@@ -12,4 +12,34 @@ datasource db {
   provider = "postgresql"
 }
 
+//====== ENUMS ========================
+
+
+enum Role {
+  PATIENT
+  MEDECIN
+  PHARMACIE
+  ADMIN
+  SUPER_ADMIN
+}
+
+//================ Models ======
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  nom       String
+  prenom    String
+  telephone String?
+  role      Role     @default(PATIENT)
+  isActive  Boolean  @default(true)
+
+  resetPasswordToken   String?   @unique
+  resetPasswordExpires DateTime?
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
 
