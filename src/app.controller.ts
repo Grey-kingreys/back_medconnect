@@ -1,12 +1,17 @@
 import { Controller, Get } from '@nestjs/common';
-import { AppService } from './app.service';
+import { ApiTags, ApiOperation } from '@nestjs/swagger';
 
+@ApiTags('App')
 @Controller()
 export class AppController {
-  constructor(private readonly appService: AppService) {}
-
-  @Get()
-  getHello(): string {
-    return this.appService.getHello();
-  }
+    @Get()
+    @ApiOperation({ summary: 'Health check' })
+    getHello(): object {
+        return {
+            message: '🏥 MedConnect API — Plateforme de Santé Numérique',
+            version: '1.0.0',
+            status: 'running',
+            docs: '/api',
+        };
+    }
 }

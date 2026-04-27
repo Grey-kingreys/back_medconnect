@@ -5,37 +5,34 @@ import {
     ForbiddenException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { Role } from 'generated/prisma/client';
 
 export const ROLES_KEY = 'roles';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
-    constructor(private reflector: Reflector) { }
+    constructor(private readonly reflector: Reflector) { }
 
-    async canActivate(context: ExecutionContext): Promise<boolean> {
-        const requiredRoles = this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, [
+    canActivate(context: ExecutionContext): boolean {
+        const requiredRoles = this.reflector.getAllAndOverride<string[]>(ROLES_KEY, [
             context.getHandler(),
             context.getClass(),
         ]);
 
-        if (!requiredRoles) {
+        if (!requiredRoles || requiredRoles.length === 0) {
             return true;
         }
 
         const request = context.switchToHttp().getRequest();
         const user = request.user;
 
-
         if (!user) {
-            throw new ForbiddenException("Vous n'êtes pas authentifié");
+            throw new ForbiddenException("Vous n'êtes pas authentifié.");
         }
 
-        const hasRole = requiredRoles.some((role) => user.role === role);
-
+        const hasRole = requiredRoles.includes(user.role);
         if (!hasRole) {
             throw new ForbiddenException(
-                `Accès refusé. Rôles requis: ${requiredRoles.join(', ')}`,
+                `Accès refusé. Rôle(s) requis : ${requiredRoles.join(', ')}`,
             );
         }
 
