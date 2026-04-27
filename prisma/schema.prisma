@@ -1,8 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client"
   output   = "../generated/prisma"
@@ -12,18 +7,24 @@ datasource db {
   provider = "postgresql"
 }
 
-//====== ENUMS ========================
-
+// ====== ENUMS ========================
 
 enum Role {
   PATIENT
   MEDECIN
-  PHARMACIE
+  PHARMACIEN
+  STRUCTURE_ADMIN
   ADMIN
   SUPER_ADMIN
 }
 
-//================ Models ======
+enum StructureType {
+  HOPITAL
+  CLINIQUE
+  PHARMACIE
+}
+
+// ====== MODELS =======================
 
 model User {
   id        String   @id @default(uuid())
@@ -37,9 +38,211 @@ model User {
 
   resetPasswordToken   String?   @unique
   resetPasswordExpires DateTime?
-  
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+
+  refreshToken        String?   @unique
+  refreshTokenExpires DateTime?
+
+  // Lien vers une structure (pour MEDECIN, PHARMACIEN, STRUCTURE_ADMIN)
+  structureId String?
+  structure   Structure? @relation("StructureMembers", fields: [structureId], references: [id])
+
+  // Structure dont cet user est l'admin
+  administeredStructure Structure? @relation("StructureAdmin")
+
+  // Carnet de santé
+  profilMedical  ProfilMedical?
+  consultations  Consultation[]
+  ordonnances    Ordonnance[]
+  analyses       ResultatAnalyse[]
+  vaccinations   Vaccination[]
+  autoDiagnostics AutoDiagnostic[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
+model Structure {
+  id          String        @id @default(uuid())
+  nom         String
+  type        StructureType
+  email       String        @unique
+  telephone   String?
+  adresse     String?
+  ville       String?
+  latitude    Float?
+  longitude   Float?
+  description String?
+  horaires    String?       // JSON string ex: {"lun":"08:00-18:00",...}
+  estDeGarde  Boolean       @default(false)
+  isActive    Boolean       @default(true)
+  isConfigured Boolean      @default(false)
 
+  // Token d'invitation envoyé par email
+  inviteToken   String?   @unique
+  inviteExpires DateTime?
+
+  // Admin de la structure
+  adminId String? @unique
+  admin   User?   @relation("StructureAdmin", fields: [adminId], references: [id])
+
+  // Membres (médecins, pharmaciens...)
+  membres User[] @relation("StructureMembers")
+
+  // Stock médicaments (pharmacies)
+  medicaments StockMedicament[]
+
+  // Consultations effectuées dans cette structure
+  consultations Consultation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ====== CARNET DE SANTE ==============
+
+enum GroupeSanguin {
+  A_POSITIF
+  A_NEGATIF
+  B_POSITIF
+  B_NEGATIF
+  AB_POSITIF
+  AB_NEGATIF
+  O_POSITIF
+  O_NEGATIF
+  INCONNU
+}
+
+model ProfilMedical {
+  id             String         @id @default(uuid())
+  userId         String         @unique
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  groupeSanguin  GroupeSanguin  @default(INCONNU)
+  allergies      String[]       @default([])
+  pathologies    String[]       @default([])
+  traitements    String[]       @default([])  // Traitements en cours
+  taille         Float?         // en cm
+  poids          Float?         // en kg
+  dateNaissance  DateTime?
+  genre          String?        // "M" | "F" | "Autre"
+  contactUrgence String?        // Nom + téléphone
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Consultation {
+  id          String   @id @default(uuid())
+  patientId   String
+  patient     User     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  structureId String?
+  structure   Structure? @relation(fields: [structureId], references: [id], onDelete: SetNull)
+
+  medecinNom   String?   // Nom du médecin (peut être externe)
+  motif        String
+  diagnostic   String?
+  notes        String?
+  dateConsultation DateTime @default(now())
+
+  // Ordonnances liées
+  ordonnances Ordonnance[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Ordonnance {
+  id            String   @id @default(uuid())
+  patientId     String
+  patient       User     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  consultationId String?
+  consultation  Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+
+  medecinNom    String?
+  medicaments   String   // JSON: [{nom, dosage, duree, instructions}]
+  notes         String?
+  dateEmission  DateTime @default(now())
+  dateExpiration DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ResultatAnalyse {
+  id          String   @id @default(uuid())
+  patientId   String
+  patient     User     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  typeAnalyse String   // "Bilan sanguin", "Radiographie", etc.
+  laboratoire String?
+  resultats   String   // JSON ou texte libre
+  fichierUrl  String?  // lien vers le fichier PDF/image
+  dateAnalyse DateTime
+  notes       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Vaccination {
+  id          String   @id @default(uuid())
+  patientId   String
+  patient     User     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  vaccin       String
+  dateVaccin   DateTime
+  prochainRappel DateTime?
+  lotNumero    String?
+  administrePar String?
+  notes        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AutoDiagnostic {
+  id        String   @id @default(uuid())
+  patientId String
+  patient   User     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  symptomes       String   // texte libre saisi par l'utilisateur
+  analyseia       String?  // réponse de l'IA (JSON)
+  recommendation  String?  // "urgence" | "consultation" | "repos"
+
+  createdAt DateTime @default(now())
+}
+
+// ====== PHARMACIE / MEDICAMENTS ======
+
+model Medicament {
+  id          String   @id @default(uuid())
+  nom         String
+  nomGenerique String?
+  categorie   String   // "Antibiotique", "Antalgique", etc.
+  description String?
+  ordonnanceRequise Boolean @default(false)
+  formes      String[] @default([]) // "comprimé", "sirop", "injectable"
+
+  stocks StockMedicament[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model StockMedicament {
+  id            String     @id @default(uuid())
+  medicamentId  String
+  medicament    Medicament @relation(fields: [medicamentId], references: [id], onDelete: Cascade)
+  structureId   String
+  structure     Structure  @relation(fields: [structureId], references: [id], onDelete: Cascade)
+
+  quantite      Int        @default(0)
+  prixUnitaire  Float?     // en GNF
+  disponible    Boolean    @default(true)
+  dateExpiration DateTime?
+  notes         String?
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([medicamentId, structureId])
+}

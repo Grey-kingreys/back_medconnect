@@ -9,24 +9,25 @@ import { Request } from 'express';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
-  constructor(private jwtService: JwtService) { }
+  constructor(private readonly jwtService: JwtService) { }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest();
+    const request = context.switchToHttp().getRequest<Request>();
     const token = this.extractTokenFromHeader(request);
-    
+
     if (!token) {
-      throw new UnauthorizedException("Vous n'êtes pas connecté");
+      throw new UnauthorizedException('Token manquant. Veuillez vous connecter.');
     }
-    
+
     try {
-      const payload = await this.jwtService.verifyAsync(token);
-      
+      const payload = await this.jwtService.verifyAsync(token, {
+        secret: process.env.JWT_SECRET,
+      });
       request['user'] = payload;
     } catch {
-      throw new UnauthorizedException("Vous n'êtes pas autorisé à être ici");
+      throw new UnauthorizedException('Token invalide ou expiré.');
     }
-    
+
     return true;
   }
 

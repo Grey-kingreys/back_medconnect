@@ -10,25 +10,22 @@ export class PrismaService
     private pool: Pool;
 
     constructor() {
-        // Créer un pool de connexions PostgreSQL
         const pool = new Pool({
             connectionString: process.env.DATABASE_URL,
         });
-
-        // Passer le pool à l'adaptateur
         const adapter = new PrismaPg(pool);
-
         super({ adapter });
         this.pool = pool;
     }
 
     async onModuleInit() {
         await this.$connect();
+        console.log('✅ Base de données connectée');
     }
 
     async onModuleDestroy() {
-        console.log('🔌 Déconnexion de la base de données...');
         await this.$disconnect();
         await this.pool.end();
+        console.log('🔌 Base de données déconnectée');
     }
 }

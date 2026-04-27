@@ -3,13 +3,16 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
-import { UpdateUserDto } from './dto/update-user.dto';
-import { PrismaService } from 'src/common/services/prisma.service';
-import { CreateUserByAdminDto } from './dto/create-user-by-admin.dto';
 import * as bcrypt from 'bcrypt';
+import { PrismaService } from 'src/common/services/prisma.service';
 import { EmailService } from 'src/common/services/email.service';
-import { ChangeUserPasswordDto } from './dto/change-user-password.dto';
+import {
+  CreateUserByAdminDto,
+  UpdateUserDto,
+  ChangeUserPasswordDto,
+} from './dto/user.dto';
 
 @Injectable()
 export class UserService {
@@ -18,427 +21,223 @@ export class UserService {
     private readonly emailService: EmailService,
   ) { }
 
-  /**
-   * Créer un utilisateur (par l'admin uniquement)
-   */
-  async createByAdmin(createUserByAdminDto: CreateUserByAdminDto) {
-    try {
-      console.log("coté service",createUserByAdminDto)
-      const { nom, prenom, email, password, role } = createUserByAdminDto;
+  // ─── Créer un utilisateur (par ADMIN/SUPER_ADMIN) ─────────────
 
-      // Vérifier si l'email existe déjà
-      const existingUser = await this.prisma.user.findUnique({
-        where: { email: email.toLowerCase() },
-      });
+  async createByAdmin(dto: CreateUserByAdminDto) {
+    const { nom, prenom, email, password, role, telephone } = dto;
 
-      if (existingUser) {
-        throw new ConflictException(
-          "Un utilisateur avec cet email existe déjà",
-        );
-      }
-
-      // Vérification que les rôlesSUPER_ADMIN n'ont pas d'assignation de Batiment
-      if (role === 'SUPER_ADMIN') {
-        throw new BadRequestException(
-          `Les rôles ${role} ne doivent pas être assignés à un batiment spécifique`,
-        );
-      }
-
-      // Hashage du mot de passe
-      const saltRounds = 12;
-      const hashedPassword = await bcrypt.hash(password, saltRounds);
-
-      // Création de l'utilisateur
-      const user = await this.prisma.user.create({
-        data: {
-          nom: nom.trim(),
-          prenom: prenom.trim(),
-          email: email.toLowerCase(),
-          password: hashedPassword,
-          role,
-          isActive: true,
-        },
-        select: {
-          id: true,
-          email: true,
-          nom: true,
-          prenom: true,
-          role: true,
-          isActive: true,
-          createdAt: true,
-        },
-      });
-
-      // Envoyer un email de bienvenue
-      try {
-        await this.emailService.sendWelcomeEmail(user.email, user.nom, user.prenom);
-      } catch (emailError) {
-        console.warn(
-          "⚠️ Impossible d'envoyer l'email de bienvenue:",
-          emailError,
-        );
-        // Ne pas bloquer la création si l'email échoue
-      }
-
-      return {
-        data: user,
-        message: `Utilisateur créé avec succès avec le rôle ${role}`,
-        success: true,
-      };
-    } catch (error) {
-      if (
-        error instanceof ConflictException ||
-        error instanceof BadRequestException ||
-        error instanceof NotFoundException
-      ) {
-        throw error;
-      }
-
-      console.error("Erreur lors de la création de l'utilisateur:", error);
-      throw new BadRequestException(
-        error.message ||
-        "Une erreur est survenue lors de la création de l'utilisateur",
-      );
+    // SUPER_ADMIN ne peut pas être créé via cette route
+    if ((role as string) === 'SUPER_ADMIN') {
+      throw new ForbiddenException('Impossible de créer un compte SUPER_ADMIN via cette route');
     }
+
+    const existing = await this.prisma.user.findUnique({
+      where: { email: email.toLowerCase() },
+    });
+    if (existing) {
+      throw new ConflictException('Un utilisateur avec cet email existe déjà');
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    const user = await this.prisma.user.create({
+      data: {
+        nom: nom.trim(),
+        prenom: prenom.trim(),
+        email: email.toLowerCase(),
+        password: hashedPassword,
+        telephone: telephone?.trim(),
+        role: role as any,
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+        nom: true,
+        prenom: true,
+        role: true,
+        isActive: true,
+        createdAt: true,
+      },
+    });
+
+    this.emailService
+      .sendWelcomeEmail(user.email, user.nom, user.prenom)
+      .catch(console.error);
+
+    return {
+      data: user,
+      message: `Utilisateur créé avec le rôle ${role}`,
+      success: true,
+    };
   }
+
+  // ─── Lister tous les utilisateurs ────────────────────────────
 
   async getUsers() {
-    try {
-      const users = await this.prisma.user.findMany({
-        select: {
-          id: true,
-          email: true,
-          nom: true,
-          prenom: true,
-          role: true,
-          isActive: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-        orderBy: {
-          createdAt: 'desc',
-        },
-      });
+    const users = await this.prisma.user.findMany({
+      select: {
+        id: true,
+        email: true,
+        nom: true,
+        prenom: true,
+        telephone: true,
+        role: true,
+        isActive: true,
+        structureId: true,
+        structure: { select: { id: true, nom: true, type: true } },
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
 
-      return {
-        data: users,
-        message: 'Les utilisateurs trouvés',
-        success: true,
-      };
-    } catch (error) {
-      return {
-        data: null,
-        message: error.message || 'Users not found',
-        success: false,
-      };
-    }
+    return { data: users, message: 'Utilisateurs récupérés', success: true };
   }
 
-  async getUser({ userId }: { userId: string }) {
-    try {
-      const user = await this.prisma.user.findUnique({
-        where: {
-          id: userId,
-        },
-        select: {
-          id: true,
-          email: true,
-          nom: true,
-          prenom: true,
-          role: true,
-          isActive: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      });
+  // ─── Récupérer un utilisateur par ID ─────────────────────────
 
-      if (!user) {
-        throw new NotFoundException(
-          `Utilisateur avec l'ID "${userId}" non trouvé`,
-        );
-      }
+  async getUser(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        nom: true,
+        prenom: true,
+        telephone: true,
+        role: true,
+        isActive: true,
+        structureId: true,
+        structure: { select: { id: true, nom: true, type: true } },
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
 
-      return {
-        data: user,
-        message: 'Utilisateur trouvé',
-        success: true,
-      };
-    } catch (erreur) {
-      console.error('erreur complet: ', erreur);
-      console.error('message: ', erreur.message);
-      console.error('stack: ', erreur.stack);
-      return {
-        data: null,
-        message: erreur.message || 'User not found',
-        success: false,
-      };
+    if (!user) {
+      throw new NotFoundException(`Utilisateur avec l'ID "${userId}" non trouvé`);
     }
+
+    return { data: user, message: 'Utilisateur trouvé', success: true };
   }
 
-  async update({ userId }: { userId: string }, updateUserDto: UpdateUserDto) {
-    try {
-      const user = await this.prisma.user.findUnique({
-        where: { id: userId }
-      });
+  // ─── Mettre à jour un utilisateur ────────────────────────────
 
-      if (!user) {
-        throw new NotFoundException(`Utilisateur avec l'ID "${userId}" non trouvé`);
-      }
-
-      // // Si le rôle est SUPER_ADMIN, retirer le magasin
-      // if (updateUserDto.role === 'SUPER_ADMIN') {
-      // }
-
-      const updatedUser = await this.prisma.user.update({
-        where: { id: userId },
-        data: {
-          nom: updateUserDto.nom,
-          prenom: updateUserDto.prenom,
-          email: updateUserDto.email,
-          role: updateUserDto.role,
-        },
-        select: {
-          id: true,
-          email: true,
-          nom: true,
-          prenom: true,
-          role: true,
-          isActive: true,
-          createdAt: true,
-        }
-      });
-
-      return {
-        data: updatedUser,
-        message: 'Utilisateur modifié avec succès',
-        success: true
-      };
-
-    } catch (error) {
-      if (
-        error instanceof NotFoundException ||
-        error instanceof BadRequestException
-      ) {
-        throw error;
-      }
-
-      console.error('Erreur lors de la modification de l\'utilisateur:', error);
-      throw new BadRequestException(
-        "Une erreur est survenue lors de la modification de l'utilisateur"
-      );
+  async update(userId: string, dto: UpdateUserDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException(`Utilisateur "${userId}" non trouvé`);
     }
+
+    // Vérifier unicité email si changé
+    if (dto.email && dto.email !== user.email) {
+      const existing = await this.prisma.user.findUnique({
+        where: { email: dto.email.toLowerCase() },
+      });
+      if (existing) {
+        throw new ConflictException('Cet email est déjà utilisé');
+      }
+    }
+
+    const updateData: any = {};
+    if (dto.nom !== undefined) updateData.nom = dto.nom.trim();
+    if (dto.prenom !== undefined) updateData.prenom = dto.prenom.trim();
+    if (dto.email !== undefined) updateData.email = dto.email.toLowerCase();
+    if (dto.role !== undefined) updateData.role = dto.role;
+    if (dto.telephone !== undefined) updateData.telephone = dto.telephone.trim();
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+      select: {
+        id: true,
+        email: true,
+        nom: true,
+        prenom: true,
+        telephone: true,
+        role: true,
+        isActive: true,
+        updatedAt: true,
+      },
+    });
+
+    return { data: updated, message: 'Utilisateur modifié avec succès', success: true };
   }
 
-  async remove({ userId }: { userId: string }) {
-    try {
-      const user = await this.prisma.user.findUnique({
-        where: { id: userId },
-        // include: {
-        //   _count: {
-        //     select: {
-        //       sales: true,
-        //       cashRegisters: true,
-        //       stockMovements: true,
-        //       expenses: true,
-        //       revenues: true,
-        //     },
-        //   },
-        // },
-      });
+  // ─── Activer/Désactiver ───────────────────────────────────────
 
-      if (!user) {
-        throw new NotFoundException(
-          `Utilisateur avec l'ID "${userId}" non trouvé`,
-        );
-      }
-
-      // Vérifier qu'il n'a pas d'activités
-      // const totalActivities =
-      //   user._count.sales +
-      //   user._count.cashRegisters +
-      //   user._count.stockMovements +
-      //   user._count.expenses +
-      //   user._count.revenues;
-
-      // if (totalActivities > 0) {
-      //   throw new ConflictException(
-      //     `Impossible de supprimer cet utilisateur car il a ${totalActivities} activité(s) associée(s). Désactivez-le plutôt.`,
-      //   );
-      // }
-
-      await this.prisma.user.delete({
-        where: { id: userId },
-      });
-
-      return {
-        data: { id: userId },
-        message: 'Utilisateur supprimé avec succès',
-        success: true,
-      };
-    } catch (error) {
-      if (
-        error instanceof NotFoundException ||
-        error instanceof ConflictException
-      ) {
-        throw error;
-      }
-
-      console.error("Erreur lors de la suppression de l'utilisateur:", error);
-      throw new BadRequestException(
-        "Une erreur est survenue lors de la suppression de l'utilisateur",
-      );
-    }
-  }
-
-  /**
-   * Activer/Désactiver un utilisateur
-   */
   async toggleActive(userId: string) {
-    try {
-      const user = await this.prisma.user.findUnique({
-        where: { id: userId },
-      });
-
-      if (!user) {
-        throw new NotFoundException(
-          `Utilisateur avec l'ID "${userId}" non trouvé`,
-        );
-      }
-
-      const updatedUser = await this.prisma.user.update({
-        where: { id: userId },
-        data: {
-          isActive: !user.isActive,
-        },
-        select: {
-          id: true,
-          email: true,
-          nom: true,
-          prenom: true,
-          role: true,
-          isActive: true,
-        },
-      });
-
-      return {
-        data: updatedUser,
-        message: `Utilisateur ${updatedUser.isActive ? 'activé' : 'désactivé'} avec succès`,
-        success: true,
-      };
-    } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
-
-      console.error(
-        "Erreur lors du changement de statut de l'utilisateur:",
-        error,
-      );
-      throw new BadRequestException(
-        'Une erreur est survenue lors du changement de statut',
-      );
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException(`Utilisateur "${userId}" non trouvé`);
     }
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: { isActive: !user.isActive },
+      select: { id: true, nom: true, prenom: true, role: true, isActive: true },
+    });
+
+    return {
+      data: updated,
+      message: `Utilisateur ${updated.isActive ? 'activé' : 'désactivé'} avec succès`,
+      success: true,
+    };
   }
 
-  /**
-   * Récupérer les statistiques des utilisateurs
-   */
+  // ─── Supprimer ────────────────────────────────────────────────
+
+  async remove(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException(`Utilisateur "${userId}" non trouvé`);
+    }
+
+    await this.prisma.user.delete({ where: { id: userId } });
+
+    return { data: { id: userId }, message: 'Utilisateur supprimé', success: true };
+  }
+
+  // ─── Changer le mot de passe (par admin) ─────────────────────
+
+  async changeUserPassword(userId: string, dto: ChangeUserPasswordDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException(`Utilisateur "${userId}" non trouvé`);
+    }
+
+    const hashed = await bcrypt.hash(dto.newPassword, 12);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { password: hashed },
+    });
+
+    return {
+      data: null,
+      message: `Mot de passe de ${user.prenom} ${user.nom} modifié`,
+      success: true,
+    };
+  }
+
+  // ─── Stats ────────────────────────────────────────────────────
+
   async getStats() {
-    try {
-      const [
-        totalUsers,
-        activeUsers,
-        inactiveUsers,
-        usersByRole,
-        // usersWithStore,
-      ] = await Promise.all([
-        this.prisma.user.count(),
-        this.prisma.user.count({ where: { isActive: true } }),
-        this.prisma.user.count({ where: { isActive: false } }),
-        this.prisma.user.groupBy({
-          by: ['role'],
-          _count: true,
-          orderBy: {
-            _count: {
-              role: 'desc',
-            },
-          },
-        }),
-        // this.prisma.user.count({
-        //   where: {
-        //     storeId: {
-        //       not: null,
-        //     },
-        //   },
-        // }),
-      ]);
+    const [total, actifs, inactifs, parRole] = await Promise.all([
+      this.prisma.user.count(),
+      this.prisma.user.count({ where: { isActive: true } }),
+      this.prisma.user.count({ where: { isActive: false } }),
+      this.prisma.user.groupBy({
+        by: ['role'],
+        _count: true,
+        orderBy: { _count: { role: 'desc' } },
+      }),
+    ]);
 
-      return {
-        data: {
-          totalUsers,
-          activeUsers,
-          inactiveUsers,
-          // usersWithStore,
-          // usersWithoutStore: totalUsers - usersWithStore,
-          usersByRole,
-        },
-        message: 'Statistiques des utilisateurs récupérées',
-        success: true,
-      };
-    } catch (error) {
-      console.error(
-        'Erreur lors de la récupération des statistiques:',
-        error,
-      );
-      throw new BadRequestException(
-        'Une erreur est survenue lors de la récupération des statistiques',
-      );
-    }
-  }
-
-
-  
-
-  /**
- * Changer le mot de passe d'un utilisateur (Admin)
- */
-  async changeUserPassword(userId: string, changePasswordDto: ChangeUserPasswordDto) {
-    try {
-      const { newPassword } = changePasswordDto;
-
-      const user = await this.prisma.user.findUnique({
-        where: { id: userId }
-      });
-
-      if (!user) {
-        throw new NotFoundException(`Utilisateur avec l'ID "${userId}" non trouvé`);
-      }
-
-      // Hasher le nouveau mot de passe
-      const saltRounds = 12;
-      const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
-
-      // Mettre à jour le mot de passe
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: { password: hashedPassword }
-      });
-
-      return {
-        data: null,
-        message: `Le mot de passe de ${user.nom} ${user.prenom} a été modifié avec succès`,
-        success: true
-      };
-
-    } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
-
-      console.error('Erreur lors du changement de mot de passe:', error);
-      throw new BadRequestException(
-        "Une erreur est survenue lors du changement de mot de passe"
-      );
-    }
+    return {
+      data: { total, actifs, inactifs, parRole },
+      message: 'Statistiques récupérées',
+      success: true,
+    };
   }
 }
