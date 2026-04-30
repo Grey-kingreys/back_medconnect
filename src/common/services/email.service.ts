@@ -36,7 +36,7 @@ export class EmailService {
             <li>Accéder à l'assistance IA en cas de besoin</li>
           </ul>
           <div style="text-align:center;margin:30px 0">
-            <a href="${process.env.FRONTEND_URL}/login" style="${this.btnStyle('#2563eb')}">Se connecter</a>
+            <a href="${process.env.FRONTEND_URL}/auth/login" style="${this.btnStyle('#2563eb')}">Se connecter</a>
           </div>
           <p>Cordialement,<br>L'équipe MedConnect</p>
         `,
@@ -53,7 +53,7 @@ export class EmailService {
     prenom: string,
     resetToken: string,
   ): Promise<void> {
-    const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+    const resetUrl = `${process.env.FRONTEND_URL}/auth/reset-password?token=${resetToken}`;
     try {
       await this.resend.emails.send({
         from: this.fromEmail,
@@ -90,7 +90,7 @@ export class EmailService {
     structureType: string,
     inviteToken: string,
   ): Promise<void> {
-    const setupUrl = `${process.env.FRONTEND_URL}/setup-structure?token=${inviteToken}`;
+    const setupUrl = `${process.env.FRONTEND_URL}/auth/setup-structure/${inviteToken}`;
     const typeLabel = this.getTypeLabel(structureType);
 
     try {
@@ -153,7 +153,7 @@ export class EmailService {
           </div>
           <p>Connectez-vous et changez votre mot de passe dès que possible.</p>
           <div style="text-align:center;margin:30px 0">
-            <a href="${process.env.FRONTEND_URL}/login" style="${this.btnStyle('#2563eb')}">Se connecter</a>
+            <a href="${process.env.FRONTEND_URL}/auth/login" style="${this.btnStyle('#2563eb')}">Se connecter</a>
           </div>
           <p>Cordialement,<br>L'équipe MedConnect</p>
         `,

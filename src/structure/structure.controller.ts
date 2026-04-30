@@ -47,6 +47,12 @@ export class StructureController {
     return this.structureService.verifyInviteToken(token);
   }
 
+  @Get('all')
+  @ApiOperation({ summary: 'Lister toutes les structures', description: 'Retourne la liste de toutes les structures actives pour la carte.' })
+  getAllStructures() {
+    return this.structureService.getAllStructures();
+  }
+
   @Post('setup/:token')
   @HttpCode(HttpStatus.CREATED)
   @ApiParam({ name: 'token', description: "Token d'invitation reçu par email" })

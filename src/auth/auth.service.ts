@@ -67,7 +67,11 @@ export class AuthService {
       throw new UnauthorizedException('Email ou mot de passe incorrect');
     }
 
-    const { access_token, refreshToken, refreshTokenExpires } = this.generateTokens({ userId: user.id, role: user.role });
+    const { access_token, refreshToken, refreshTokenExpires } = this.generateTokens({ 
+      userId: user.id, 
+      role: user.role,
+      structureId: user.structureId ?? undefined 
+    });
 
     const hashedRefresh = crypto.createHash('sha256').update(refreshToken).digest('hex');
     await this.prisma.user.update({
@@ -375,7 +379,7 @@ export class AuthService {
   }
 
   
-  private generateTokens(payload: UserPayload) {
+  generateTokens(payload: UserPayload) {
     const access_token = this.jwtService.sign(payload, {
       secret: process.env.JWT_SECRET,
       expiresIn: '15m', // ← raccourcir le access token

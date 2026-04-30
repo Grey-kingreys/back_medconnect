@@ -20,7 +20,7 @@ import { SuperAdminService } from './super-admin.service';
 import { AuthGuard } from 'src/common/guards/auth.guard';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
-import { CreateStructureDto } from './dto/super-admin.dto';
+import { CreateStructureDto, CreateSuperAdminDto } from './dto/super-admin.dto';
 
 @ApiTags('Super Admin')
 @Controller('super-admin')
@@ -74,6 +74,20 @@ export class SuperAdminController {
   @ApiOperation({ summary: 'Activer/Désactiver une structure' })
   toggleActive(@Param('structureId') structureId: string) {
     return this.superAdminService.toggleActive(structureId);
+  }
+
+  // ─── Créer un autre Super Admin ───────────────────────────────
+
+  @Post('create-super-admin')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Créer un compte Super Admin',
+    description: 'Seul un Super Admin existant peut créer un autre Super Admin.',
+  })
+  @ApiResponse({ status: 201, description: 'Super Admin créé' })
+  @ApiResponse({ status: 409, description: 'Email déjà utilisé' })
+  createSuperAdmin(@Body() dto: CreateSuperAdminDto) {
+    return this.superAdminService.createSuperAdmin(dto);
   }
 
   // ─── Stats globales ───────────────────────────────────────────
