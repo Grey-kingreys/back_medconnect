@@ -74,6 +74,26 @@ export class StructureService {
     };
   }
 
+  // ─── Lister toutes les structures (Public) ───────────────────
+
+  async getAllStructures() {
+    const structures = await this.prisma.structure.findMany({
+      where: { isActive: true, isConfigured: true },
+      select: {
+        id: true,
+        nom: true,
+        type: true,
+        ville: true,
+        adresse: true,
+        latitude: true,
+        longitude: true,
+        estDeGarde: true,
+      },
+    });
+
+    return { data: structures, message: 'Structures récupérées', success: true };
+  }
+
   // ─── Setup structure (admin clique sur le lien) ───────────────
 
   async setupStructure(rawToken: string, dto: SetupStructureDto) {
@@ -137,6 +157,10 @@ export class StructureService {
           ville: dto.ville.trim(),
           telephone: dto.structureTelephone?.trim(),
           description: dto.description?.trim(),
+          latitude: dto.latitude,
+          longitude: dto.longitude,
+          horaires: dto.horaires,
+          estDeGarde: dto.estDeGarde,
           adminId: admin.id,
           isConfigured: true,
           inviteToken: null,  // Invalider le token
@@ -149,6 +173,10 @@ export class StructureService {
           email: true,
           adresse: true,
           ville: true,
+          latitude: true,
+          longitude: true,
+          horaires: true,
+          estDeGarde: true,
           isConfigured: true,
         },
       });
@@ -157,15 +185,23 @@ export class StructureService {
     });
 
     // Générer le JWT
-    const token = this.authService.generateToken({
+    const { access_token, refreshToken, refreshTokenExpires } = this.authService.generateTokens({
       userId: result.admin.id,
       role: result.admin.role,
       structureId: structure.id,
     });
 
+    // Mettre à jour le refreshToken
+    const hashedRefresh = crypto.createHash('sha256').update(refreshToken).digest('hex');
+    await this.prisma.user.update({
+      where: { id: result.admin.id },
+      data: { refreshToken: hashedRefresh, refreshTokenExpires },
+    });
+
     return {
       data: {
-        access_token: token,
+        access_token,
+        refresh_token: refreshToken,
         user: result.admin,
         structure: result.structure,
       },
@@ -285,6 +321,10 @@ export class StructureService {
   // ─── Infos de ma structure ────────────────────────────────────
 
   async getMyStructure(structureId: string) {
+    if (!structureId) {
+      throw new BadRequestException('Utilisateur non rattaché à une structure');
+    }
+
     const structure = await this.prisma.structure.findUnique({
       where: { id: structureId },
       include: {
@@ -327,6 +367,10 @@ export class StructureService {
     if (dto.ville !== undefined) updateData.ville = dto.ville.trim();
     if (dto.telephone !== undefined) updateData.telephone = dto.telephone.trim();
     if (dto.description !== undefined) updateData.description = dto.description.trim();
+    if (dto.latitude !== undefined) updateData.latitude = dto.latitude;
+    if (dto.longitude !== undefined) updateData.longitude = dto.longitude;
+    if (dto.horaires !== undefined) updateData.horaires = dto.horaires;
+    if (dto.estDeGarde !== undefined) updateData.estDeGarde = dto.estDeGarde;
 
     const updated = await this.prisma.structure.update({
       where: { id: structureId },
@@ -340,6 +384,10 @@ export class StructureService {
         adresse: true,
         ville: true,
         description: true,
+        latitude: true,
+        longitude: true,
+        horaires: true,
+        estDeGarde: true,
         updatedAt: true,
       },
     });

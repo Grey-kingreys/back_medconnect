@@ -6,6 +6,8 @@ import {
     IsEmail,
     IsEnum,
     Matches,
+    IsNumber,
+    IsBoolean,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -71,6 +73,26 @@ export class SetupStructureDto {
     @IsString()
     @Length(0, 500)
     description?: string;
+
+    @ApiPropertyOptional({ example: 9.537 })
+    @IsOptional()
+    @IsNumber()
+    latitude?: number;
+
+    @ApiPropertyOptional({ example: -13.678 })
+    @IsOptional()
+    @IsNumber()
+    longitude?: number;
+
+    @ApiPropertyOptional({ example: '{"lun":"08:00-18:00","mar":"08:00-18:00"}' })
+    @IsOptional()
+    @IsString()
+    horaires?: string;
+
+    @ApiPropertyOptional({ example: false })
+    @IsOptional()
+    @IsBoolean()
+    estDeGarde?: boolean;
 }
 
 // ─── Créer un membre dans la structure ───────────────────────────────────────
@@ -78,6 +100,7 @@ export class SetupStructureDto {
 export enum MembreRoleEnum {
     MEDECIN = 'MEDECIN',
     PHARMACIEN = 'PHARMACIEN',
+    STRUCTURE_ADMIN = 'STRUCTURE_ADMIN',
 }
 
 export class CreateMembreDto {
@@ -109,7 +132,7 @@ export class CreateMembreDto {
     @ApiProperty({ enum: MembreRoleEnum, example: 'MEDECIN' })
     @IsNotEmpty()
     @IsEnum(MembreRoleEnum, {
-        message: 'Le rôle doit être MEDECIN ou PHARMACIEN',
+        message: 'Le rôle doit être MEDECIN, PHARMACIEN ou STRUCTURE_ADMIN',
     })
     role: MembreRoleEnum;
 }
@@ -146,4 +169,24 @@ export class UpdateStructureDto {
     @IsString()
     @Length(0, 500)
     description?: string;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    @IsNumber()
+    latitude?: number;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    @IsNumber()
+    longitude?: number;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    @IsString()
+    horaires?: string;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    @IsBoolean()
+    estDeGarde?: boolean;
 }

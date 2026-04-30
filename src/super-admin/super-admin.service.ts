@@ -5,9 +5,10 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { EmailService } from 'src/common/services/email.service';
-import { CreateStructureDto } from './dto/super-admin.dto';
+import { CreateStructureDto, CreateSuperAdminDto } from './dto/super-admin.dto';
 
 @Injectable()
 export class SuperAdminService {
@@ -19,7 +20,7 @@ export class SuperAdminService {
   // ─── Créer une structure + envoyer l'invitation ───────────────
 
   async createStructure(dto: CreateStructureDto) {
-    const { nom, type, email, telephone, adresse, ville } = dto;
+    const { nom, type, email, telephone, adresse, ville, latitude, longitude, horaires, estDeGarde } = dto;
 
     // Vérifier si l'email de la structure est déjà utilisé
     const existingStructure = await this.prisma.structure.findUnique({
@@ -42,6 +43,10 @@ export class SuperAdminService {
         telephone: telephone?.trim(),
         adresse: adresse?.trim(),
         ville: ville?.trim(),
+        latitude: latitude,
+        longitude: longitude,
+        horaires: horaires,
+        estDeGarde: estDeGarde,
         inviteToken: hashedToken,
         inviteExpires: tokenExpires,
         isConfigured: false,
@@ -189,8 +194,51 @@ export class SuperAdminService {
     };
   }
 
-  // ─── Stats globales ───────────────────────────────────────────
+  // ─── Créer un Super Admin ───────────────────────────────────────────
 
+  async createSuperAdmin(dto: CreateSuperAdminDto) {
+    const existing = await this.prisma.user.findUnique({
+      where: { email: dto.email.toLowerCase() },
+    });
+    if (existing) {
+      throw new ConflictException('Un compte avec cet email existe déjà');
+    }
+
+    const hashed = await bcrypt.hash(dto.password, 12);
+
+    const user = await this.prisma.user.create({
+      data: {
+        nom: dto.nom.trim(),
+        prenom: dto.prenom.trim(),
+        email: dto.email.toLowerCase(),
+        password: hashed,
+        telephone: dto.telephone?.trim(),
+        role: 'SUPER_ADMIN',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        email: true,
+        nom: true,
+        prenom: true,
+        role: true,
+        isActive: true,
+        createdAt: true,
+      },
+    });
+
+    this.emailService
+      .sendWelcomeEmail(user.email, user.nom, user.prenom)
+      .catch(console.error);
+
+    return {
+      data: user,
+      message: `Compte Super Admin créé pour ${user.prenom} ${user.nom}`,
+      success: true,
+    };
+  }
+
+  // ─── Stats globales ───────────────────────────────────────────
   async getStats() {
     const [
       totalUsers,
