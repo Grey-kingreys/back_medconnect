@@ -273,32 +273,41 @@ export class PharmacieService {
   // ─── Recherche disponibilité (PUBLIC) ─────────────────────────
 
   async rechercherDisponibilite(
-    search: string,
+    search?: string,
     ville?: string,
     lat?: number,
     lng?: number,
+    pharmacieId?: string,
   ) {
-    if (!search || search.trim().length < 2) {
-      throw new BadRequestException('Saisissez au moins 2 caractères pour la recherche');
+    const where: any = {
+      disponible: true,
+      quantite: { gt: 0 },
+      structure: {
+        type: 'PHARMACIE',
+        isActive: true,
+        isConfigured: true,
+      },
+    };
+
+    if (search && search.trim().length >= 2) {
+      where.medicament = {
+        OR: [
+          { nom: { contains: search.trim(), mode: 'insensitive' } },
+          { nomGenerique: { contains: search.trim(), mode: 'insensitive' } },
+        ],
+      };
+    }
+
+    if (ville) {
+      where.structure.ville = { contains: ville.trim(), mode: 'insensitive' };
+    }
+
+    if (pharmacieId) {
+      where.structureId = pharmacieId;
     }
 
     const stocks = await this.prisma.stockMedicament.findMany({
-      where: {
-        disponible: true,
-        quantite: { gt: 0 },
-        medicament: {
-          OR: [
-            { nom: { contains: search.trim(), mode: 'insensitive' } },
-            { nomGenerique: { contains: search.trim(), mode: 'insensitive' } },
-          ],
-        },
-        structure: {
-          type: 'PHARMACIE',
-          isActive: true,
-          isConfigured: true,
-          ...(ville ? { ville: { contains: ville.trim(), mode: 'insensitive' } } : {}),
-        },
-      },
+      where,
       include: {
         medicament: {
           select: {
@@ -355,7 +364,8 @@ export class PharmacieService {
 
   private async checkPharmacieAccess(structureId: string, userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.structureId !== structureId || user.role !== 'STRUCTURE_ADMIN') {
+    const isAuthorizedRole = user?.role === 'STRUCTURE_ADMIN' || user?.role === 'PHARMACIEN';
+    if (!user || user.structureId !== structureId || !isAuthorizedRole) {
       throw new ForbiddenException("Vous n'êtes pas autorisé à gérer cette pharmacie");
     }
 

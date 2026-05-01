@@ -346,7 +346,11 @@ export class StructureService {
   // ─── Lister les membres de la structure ──────────────────────
 
   async getMembres(structureId: string, requestingUserId: string) {
-    await this.checkStructureAccess(structureId, requestingUserId);
+    // Vérifier juste que l'utilisateur appartient à la structure
+    const user = await this.prisma.user.findUnique({ where: { id: requestingUserId } });
+    if (!user || user.structureId !== structureId) {
+      throw new ForbiddenException("Vous n'appartenez pas à cette structure");
+    }
 
     const membres = await this.prisma.user.findMany({
       where: { structureId, role: { in: ['MEDECIN', 'PHARMACIEN'] } },
@@ -484,7 +488,7 @@ export class StructureService {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || user.structureId !== structureId || user.role !== 'STRUCTURE_ADMIN') {
       throw new ForbiddenException(
-        "Vous n'êtes pas autorisé à gérer cette structure",
+        "Action réservée à l'administrateur de la structure",
       );
     }
     return user;
