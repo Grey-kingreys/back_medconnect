@@ -5,6 +5,7 @@ import {
   Patch,
   Body,
   Param,
+  Req,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -88,6 +89,20 @@ export class SuperAdminController {
   @ApiResponse({ status: 409, description: 'Email déjà utilisé' })
   createSuperAdmin(@Body() dto: CreateSuperAdminDto) {
     return this.superAdminService.createSuperAdmin(dto);
+  }
+
+  @Get('admins')
+  @ApiOperation({ summary: 'Lister les Super Admins' })
+  getSuperAdmins() {
+    return this.superAdminService.getSuperAdmins();
+  }
+
+  @Post('admins/:adminId/delete')
+  @HttpCode(HttpStatus.OK)
+  @ApiParam({ name: 'adminId' })
+  @ApiOperation({ summary: 'Supprimer un Super Admin' })
+  deleteSuperAdmin(@Param('adminId') adminId: string, @Req() req: any) {
+    return this.superAdminService.deleteSuperAdmin(adminId, req.user.userId);
   }
 
   // ─── Stats globales ───────────────────────────────────────────
