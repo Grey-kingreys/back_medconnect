@@ -240,6 +240,43 @@ export class SuperAdminService {
     };
   }
 
+  // ─── Gestion des Super Admins ───────────────────────────────────
+
+  async getSuperAdmins() {
+    const admins = await this.prisma.user.findMany({
+      where: { role: 'SUPER_ADMIN' },
+      select: {
+        id: true,
+        nom: true,
+        prenom: true,
+        email: true,
+        telephone: true,
+        isActive: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return { data: admins, message: 'Super Admins récupérés', success: true };
+  }
+
+  async deleteSuperAdmin(targetId: string, requesterId: string) {
+    if (targetId === requesterId) {
+      throw new BadRequestException("Vous ne pouvez pas supprimer votre propre compte.");
+    }
+
+    const target = await this.prisma.user.findFirst({
+      where: { id: targetId, role: 'SUPER_ADMIN' },
+    });
+
+    if (!target) {
+      throw new NotFoundException("Super Admin non trouvé.");
+    }
+
+    await this.prisma.user.delete({ where: { id: targetId } });
+
+    return { data: null, message: 'Compte Super Admin supprimé avec succès', success: true };
+  }
+
   // ─── Stats globales ───────────────────────────────────────────
   async getStats() {
     const [

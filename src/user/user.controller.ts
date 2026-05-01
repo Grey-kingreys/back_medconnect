@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -83,8 +84,8 @@ export class UserController {
   @Roles('ADMIN', 'SUPER_ADMIN')
   @ApiParam({ name: 'userId' })
   @ApiOperation({ summary: 'Supprimer un utilisateur' })
-  remove(@Param('userId') userId: string) {
-    return this.userService.remove(userId);
+  remove(@Param('userId') userId: string, @Req() req: any) {
+    return this.userService.remove(userId, req.user);
   }
 
   @Post(':userId/change-password')

@@ -188,15 +188,26 @@ export class UserService {
 
   // ─── Supprimer ────────────────────────────────────────────────
 
-  async remove(userId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) {
-      throw new NotFoundException(`Utilisateur "${userId}" non trouvé`);
+  async remove(targetId: string, requester: { userId: string; role: string }) {
+    if (targetId === requester.userId) {
+      throw new BadRequestException("Vous ne pouvez pas supprimer votre propre compte.");
     }
 
-    await this.prisma.user.delete({ where: { id: userId } });
+    const target = await this.prisma.user.findUnique({ where: { id: targetId } });
+    if (!target) {
+      throw new NotFoundException(`Utilisateur "${targetId}" non trouvé`);
+    }
 
-    return { data: { id: userId }, message: 'Utilisateur supprimé', success: true };
+    // Un ADMIN ne peut pas supprimer un SUPER_ADMIN
+    if (target.role === 'SUPER_ADMIN' && requester.role !== 'SUPER_ADMIN') {
+      throw new ForbiddenException(
+        "Seul un Super Administrateur peut supprimer un compte Super Admin.",
+      );
+    }
+
+    await this.prisma.user.delete({ where: { id: targetId } });
+
+    return { data: { id: targetId }, message: 'Utilisateur supprimé', success: true };
   }
 
   // ─── Changer le mot de passe (par admin) ─────────────────────
