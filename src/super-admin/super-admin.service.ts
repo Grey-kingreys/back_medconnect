@@ -127,6 +127,8 @@ export class SuperAdminService {
         telephone: true,
         adresse: true,
         ville: true,
+        latitude: true,
+        longitude: true,
         isActive: true,
         isConfigured: true,
         admin: {
@@ -266,6 +268,45 @@ export class SuperAdminService {
         parType,
       },
       message: 'Statistiques globales',
+      success: true,
+    };
+  }
+
+  // ─── Supprimer une structure ──────────────────────────────────
+  async deleteStructure(structureId: string) {
+    const structure = await this.prisma.structure.findUnique({
+      where: { id: structureId },
+      include: { membres: true, admin: true },
+    });
+    if (!structure) {
+      throw new NotFoundException('Structure non trouvée');
+    }
+
+    // Transaction pour tout supprimer proprement
+    await this.prisma.$transaction(async (tx) => {
+      // 1. Supprimer tous les membres de la structure
+      await tx.user.deleteMany({
+        where: { structureId: structureId },
+      });
+
+      // 2. Supprimer l'admin de la structure (s'il n'est pas déjà dans les membres)
+      if (structure.adminId) {
+        // On vérifie s'il existe toujours (car deleteMany l'a peut-être déjà supprimé s'il avait structureId)
+        const adminExists = await tx.user.findUnique({ where: { id: structure.adminId } });
+        if (adminExists) {
+          await tx.user.delete({ where: { id: structure.adminId } });
+        }
+      }
+
+      // 3. Supprimer la structure
+      await tx.structure.delete({
+        where: { id: structureId },
+      });
+    });
+
+    return {
+      data: null,
+      message: 'Structure et tous ses comptes associés supprimés avec succès',
       success: true,
     };
   }

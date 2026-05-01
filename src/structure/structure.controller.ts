@@ -53,6 +53,12 @@ export class StructureController {
     return this.structureService.getAllStructures();
   }
 
+  @Get('public/:id')
+  @ApiOperation({ summary: 'Détails publics', description: 'Retourne les détails et les professionnels actifs d\'une structure.' })
+  getPublicStructureDetails(@Param('id') id: string) {
+    return this.structureService.getPublicStructureDetails(id);
+  }
+
   @Post('setup/:token')
   @HttpCode(HttpStatus.CREATED)
   @ApiParam({ name: 'token', description: "Token d'invitation reçu par email" })
@@ -140,6 +146,26 @@ export class StructureController {
     @Req() req: any,
   ) {
     return this.structureService.toggleMembreActive(
+      structureId,
+      membreId,
+      req.user.userId,
+    );
+  }
+
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles('STRUCTURE_ADMIN')
+  @Post(':structureId/membres/:membreId/delete')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiParam({ name: 'structureId' })
+  @ApiParam({ name: 'membreId' })
+  @ApiOperation({ summary: 'Supprimer un membre' })
+  deleteMembre(
+    @Param('structureId') structureId: string,
+    @Param('membreId') membreId: string,
+    @Req() req: any,
+  ) {
+    return this.structureService.deleteMembre(
       structureId,
       membreId,
       req.user.userId,

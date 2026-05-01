@@ -97,4 +97,12 @@ export class SuperAdminController {
   getStats() {
     return this.superAdminService.getStats();
   }
+
+  @Post('structures/:structureId/delete')
+  @HttpCode(HttpStatus.OK)
+  @ApiParam({ name: 'structureId' })
+  @ApiOperation({ summary: 'Supprimer une structure' })
+  deleteStructure(@Param('structureId') structureId: string) {
+    return this.superAdminService.deleteStructure(structureId);
+  }
 }

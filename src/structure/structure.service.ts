@@ -88,10 +88,56 @@ export class StructureService {
         latitude: true,
         longitude: true,
         estDeGarde: true,
+        horaires: true,
+        telephone: true,
+        estOuvertManuel: true,
       },
     });
 
     return { data: structures, message: 'Structures récupérées', success: true };
+  }
+
+  // ─── Détails publics d'une structure (pour patients) ───────────────
+
+  async getPublicStructureDetails(id: string) {
+    const structure = await this.prisma.structure.findUnique({
+      where: { id, isActive: true, isConfigured: true },
+      select: {
+        id: true,
+        nom: true,
+        type: true,
+        ville: true,
+        adresse: true,
+        telephone: true,
+        email: true,
+        description: true,
+        horaires: true,
+        estDeGarde: true,
+        estOuvertManuel: true,
+        latitude: true,
+        longitude: true,
+        membres: {
+          where: {
+            isActive: true,
+            role: { in: ['MEDECIN', 'PHARMACIEN'] },
+          },
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            email: true,
+            telephone: true,
+            role: true,
+          },
+        },
+      },
+    });
+
+    if (!structure) {
+      throw new UnauthorizedException('Structure introuvable ou inactive');
+    }
+
+    return { data: structure, message: 'Détails récupérés', success: true };
   }
 
   // ─── Setup structure (admin clique sur le lien) ───────────────
@@ -161,6 +207,7 @@ export class StructureService {
           longitude: dto.longitude,
           horaires: dto.horaires,
           estDeGarde: dto.estDeGarde,
+          estOuvertManuel: dto.estOuvertManuel,
           adminId: admin.id,
           isConfigured: true,
           inviteToken: null,  // Invalider le token
@@ -177,6 +224,7 @@ export class StructureService {
           longitude: true,
           horaires: true,
           estDeGarde: true,
+          estOuvertManuel: true,
           isConfigured: true,
         },
       });
@@ -371,6 +419,7 @@ export class StructureService {
     if (dto.longitude !== undefined) updateData.longitude = dto.longitude;
     if (dto.horaires !== undefined) updateData.horaires = dto.horaires;
     if (dto.estDeGarde !== undefined) updateData.estDeGarde = dto.estDeGarde;
+    if (dto.estOuvertManuel !== undefined) updateData.estOuvertManuel = dto.estOuvertManuel;
 
     const updated = await this.prisma.structure.update({
       where: { id: structureId },
@@ -388,6 +437,7 @@ export class StructureService {
         longitude: true,
         horaires: true,
         estDeGarde: true,
+        estOuvertManuel: true,
         updatedAt: true,
       },
     });
@@ -438,5 +488,31 @@ export class StructureService {
       );
     }
     return user;
+  }
+
+  // ─── Supprimer un membre ──────────────────────────────────────
+  async deleteMembre(structureId: string, membreId: string, requestingUserId: string) {
+    await this.checkStructureAccess(structureId, requestingUserId);
+
+    const membre = await this.prisma.user.findFirst({
+      where: { id: membreId, structureId },
+    });
+    if (!membre) {
+      throw new NotFoundException('Membre non trouvé dans cette structure');
+    }
+
+    if (membre.id === requestingUserId) {
+      throw new BadRequestException("Vous ne pouvez pas vous supprimer vous-même");
+    }
+
+    await this.prisma.user.delete({
+      where: { id: membreId },
+    });
+
+    return {
+      data: null,
+      message: 'Membre supprimé avec succès',
+      success: true,
+    };
   }
 }
