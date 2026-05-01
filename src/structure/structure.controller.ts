@@ -77,7 +77,7 @@ export class StructureController {
   // ─── Routes protégées (STRUCTURE_ADMIN) ───────────────────────
 
   @UseGuards(AuthGuard, RolesGuard)
-  @Roles('STRUCTURE_ADMIN')
+  @Roles('STRUCTURE_ADMIN', 'PHARMACIEN', 'MEDECIN')
   @Get('my')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Ma structure', description: 'Retourne les infos de la structure de l\'admin connecté' })
@@ -99,7 +99,7 @@ export class StructureController {
   }
 
   @UseGuards(AuthGuard, RolesGuard)
-  @Roles('STRUCTURE_ADMIN')
+  @Roles('STRUCTURE_ADMIN', 'PHARMACIEN', 'MEDECIN')
   @Get(':structureId/membres')
   @ApiBearerAuth()
   @ApiParam({ name: 'structureId' })

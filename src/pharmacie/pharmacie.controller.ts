@@ -43,21 +43,24 @@ export class PharmacieController {
     summary: 'Rechercher un médicament (public)',
     description: 'Cherche la disponibilité d\'un médicament dans les pharmacies partenaires.',
   })
-  @ApiQuery({ name: 'q', required: true, description: 'Nom du médicament' })
+  @ApiQuery({ name: 'q', required: false, description: 'Nom du médicament' })
   @ApiQuery({ name: 'ville', required: false })
   @ApiQuery({ name: 'lat', required: false, type: Number })
   @ApiQuery({ name: 'lng', required: false, type: Number })
+  @ApiQuery({ name: 'pharmacieId', required: false })
   rechercherDisponibilite(
-    @Query('q') search: string,
+    @Query('q') search?: string,
     @Query('ville') ville?: string,
     @Query('lat') lat?: string,
     @Query('lng') lng?: string,
+    @Query('pharmacieId') pharmacieId?: string,
   ) {
     return this.pharmacieService.rechercherDisponibilite(
       search,
       ville,
       lat ? parseFloat(lat) : undefined,
       lng ? parseFloat(lng) : undefined,
+      pharmacieId,
     );
   }
 
@@ -91,7 +94,7 @@ export class PharmacieController {
   // ─── Catalogue Admin (ADMIN/SUPER_ADMIN) ─────────────────────
 
   @UseGuards(AuthGuard, RolesGuard)
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'PHARMACIEN', 'STRUCTURE_ADMIN')
   @Post('catalogue')
   @HttpCode(HttpStatus.CREATED)
   @ApiBearerAuth()
@@ -126,7 +129,7 @@ export class PharmacieController {
   // ─── Gestion Stock (STRUCTURE_ADMIN de pharmacie) ─────────────
 
   @UseGuards(AuthGuard, RolesGuard)
-  @Roles('STRUCTURE_ADMIN')
+  @Roles('STRUCTURE_ADMIN', 'PHARMACIEN')
   @Get('stock/:structureId')
   @ApiBearerAuth()
   @ApiParam({ name: 'structureId' })
@@ -139,7 +142,7 @@ export class PharmacieController {
   }
 
   @UseGuards(AuthGuard, RolesGuard)
-  @Roles('STRUCTURE_ADMIN')
+  @Roles('STRUCTURE_ADMIN', 'PHARMACIEN')
   @Post('stock/:structureId')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
@@ -157,7 +160,7 @@ export class PharmacieController {
   }
 
   @UseGuards(AuthGuard, RolesGuard)
-  @Roles('STRUCTURE_ADMIN')
+  @Roles('STRUCTURE_ADMIN', 'PHARMACIEN')
   @Patch('stock/:structureId/:stockId/quantite')
   @ApiBearerAuth()
   @ApiParam({ name: 'structureId' })
@@ -181,7 +184,7 @@ export class PharmacieController {
   }
 
   @UseGuards(AuthGuard, RolesGuard)
-  @Roles('STRUCTURE_ADMIN')
+  @Roles('STRUCTURE_ADMIN', 'PHARMACIEN')
   @Delete('stock/:structureId/:stockId')
   @ApiBearerAuth()
   @ApiParam({ name: 'structureId' })
