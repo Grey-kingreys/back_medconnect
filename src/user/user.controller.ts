@@ -98,4 +98,13 @@ export class UserController {
   ) {
     return this.userService.changeUserPassword(userId, dto);
   }
+
+  // ─── Patients (Pour médecins) ───────────────────────────────
+
+  @Get('patients/my')
+  @Roles('MEDECIN', 'STRUCTURE_ADMIN')
+  @ApiOperation({ summary: 'Liste de mes patients', description: 'Retourne les patients ayant eu une consultation dans la structure du médecin' })
+  getMyPatients(@Req() req: any) {
+    return this.userService.getPatientsForDoctor(req.user.structureId);
+  }
 }

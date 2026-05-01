@@ -91,6 +91,10 @@ export class StructureService {
         horaires: true,
         telephone: true,
         estOuvertManuel: true,
+        membres: {
+          where: { role: { in: ['MEDECIN', 'STRUCTURE_ADMIN'] }, isActive: true },
+          select: { specialite: true },
+        },
       },
     });
 
@@ -119,7 +123,7 @@ export class StructureService {
         membres: {
           where: {
             isActive: true,
-            role: { in: ['MEDECIN', 'PHARMACIEN'] },
+            role: { in: ['MEDECIN', 'PHARMACIEN', 'STRUCTURE_ADMIN'] },
           },
           select: {
             id: true,
@@ -128,6 +132,7 @@ export class StructureService {
             email: true,
             telephone: true,
             role: true,
+            specialite: true,
           },
         },
       },
@@ -156,16 +161,6 @@ export class StructureService {
     if (!structure) {
       throw new UnauthorizedException(
         'Lien d\'invitation invalide ou expiré. Contactez l\'administrateur MedConnect.',
-      );
-    }
-
-    // Vérifier que l'email de la structure n'est pas déjà un compte User
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email: structure.email },
-    });
-    if (existingUser) {
-      throw new ConflictException(
-        'Un compte existe déjà avec cet email. Connectez-vous.',
       );
     }
 
@@ -311,6 +306,7 @@ export class StructureService {
         role: dto.role as any,
         isActive: true,
         structureId: structureId,
+        specialite: dto.role === 'MEDECIN' ? (dto as any).specialite : undefined,
       },
       select: {
         id: true,
@@ -319,6 +315,7 @@ export class StructureService {
         email: true,
         telephone: true,
         role: true,
+        specialite: true,
         isActive: true,
         createdAt: true,
       },

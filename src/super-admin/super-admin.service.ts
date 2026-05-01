@@ -22,12 +22,20 @@ export class SuperAdminService {
   async createStructure(dto: CreateStructureDto) {
     const { nom, type, email, telephone, adresse, ville, latitude, longitude, horaires, estDeGarde } = dto;
 
-    // Vérifier si l'email de la structure est déjà utilisé
+    // 1. Vérifier si l'email est déjà utilisé par une structure
     const existingStructure = await this.prisma.structure.findUnique({
       where: { email: email.toLowerCase() },
     });
     if (existingStructure) {
       throw new ConflictException('Une structure avec cet email existe déjà');
+    }
+
+    // 2. Vérifier si l'email est déjà utilisé par un utilisateur (User)
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: email.toLowerCase() },
+    });
+    if (existingUser) {
+      throw new ConflictException('Un compte utilisateur avec cet email existe déjà');
     }
 
     // Générer le token d'invitation (72h)

@@ -49,6 +49,7 @@ export class UserService {
         telephone: telephone?.trim(),
         role: role as any,
         isActive: true,
+        specialite: (role === 'MEDECIN') ? (dto as any).specialite : undefined,
       },
       select: {
         id: true,
@@ -248,6 +249,51 @@ export class UserService {
     return {
       data: { total, actifs, inactifs, parRole },
       message: 'Statistiques récupérées',
+      success: true,
+    };
+  }
+
+  // ─── Patients pour médecins ───────────────────────────────────
+
+  async getPatientsForDoctor(structureId: string) {
+    if (!structureId) return { data: [], message: 'Aucune structure', success: true };
+
+    const consultations = await this.prisma.consultation.findMany({
+      where: { structureId },
+      include: {
+        patient: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            email: true,
+            telephone: true,
+            profilMedical: {
+              select: {
+                groupeSanguin: true,
+                allergies: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { dateConsultation: 'desc' },
+    });
+
+    const patientMap = new Map();
+    consultations.forEach((c) => {
+      if (!patientMap.has(c.patientId)) {
+        patientMap.set(c.patientId, {
+          ...c.patient,
+          derniereConsultation: c.dateConsultation,
+          dernierMotif: c.motif,
+        });
+      }
+    });
+
+    return {
+      data: Array.from(patientMap.values()),
+      message: 'Patients de la structure récupérés',
       success: true,
     };
   }

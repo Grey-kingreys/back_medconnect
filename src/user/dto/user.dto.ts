@@ -57,6 +57,11 @@ export class CreateUserByAdminDto {
         message: `Le rôle doit être l'un des suivants : ${Object.values(AdminCreatableRole).join(', ')}`,
     })
     role: AdminCreatableRole;
+
+    @ApiPropertyOptional({ example: 'Cardiologie' })
+    @IsOptional()
+    @IsString()
+    specialite?: string;
 }
 
 export class UpdateUserDto {
