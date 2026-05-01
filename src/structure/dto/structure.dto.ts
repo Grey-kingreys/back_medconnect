@@ -93,6 +93,11 @@ export class SetupStructureDto {
     @IsOptional()
     @IsBoolean()
     estDeGarde?: boolean;
+
+    @ApiPropertyOptional({ example: true })
+    @IsOptional()
+    @IsBoolean()
+    estOuvertManuel?: boolean;
 }
 
 // ─── Créer un membre dans la structure ───────────────────────────────────────
@@ -189,4 +194,9 @@ export class UpdateStructureDto {
     @IsOptional()
     @IsBoolean()
     estDeGarde?: boolean;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    @IsBoolean()
+    estOuvertManuel?: boolean;
 }

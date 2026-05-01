@@ -74,6 +74,7 @@ model Structure {
   description String?
   horaires    String?       // JSON string ex: {"lun":"08:00-18:00",...}
   estDeGarde  Boolean       @default(false)
+  estOuvertManuel Boolean?    // null: auto, true: forcé ouvert, false: forcé fermé
   isActive    Boolean       @default(true)
   isConfigured Boolean      @default(false)
 
