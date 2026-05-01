@@ -140,6 +140,11 @@ export class CreateMembreDto {
         message: 'Le rôle doit être MEDECIN, PHARMACIEN ou STRUCTURE_ADMIN',
     })
     role: MembreRoleEnum;
+
+    @ApiPropertyOptional({ example: 'Cardiologie' })
+    @IsOptional()
+    @IsString()
+    specialite?: string;
 }
 
 // ─── Update structure ─────────────────────────────────────────────────────────
