@@ -8,6 +8,10 @@ import {
     IsOptional,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Exclude, Expose, Type } from 'class-transformer';
+
+// ... (reste du fichier existant)
+
 
 // Rôles que l'admin peut créer (pas PATIENT, pas SUPER_ADMIN)
 export enum AdminCreatableRole {
@@ -104,4 +108,52 @@ export class ChangeUserPasswordDto {
         message: 'Le mot de passe doit contenir une majuscule, une minuscule et un chiffre',
     })
     newPassword: string;
+}
+
+export class UserResponseDto {
+    @Expose()
+    id: string;
+
+    @Expose()
+    email: string;
+
+    @Expose()
+    nom: string;
+
+    @Expose()
+    prenom: string;
+
+    @Expose()
+    telephone: string;
+
+    @Expose()
+    role: string;
+
+    @Expose()
+    isActive: boolean;
+
+    @Expose()
+    structureId: string;
+
+    @Expose()
+    specialite: string;
+
+    @Expose()
+    createdAt: Date;
+
+    @Expose()
+    updatedAt: Date;
+
+    @Exclude()
+    password?: string;
+
+    @Exclude()
+    refreshToken?: string;
+
+    @Exclude()
+    refreshTokenExpires?: Date;
+
+    constructor(partial: Partial<UserResponseDto>) {
+        Object.assign(this, partial);
+    }
 }

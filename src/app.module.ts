@@ -9,6 +9,7 @@ import { SuperAdminModule } from './super-admin/super-admin.module';
 import { CarnetSanteModule } from './carnet-sante/carnet-sante.module';
 import { PharmacieModule } from './pharmacie/pharmacie.module';
 import { GeoModule } from './geo/geo.module';
+import { ChatModule } from './common/services/chat.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { GeoModule } from './geo/geo.module';
     CarnetSanteModule,
     PharmacieModule,
     GeoModule,
+    ChatModule,
   ],
   controllers: [AppController],
   providers: [AppService],

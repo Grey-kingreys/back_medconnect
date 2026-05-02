@@ -24,7 +24,9 @@ import {
   CreateUserByAdminDto,
   UpdateUserDto,
   ChangeUserPasswordDto,
+  UserResponseDto,
 } from './dto/user.dto';
+import { plainToInstance } from 'class-transformer';
 
 @ApiTags('Utilisateurs (Admin)')
 @Controller('users')
@@ -33,21 +35,7 @@ import {
 export class UserController {
   constructor(private readonly userService: UserService) { }
 
-  @Post()
-  @Roles('ADMIN', 'SUPER_ADMIN')
-  @ApiOperation({ summary: 'Créer un utilisateur (Admin)' })
-  @ApiResponse({ status: 201, description: 'Utilisateur créé' })
-  @ApiResponse({ status: 409, description: 'Email déjà utilisé' })
-  create(@Body() dto: CreateUserByAdminDto) {
-    return this.userService.createByAdmin(dto);
-  }
-
-  @Get()
-  @Roles('ADMIN', 'SUPER_ADMIN')
-  @ApiOperation({ summary: 'Liste des utilisateurs' })
-  getUsers() {
-    return this.userService.getUsers();
-  }
+  // ─── Routes statiques (DOIVENT être AVANT :userId) ──────────
 
   @Get('stats')
   @Roles('ADMIN', 'SUPER_ADMIN')
@@ -56,12 +44,77 @@ export class UserController {
     return this.userService.getStats();
   }
 
+  @Get('patients/my')
+  @Roles('MEDECIN', 'STRUCTURE_ADMIN')
+  @ApiOperation({ summary: 'Liste de mes patients', description: 'Retourne les patients ayant eu une consultation dans la structure du médecin' })
+  getMyPatients(@Req() req: any) {
+    return this.userService.getPatientsForDoctor(req.user.structureId);
+  }
+
+  @Get('patient/autorisations')
+  @Roles('PATIENT')
+  @ApiOperation({ summary: 'Récupérer les autorisations du patient' })
+  getAutorisations(@Req() req: any) {
+    return this.userService.getAutorisations(req.user.userId);
+  }
+
+  @Post('patient/autoriser-structure/:structureId')
+  @Roles('PATIENT')
+  @ApiOperation({ summary: 'Autoriser une structure à voir le dossier' })
+  autoriserStructure(@Param('structureId') structureId: string, @Req() req: any) {
+    return this.userService.autoriserStructure(req.user.userId, structureId);
+  }
+
+  @Delete('patient/revoquer-structure/:structureId')
+  @Roles('PATIENT')
+  @ApiOperation({ summary: 'Révoquer l\'autorisation d\'une structure' })
+  revoquerStructure(@Param('structureId') structureId: string, @Req() req: any) {
+    return this.userService.revoquerStructure(req.user.userId, structureId);
+  }
+
+  @Post('patient/designer-medecin/:medecinId')
+  @Roles('PATIENT')
+  @ApiOperation({ summary: 'Désigner un médecin traitant' })
+  designerMedecin(@Param('medecinId') medecinId: string, @Req() req: any) {
+    return this.userService.designerMedecin(req.user.userId, medecinId);
+  }
+
+  // ─── CRUD Utilisateurs (Admin) ────────────────────────────────
+
+  @Post()
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Créer un utilisateur (Admin)' })
+  @ApiResponse({ status: 201, description: 'Utilisateur créé' })
+  @ApiResponse({ status: 409, description: 'Email déjà utilisé' })
+  async create(@Body() dto: CreateUserByAdminDto) {
+    const res = await this.userService.createByAdmin(dto);
+    return {
+      ...res,
+      data: plainToInstance(UserResponseDto, res.data, { excludeExtraneousValues: true }),
+    };
+  }
+
+  @Get()
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Liste des utilisateurs' })
+  async getUsers() {
+    const res = await this.userService.getUsers();
+    return {
+      ...res,
+      data: plainToInstance(UserResponseDto, res.data, { excludeExtraneousValues: true }),
+    };
+  }
+
   @Get(':userId')
   @Roles('ADMIN', 'SUPER_ADMIN')
   @ApiParam({ name: 'userId', description: "ID de l'utilisateur" })
   @ApiOperation({ summary: "Détails d'un utilisateur" })
-  getUser(@Param('userId') userId: string) {
-    return this.userService.getUser(userId);
+  async getUser(@Param('userId') userId: string) {
+    const res = await this.userService.getUser(userId);
+    return {
+      ...res,
+      data: plainToInstance(UserResponseDto, res.data, { excludeExtraneousValues: true }),
+    };
   }
 
   @Patch(':userId')
@@ -97,14 +150,5 @@ export class UserController {
     @Body() dto: ChangeUserPasswordDto,
   ) {
     return this.userService.changeUserPassword(userId, dto);
-  }
-
-  // ─── Patients (Pour médecins) ───────────────────────────────
-
-  @Get('patients/my')
-  @Roles('MEDECIN', 'STRUCTURE_ADMIN')
-  @ApiOperation({ summary: 'Liste de mes patients', description: 'Retourne les patients ayant eu une consultation dans la structure du médecin' })
-  getMyPatients(@Req() req: any) {
-    return this.userService.getPatientsForDoctor(req.user.structureId);
   }
 }

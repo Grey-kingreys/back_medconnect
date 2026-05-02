@@ -29,7 +29,9 @@
     "@nestjs/mapped-types": "*",
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/platform-socket.io": "^11.1.19",
     "@nestjs/swagger": "^11.2.5",
+    "@nestjs/websockets": "^11.1.19",
     "@prisma/adapter-pg": "^7.2.0",
     "@prisma/client": "^7.2.0",
     "@types/bcrypt": "^6.0.0",
@@ -45,6 +47,7 @@
     "reflect-metadata": "^0.2.2",
     "resend": "^6.9.1",
     "rxjs": "^7.8.1",
+    "socket.io": "^4.8.3",
     "swagger-ui": "^5.31.0"
   },
   "devDependencies": {

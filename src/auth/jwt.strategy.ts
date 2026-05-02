@@ -5,7 +5,8 @@ import { PrismaService } from '../common/services/prisma.service';
 
 export type UserPayload = {
     userId: string;
-    role: string; // Ajoutez le rôle ici
+    role: string;
+    structureId?: string | null;
 };
 
 export type RequestWithUser = {
@@ -30,6 +31,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
                 id: true,
                 role: true,
                 isActive: true,
+                structureId: true,
             },
         });
 
@@ -39,7 +41,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
         return {
             userId: user.id,
-            role: user.role, // Incluez le rôle dans le payload
+            role: user.role,
+            structureId: user.structureId,
         };
     }
 }

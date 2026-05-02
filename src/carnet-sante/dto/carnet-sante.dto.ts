@@ -12,7 +12,8 @@ import {
     Length,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Expose, Exclude, Type, Transform } from 'class-transformer';
+
 
 // ─── Profil Médical ───────────────────────────────────────────────────────────
 
@@ -90,6 +91,11 @@ export class CreateConsultationDto {
     @Length(3, 500)
     motif: string;
 
+    @ApiPropertyOptional({ description: 'ID du patient (pour les médecins)' })
+    @IsOptional()
+    @IsString()
+    patientId?: string;
+
     @ApiPropertyOptional({ example: 'Dr. Kouyaté Mamadou' })
     @IsOptional()
     @IsString()
@@ -159,6 +165,11 @@ export class CreateOrdonnanceDto {
     @Type(() => MedicamentOrdonnanceDto)
     medicaments: MedicamentOrdonnanceDto[];
 
+    @ApiPropertyOptional({ description: 'ID du patient (pour les médecins)' })
+    @IsOptional()
+    @IsString()
+    patientId?: string;
+
     @ApiPropertyOptional()
     @IsOptional()
     @IsString()
@@ -178,6 +189,11 @@ export class CreateResultatAnalyseDto {
     @IsString()
     @Length(2, 200)
     typeAnalyse: string;
+
+    @ApiPropertyOptional({ description: 'ID du patient (pour les médecins)' })
+    @IsOptional()
+    @IsString()
+    patientId?: string;
 
     @ApiPropertyOptional({ example: 'Laboratoire National de Conakry' })
     @IsOptional()
@@ -215,6 +231,11 @@ export class CreateVaccinationDto {
     @Length(2, 200)
     vaccin: string;
 
+    @ApiPropertyOptional({ description: 'ID du patient (pour les médecins)' })
+    @IsOptional()
+    @IsString()
+    patientId?: string;
+
     @ApiProperty({ example: '2026-03-01' })
     @IsNotEmpty()
     @IsDateString()
@@ -241,6 +262,49 @@ export class CreateVaccinationDto {
     notes?: string;
 }
 
+// ─── Rendez-vous ──────────────────────────────────────────────────────────────
+
+export enum AppointmentStatusEnum {
+    PROGRAMME = 'PROGRAMME',
+    CONFIRME = 'CONFIRME',
+    ANNULE = 'ANNULE',
+    TERMINE = 'TERMINE',
+}
+
+export class CreateRendezVousDto {
+    @ApiProperty({ example: '2026-04-20T10:00:00Z' })
+    @IsNotEmpty()
+    @IsDateString()
+    date: string;
+
+    @ApiProperty({ example: 'Consultation de suivi' })
+    @IsNotEmpty()
+    @IsString()
+    @Length(3, 500)
+    motif: string;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    @IsString()
+    notes?: string;
+
+    @ApiProperty({ description: 'ID du patient' })
+    @IsNotEmpty()
+    @IsString()
+    patientId: string;
+
+    @ApiPropertyOptional({ description: 'ID de la structure' })
+    @IsOptional()
+    @IsString()
+    structureId?: string;
+
+    @ApiPropertyOptional({ enum: AppointmentStatusEnum })
+    @IsOptional()
+    @IsEnum(AppointmentStatusEnum)
+    status?: AppointmentStatusEnum;
+}
+
+
 // ─── Auto-diagnostic ──────────────────────────────────────────────────────────
 
 export class CreateAutoDiagnosticDto {
@@ -251,4 +315,34 @@ export class CreateAutoDiagnosticDto {
     @IsString()
     @Length(10, 2000)
     symptomes: string;
+}
+
+export class AutoDiagnosticResponseDto {
+    @Expose()
+    id: string;
+
+    @Expose()
+    patientId: string;
+
+    @Expose()
+    symptomes: string;
+
+    @Expose()
+    @Transform(({ value }) => {
+        if (typeof value === 'string') {
+            try { return JSON.parse(value); } catch { return value; }
+        }
+        return value;
+    })
+    analyseia: any;
+
+    @Expose()
+    recommendation: string;
+
+    @Expose()
+    createdAt: Date;
+
+    constructor(partial: Partial<AutoDiagnosticResponseDto>) {
+        Object.assign(this, partial);
+    }
 }

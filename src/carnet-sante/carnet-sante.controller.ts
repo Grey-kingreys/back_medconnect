@@ -9,6 +9,7 @@ import {
   Req,
   HttpCode,
   HttpStatus,
+  ForbiddenException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -19,6 +20,8 @@ import {
 } from '@nestjs/swagger';
 import { CarnetSanteService } from './carnet-sante.service';
 import { AuthGuard } from 'src/common/guards/auth.guard';
+import { RolesGuard } from 'src/common/guards/roles.guard';
+import { Roles } from 'src/common/decorators/roles.decorator';
 import {
   UpsertProfilMedicalDto,
   CreateConsultationDto,
@@ -26,11 +29,14 @@ import {
   CreateResultatAnalyseDto,
   CreateVaccinationDto,
   CreateAutoDiagnosticDto,
+  AutoDiagnosticResponseDto,
+  CreateRendezVousDto,
 } from './dto/carnet-sante.dto';
+import { plainToInstance } from 'class-transformer';
 
 @ApiTags('Carnet de Santé')
 @Controller('carnet-sante')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, RolesGuard)
 @ApiBearerAuth()
 export class CarnetSanteController {
   constructor(private readonly carnetSanteService: CarnetSanteService) { }
@@ -44,6 +50,16 @@ export class CarnetSanteController {
   })
   getResume(@Req() req: any) {
     return this.carnetSanteService.getResume(req.user.userId);
+  }
+
+  // ─── Vue Médecin : Carnet d'un patient ────────────────────────
+
+  @Get('patient/:patientId')
+  @Roles('MEDECIN', 'STRUCTURE_ADMIN')
+  @ApiParam({ name: 'patientId', description: 'ID du patient' })
+  @ApiOperation({ summary: 'Voir le carnet d\'un patient (médecin traitant ou structure)' })
+  async getPatientCarnet(@Req() req: any, @Param('patientId') patientId: string) {
+    return this.carnetSanteService.getPatientCarnetForDoctor(req.user.userId, patientId, req.user.structureId);
   }
 
   // ─── Profil Médical ───────────────────────────────────────────
@@ -84,7 +100,7 @@ export class CarnetSanteController {
   @ApiOperation({ summary: 'Ajouter une consultation' })
   @ApiResponse({ status: 201, description: 'Consultation ajoutée' })
   createConsultation(@Req() req: any, @Body() dto: CreateConsultationDto) {
-    return this.carnetSanteService.createConsultation(req.user.userId, dto);
+    return this.carnetSanteService.createConsultation(req.user.userId, dto, req.user.structureId);
   }
 
   @Delete('consultations/:id')
@@ -106,7 +122,7 @@ export class CarnetSanteController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Ajouter une ordonnance' })
   createOrdonnance(@Req() req: any, @Body() dto: CreateOrdonnanceDto) {
-    return this.carnetSanteService.createOrdonnance(req.user.userId, dto);
+    return this.carnetSanteService.createOrdonnance(req.user.userId, dto, req.user.structureId);
   }
 
   @Delete('ordonnances/:id')
@@ -128,7 +144,7 @@ export class CarnetSanteController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: "Ajouter un résultat d'analyse" })
   createAnalyse(@Req() req: any, @Body() dto: CreateResultatAnalyseDto) {
-    return this.carnetSanteService.createAnalyse(req.user.userId, dto);
+    return this.carnetSanteService.createAnalyse(req.user.userId, dto, req.user.structureId);
   }
 
   @Delete('analyses/:id')
@@ -150,7 +166,7 @@ export class CarnetSanteController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Ajouter une vaccination' })
   createVaccination(@Req() req: any, @Body() dto: CreateVaccinationDto) {
-    return this.carnetSanteService.createVaccination(req.user.userId, dto);
+    return this.carnetSanteService.createVaccination(req.user.userId, dto, req.user.structureId);
   }
 
   @Delete('vaccinations/:id')
@@ -160,12 +176,38 @@ export class CarnetSanteController {
     return this.carnetSanteService.deleteVaccination(req.user.userId, id);
   }
 
+  // ─── Rendez-vous ──────────────────────────────────────────────
+
+  @Get('rendez-vous')
+  @ApiOperation({ summary: 'Mes rendez-vous' })
+  getRendezVous(@Req() req: any) {
+    return this.carnetSanteService.getRendezVous(req.user.userId, req.user.role);
+  }
+
+  @Post('rendez-vous')
+  @HttpCode(HttpStatus.CREATED)
+  @Roles('MEDECIN', 'STRUCTURE_ADMIN')
+  @ApiOperation({ summary: 'Programmer un rendez-vous (Médecin)' })
+  createRendezVous(@Req() req: any, @Body() dto: CreateRendezVousDto) {
+    return this.carnetSanteService.createRendezVous(req.user.userId, dto, req.user.structureId);
+  }
+
+  @Post('rendez-vous/:id/status')
+  @ApiOperation({ summary: 'Mettre à jour le statut d\'un rendez-vous' })
+  updateRendezVousStatus(@Param('id') id: string, @Body('status') status: string) {
+    return this.carnetSanteService.updateRendezVousStatus(id, status);
+  }
+
   // ─── Auto-diagnostics ─────────────────────────────────────────
 
   @Get('auto-diagnostics')
   @ApiOperation({ summary: 'Historique des auto-diagnostics' })
-  getAutoDiagnostics(@Req() req: any) {
-    return this.carnetSanteService.getAutoDiagnostics(req.user.userId);
+  async getAutoDiagnostics(@Req() req: any) {
+    const res = await this.carnetSanteService.getAutoDiagnostics(req.user.userId);
+    return {
+      ...res,
+      data: plainToInstance(AutoDiagnosticResponseDto, res.data, { excludeExtraneousValues: true }),
+    };
   }
 
   @Post('auto-diagnostics')
@@ -175,7 +217,11 @@ export class CarnetSanteController {
     description:
       'Enregistre les symptômes et lance l\'analyse IA. ⚠️ Non substitutable à une consultation médicale.',
   })
-  createAutoDiagnostic(@Req() req: any, @Body() dto: CreateAutoDiagnosticDto) {
-    return this.carnetSanteService.createAutoDiagnostic(req.user.userId, dto);
+  async createAutoDiagnostic(@Req() req: any, @Body() dto: CreateAutoDiagnosticDto) {
+    const res = await this.carnetSanteService.createAutoDiagnostic(req.user.userId, dto);
+    return {
+      ...res,
+      data: plainToInstance(AutoDiagnosticResponseDto, res.data, { excludeExtraneousValues: true }),
+    };
   }
-}
+}
