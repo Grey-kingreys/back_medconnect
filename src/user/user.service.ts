@@ -268,6 +268,7 @@ export class UserService {
             prenom: true,
             email: true,
             telephone: true,
+            medecinTraitantId: true,
             profilMedical: {
               select: {
                 groupeSanguin: true,
@@ -278,6 +279,25 @@ export class UserService {
         },
       },
       orderBy: { dateConsultation: 'desc' },
+    });
+
+    const autorisations = await this.prisma.autorisationStructure.findMany({
+      where: { structureId },
+      include: {
+        patient: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            email: true,
+            telephone: true,
+            medecinTraitantId: true,
+            profilMedical: {
+              select: { groupeSanguin: true, allergies: true }
+            }
+          }
+        }
+      }
     });
 
     const patientMap = new Map();
@@ -291,10 +311,74 @@ export class UserService {
       }
     });
 
+    autorisations.forEach(a => {
+      if (!patientMap.has(a.patientId)) {
+        patientMap.set(a.patientId, {
+          ...a.patient,
+          autorisationNiveau1: true,
+        });
+      } else {
+        patientMap.get(a.patientId).autorisationNiveau1 = true;
+      }
+    });
+
     return {
       data: Array.from(patientMap.values()),
       message: 'Patients de la structure récupérés',
       success: true,
     };
+  }
+
+  // ─── Actions Patient (Autorisations) ──────────────────────────
+
+  async autoriserStructure(patientId: string, structureId: string) {
+    const exist = await this.prisma.autorisationStructure.findFirst({
+      where: { patientId, structureId }
+    });
+    if (!exist) {
+      await this.prisma.autorisationStructure.create({
+        data: { patientId, structureId }
+      });
+    }
+    return { success: true, message: 'Structure autorisée' };
+  }
+
+  async revoquerStructure(patientId: string, structureId: string) {
+    const exist = await this.prisma.autorisationStructure.findFirst({
+      where: { patientId, structureId }
+    });
+    if (exist) {
+      await this.prisma.autorisationStructure.delete({
+        where: { id: exist.id }
+      });
+    }
+    return { success: true, message: 'Autorisation révoquée' };
+  }
+
+  async designerMedecin(patientId: string, medecinId: string) {
+    await this.prisma.user.update({
+      where: { id: patientId },
+      data: { medecinTraitantId: medecinId }
+    });
+    return { success: true, message: 'Médecin désigné avec succès' };
+  }
+
+  async getAutorisations(patientId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: patientId },
+      select: { 
+        medecinTraitantId: true,
+        medecinTraitant: { select: { id: true, nom: true, prenom: true, specialite: true } },
+        autorisationsStructures: {
+          select: {
+            id: true,
+            structureId: true,
+            createdAt: true,
+            structure: { select: { id: true, nom: true, type: true } }
+          }
+        }
+      }
+    });
+    return { success: true, data: user };
   }
 }

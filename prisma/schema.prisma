@@ -58,6 +58,23 @@ model User {
   vaccinations   Vaccination[]
   autoDiagnostics AutoDiagnostic[]
 
+  // Autorisations données aux structures (Niveau 1)
+  autorisationsStructures AutorisationStructure[] @relation("PatientAutorisations")
+
+  // Médecin traitant (Niveau 2)
+  medecinTraitantId String?
+  medecinTraitant   User?   @relation("MedecinTraitant", fields: [medecinTraitantId], references: [id])
+  patientsSuivis    User[]  @relation("MedecinTraitant")
+
+  // Conversations et Messages
+  conversationsEnTantQuePatient Conversation[] @relation("ConversationPatient")
+  conversationsEnTantQueMedecin Conversation[] @relation("ConversationMedecin")
+  messagesEnvoyes               Message[]
+
+  // Rendez-vous
+  rendezVousEnTantQuePatient RendezVous[] @relation("PatientRendezVous")
+  rendezVousEnTantQueMedecin RendezVous[] @relation("MedecinRendezVous")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -95,6 +112,15 @@ model Structure {
 
   // Consultations effectuées dans cette structure
   consultations Consultation[]
+
+  // Patients ayant autorisé l'accès à leur dossier
+  autorisationsPatients AutorisationStructure[] @relation("StructureAutorisations")
+  
+  // Conversations avec les patients
+  conversations Conversation[] @relation("ConversationStructure")
+
+  // Rendez-vous dans cette structure
+  rendezVous RendezVous[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -202,6 +228,34 @@ model Vaccination {
   updatedAt DateTime @updatedAt
 }
 
+enum AppointmentStatus {
+  PROGRAMME
+  CONFIRME
+  ANNULE
+  TERMINE
+}
+
+model RendezVous {
+  id          String   @id @default(uuid())
+  patientId   String
+  patient     User     @relation("PatientRendezVous", fields: [patientId], references: [id], onDelete: Cascade)
+  
+  medecinId   String
+  medecin     User     @relation("MedecinRendezVous", fields: [medecinId], references: [id], onDelete: Cascade)
+
+  structureId String?
+  structure   Structure? @relation(fields: [structureId], references: [id], onDelete: SetNull)
+
+  date        DateTime
+  motif       String
+  notes       String?
+  status      AppointmentStatus @default(PROGRAMME)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+
 model AutoDiagnostic {
   id        String   @id @default(uuid())
   patientId String
@@ -247,4 +301,62 @@ model StockMedicament {
   updatedAt DateTime @updatedAt
 
   @@unique([medicamentId, structureId])
+}
+
+// ====== SECURITE ET ACCES ======
+
+// Niveau 1: Autorisation de partage de dossier avec une structure
+model AutorisationStructure {
+  id          String   @id @default(uuid())
+  patientId   String
+  patient     User     @relation("PatientAutorisations", fields: [patientId], references: [id], onDelete: Cascade)
+  structureId String
+  structure   Structure @relation("StructureAutorisations", fields: [structureId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@unique([patientId, structureId])
+}
+
+// ====== MESSAGERIE (CHAT) ======
+
+enum ConversationType {
+  PRIVE      // Patient - Médecin
+  STRUCTURE  // Patient - Structure
+}
+
+model Conversation {
+  id          String   @id @default(uuid())
+  type        ConversationType
+  
+  // Si PRIVE (Patient - Médecin)
+  patientId   String?
+  patient     User?     @relation("ConversationPatient", fields: [patientId], references: [id], onDelete: Cascade)
+  medecinId   String?
+  medecin     User?     @relation("ConversationMedecin", fields: [medecinId], references: [id], onDelete: Cascade)
+  
+  // Si STRUCTURE (Patient - Structure)
+  structureId String?
+  structure   Structure? @relation("ConversationStructure", fields: [structureId], references: [id], onDelete: Cascade)
+
+  messages    Message[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  
+  senderId       String
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  
+  content        String
+  isLocation     Boolean      @default(false) // Pour le bouton 📍 Position
+  latitude       Float?
+  longitude      Float?
+  
+  lu             Boolean      @default(false)
+  
+  createdAt      DateTime     @default(now())
 }
