@@ -33,6 +33,7 @@ model User {
   nom       String
   prenom    String
   telephone String?
+  age       Int?
   role      Role     @default(PATIENT)
   isActive  Boolean  @default(true)
   specialite String?  // Spécialité médicale (pour MEDECIN)
