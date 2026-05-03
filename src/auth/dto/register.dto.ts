@@ -6,6 +6,9 @@ import {
     Matches,
     IsString,
     IsOptional,
+    IsNumber,
+    Min,
+    Max,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -46,4 +49,11 @@ export class RegisterDto {
     @IsString()
     @Length(8, 20)
     telephone?: string;
+
+    @ApiPropertyOptional({ example: 30 })
+    @IsOptional()
+    @IsNumber()
+    @Min(0, { message: 'L\'age doit être un nombre positif' })
+    @Max(120, { message: 'L\'age doit être inférieur à 120' })
+    age?: number;
 }

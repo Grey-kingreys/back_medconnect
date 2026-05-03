@@ -100,7 +100,7 @@ export class AuthService {
   // ─── Register (patients uniquement) ──────────────────────────
 
   async register(registerDto: RegisterDto) {
-    const { nom, prenom, email, password, telephone } = registerDto;
+    const { nom, prenom, email, password, telephone, age } = registerDto;
 
     const existingUser = await this.prisma.user.findUnique({
       where: { email: email.toLowerCase() },
@@ -119,6 +119,7 @@ export class AuthService {
         email: email.toLowerCase(),
         password: hashedPassword,
         telephone: telephone?.trim(),
+        age,
         role: 'PATIENT',
         isActive: true,
       },
