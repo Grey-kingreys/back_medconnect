@@ -49,6 +49,9 @@ export class AuthService {
         role: true,
         isActive: true,
         structureId: true,
+        dateNaissance: true,
+        taille: true,
+        poids: true,
       },
     });
 
@@ -90,6 +93,9 @@ export class AuthService {
           prenom: user.prenom,
           role: user.role,
           structureId: user.structureId,
+          dateNaissance: user.dateNaissance,
+          taille: user.taille,
+          poids: user.poids,
         },
       },
       message: 'Connexion réussie',
@@ -100,7 +106,7 @@ export class AuthService {
   // ─── Register (patients uniquement) ──────────────────────────
 
   async register(registerDto: RegisterDto) {
-    const { nom, prenom, email, password, telephone, age } = registerDto;
+    const { nom, prenom, email, password, telephone, dateNaissance, taille, poids } = registerDto;
 
     const existingUser = await this.prisma.user.findUnique({
       where: { email: email.toLowerCase() },
@@ -119,7 +125,9 @@ export class AuthService {
         email: email.toLowerCase(),
         password: hashedPassword,
         telephone: telephone?.trim(),
-        age,
+        dateNaissance: dateNaissance ? new Date(dateNaissance) : undefined,
+        taille: taille ?? undefined,
+        poids: poids ?? undefined,
         role: 'PATIENT',
         isActive: true,
       },
@@ -174,6 +182,9 @@ export class AuthService {
         nom: true,
         prenom: true,
         telephone: true,
+        dateNaissance: true,
+        taille: true,
+        poids: true,
         role: true,
         isActive: true,
         structureId: true,
@@ -215,6 +226,9 @@ export class AuthService {
     if (dto.prenom !== undefined) updateData.prenom = dto.prenom.trim();
     if (dto.email !== undefined) updateData.email = dto.email.toLowerCase();
     if (dto.telephone !== undefined) updateData.telephone = dto.telephone.trim();
+    if (dto.dateNaissance !== undefined) updateData.dateNaissance = new Date(dto.dateNaissance);
+    if (dto.taille !== undefined) updateData.taille = dto.taille;
+    if (dto.poids !== undefined) updateData.poids = dto.poids;
 
     if (Object.keys(updateData).length === 0) {
       return {
@@ -233,6 +247,9 @@ export class AuthService {
         prenom: true,
         email: true,
         telephone: true,
+        dateNaissance: true,
+        taille: true,
+        poids: true,
         role: true,
         updatedAt: true,
       },

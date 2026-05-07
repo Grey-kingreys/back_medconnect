@@ -9,6 +9,7 @@ import {
     IsNumber,
     Min,
     Max,
+    IsDateString,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -50,10 +51,22 @@ export class RegisterDto {
     @Length(8, 20)
     telephone?: string;
 
-    @ApiPropertyOptional({ example: 30 })
+    @ApiPropertyOptional({ example: '1990-05-15' })
+    @IsOptional()
+    @IsDateString({}, { message: 'La date de naissance doit être une date valide (YYYY-MM-DD)' })
+    dateNaissance?: string;
+
+    @ApiPropertyOptional({ example: 175 })
     @IsOptional()
     @IsNumber()
-    @Min(0, { message: 'L\'age doit être un nombre positif' })
-    @Max(120, { message: 'L\'age doit être inférieur à 120' })
-    age?: number;
+    @Min(50, { message: 'La taille doit être supérieure à 50 cm' })
+    @Max(250, { message: 'La taille doit être inférieure à 250 cm' })
+    taille?: number;
+
+    @ApiPropertyOptional({ example: 70.5 })
+    @IsOptional()
+    @IsNumber()
+    @Min(1, { message: 'Le poids doit être supérieur à 1 kg' })
+    @Max(500, { message: 'Le poids doit être inférieur à 500 kg' })
+    poids?: number;
 }
