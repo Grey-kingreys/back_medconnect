@@ -268,6 +268,9 @@ export class UserService {
             prenom: true,
             email: true,
             telephone: true,
+            dateNaissance: true,
+            taille: true,
+            poids: true,
             medecinTraitantId: true,
             profilMedical: {
               select: {
@@ -281,22 +284,25 @@ export class UserService {
       orderBy: { dateConsultation: 'desc' },
     });
 
-    const autorisations = await this.prisma.autorisationStructure.findMany({
-      where: { structureId },
-      include: {
-        patient: {
-          select: {
-            id: true,
-            nom: true,
-            prenom: true,
-            email: true,
-            telephone: true,
-            medecinTraitantId: true,
-            profilMedical: {
-              select: { groupeSanguin: true, allergies: true }
-            }
+  const autorisations = await this.prisma.autorisationStructure.findMany({
+    where: { structureId },
+    include: {
+      patient: {
+        select: {
+          id: true,
+          nom: true,
+          prenom: true,
+          email: true,
+          telephone: true,
+          dateNaissance: true,
+          taille: true,
+          poids: true,
+          medecinTraitantId: true,
+          profilMedical: {
+            select: { groupeSanguin: true, allergies: true }
           }
         }
+      }
       }
     });
 

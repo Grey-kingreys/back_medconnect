@@ -127,6 +127,15 @@ export class UserResponseDto {
     telephone: string;
 
     @Expose()
+    dateNaissance?: string;
+
+    @Expose()
+    taille?: number;
+
+    @Expose()
+    poids?: number;
+
+    @Expose()
     role: string;
 
     @Expose()

@@ -54,7 +54,17 @@ export class CarnetSanteService {
   async getPatientCarnetForDoctor(medecinId: string, patientId: string, structureId?: string) {
     const patient = await this.prisma.user.findUnique({
       where: { id: patientId },
-      select: { id: true, nom: true, prenom: true, email: true, telephone: true, medecinTraitantId: true }
+      select: { 
+        id: true, 
+        nom: true, 
+        prenom: true, 
+        email: true, 
+        telephone: true, 
+        medecinTraitantId: true,
+        dateNaissance: true,
+        taille: true,
+        poids: true
+      }
     });
 
     if (!patient) throw new NotFoundException('Patient non trouvé');
@@ -74,9 +84,9 @@ export class CarnetSanteService {
       throw new ForbiddenException('Vous n\'êtes pas autorisé à consulter le dossier de ce patient.');
     }
 
-    // Récupérer le profil UNIQUEMENT pour le Médecin Traitant (Niveau 1)
+    // Récupérer le profil pour le Médecin Traitant OU si la structure est autorisée
     let profil: any = null;
-    if (isMedecinTraitant) {
+    if (isMedecinTraitant || hasStructureAccess) {
       profil = await this.prisma.profilMedical.findUnique({ where: { userId: patientId } });
     }
 
@@ -96,61 +106,94 @@ export class CarnetSanteService {
       take: 50
     });
 
-    // Analyses et Vaccinations : Uniquement pour le Médecin Traitant (Niveau 1)
+    // Analyses et Vaccinations : Pour le Médecin Traitant ET les structures autorisées
     let analyses: any[] = [];
     let vaccinations: any[] = [];
     
-    if (isMedecinTraitant) {
+    if (isMedecinTraitant || hasStructureAccess) {
       analyses = await this.prisma.resultatAnalyse.findMany({
         where: { patientId },
+        include: { medecin: { select: { nom: true, prenom: true } } },
         orderBy: { dateAnalyse: 'desc' },
         take: 20
       });
       vaccinations = await this.prisma.vaccination.findMany({
         where: { patientId },
+        include: { medecin: { select: { nom: true, prenom: true } } },
         orderBy: { dateVaccin: 'desc' }
       });
     }
 
+    // Inclure medecin dans consultations et ordonnances aussi
+    const consultationsEnrichies = await this.prisma.consultation.findMany({
+      where: isMedecinTraitant ? { patientId } : { patientId, structureId: structureId as string },
+      include: { 
+        structure: { select: { id: true, nom: true, type: true } },
+        medecin: { select: { nom: true, prenom: true } }
+      },
+      orderBy: { dateConsultation: 'desc' },
+      take: 50
+    });
+
+    const ordonnancesEnrichies = await this.prisma.ordonnance.findMany({
+      where: isMedecinTraitant ? { patientId } : { patientId, consultation: { structureId: structureId as string } },
+      include: { medecin: { select: { nom: true, prenom: true } } },
+      orderBy: { dateEmission: 'desc' },
+      take: 50
+    });
+
+    // Récupérer les STATISTIQUES GLOBALES
+    const [totalConsultations, totalOrdonnances, totalAnalyses, totalVaccinations] = await Promise.all([
+      this.prisma.consultation.count({ where: { patientId } }),
+      this.prisma.ordonnance.count({ where: { patientId } }),
+      this.prisma.resultatAnalyse.count({ where: { patientId } }),
+      this.prisma.vaccination.count({ where: { patientId } }),
+    ]);
+
+    const stats = {
+      consultations: totalConsultations,
+      ordonnances: totalOrdonnances,
+      analyses: totalAnalyses,
+      vaccinations: totalVaccinations,
+    };
+
     return {
       data: {
         patient: { 
-          id: patient.id, 
-          nom: patient.nom, 
-          prenom: patient.prenom, 
-          email: isMedecinTraitant ? patient.email : null, // Cacher l'email au Niveau 2
-          telephone: isMedecinTraitant ? patient.telephone : null // Cacher le téléphone au Niveau 2
+          id: patient.id, nom: patient.nom, prenom: patient.prenom, 
+          email: (isMedecinTraitant || hasStructureAccess) ? patient.email : null,
+          telephone: (isMedecinTraitant || hasStructureAccess) ? patient.telephone : null,
+          dateNaissance: patient.dateNaissance, taille: patient.taille, poids: patient.poids
         },
         isMedecinTraitant,
-        profil,
-        consultations,
-        ordonnances: ordonnances.map(o => ({ ...o, medicaments: this.safeJsonParse(o.medicaments) })),
-        analyses,
-        vaccinations,
-        stats: {
-          consultations: consultations.length,
-          ordonnances: ordonnances.length,
-          analyses: analyses.length,
-          vaccinations: vaccinations.length,
-        }
+        profilMedical: profil,
+        stats,
+        consultations: consultationsEnrichies.map(c => ({
+          ...c,
+          medecinNom: c.medecinNom || (c.medecin ? `Dr. ${c.medecin.prenom} ${c.medecin.nom}` : null)
+        })),
+        ordonnances: ordonnancesEnrichies.map(o => ({
+          ...o,
+          medicaments: this.safeJsonParse(o.medicaments),
+          medecinNom: o.medecinNom || (o.medecin ? `Dr. ${o.medecin.prenom} ${o.medecin.nom}` : null)
+        })),
+        vaccinations: vaccinations.map(v => ({
+          ...v,
+          administrePar: v.administrePar || (v.medecin ? `Dr. ${v.medecin.prenom} ${v.medecin.nom}` : null)
+        })),
+        analyses: analyses.map(a => ({
+          ...a,
+          laboratoire: a.laboratoire || (a.medecin ? `Dr. ${a.medecin.prenom} ${a.medecin.nom}` : null)
+        })),
       },
       message: 'Carnet du patient récupéré',
-      success: true
+      success: true,
     };
   }
 
-  // ─── Profil Médical ───────────────────────────────────────────
-
   async getProfilMedical(userId: string) {
-    const profil = await this.prisma.profilMedical.findUnique({
-      where: { userId },
-    });
-
-    return {
-      data: profil || null,
-      message: profil ? 'Profil médical trouvé' : 'Aucun profil médical créé',
-      success: true,
-    };
+    const profil = await this.prisma.profilMedical.findUnique({ where: { userId } });
+    return { data: profil || null, message: profil ? 'Profil médical trouvé' : 'Aucun profil médical créé', success: true };
   }
 
   async upsertProfilMedical(userId: string, dto: UpsertProfilMedicalDto) {
@@ -170,30 +213,27 @@ export class CarnetSanteService {
       create: { userId, ...data },
       update: data,
     });
-
-    return {
-      data: profil,
-      message: 'Profil médical enregistré',
-      success: true,
-    };
+    return { data: profil, message: 'Profil médical enregistré', success: true };
   }
-
-  // ─── Consultations ────────────────────────────────────────────
 
   async getConsultations(userId: string) {
     const consultations = await this.prisma.consultation.findMany({
       where: { patientId: userId },
       include: {
         structure: { select: { id: true, nom: true, type: true, ville: true } },
+        medecin: { select: { id: true, nom: true, prenom: true } },
         ordonnances: { select: { id: true, dateEmission: true, medecinNom: true } },
       },
       orderBy: { dateConsultation: 'desc' },
     });
 
-    return {
-      data: consultations,
-      message: `${consultations.length} consultation(s) trouvée(s)`,
-      success: true,
+    return { 
+      data: consultations.map(c => ({
+        ...c,
+        medecinNom: c.medecinNom || (c.medecin ? `Dr. ${c.medecin.prenom} ${c.medecin.nom}` : null)
+      })), 
+      message: `${consultations.length} consultation(s)`, 
+      success: true 
     };
   }
 
@@ -223,11 +263,19 @@ export class CarnetSanteService {
       if (!structure) throw new NotFoundException('Structure non trouvée');
     }
 
+    // Récupérer le nom du médecin si c'est un professionnel
+    let medecinNom = dto.medecinNom;
+    if (!medecinNom && actorId !== patientId) {
+      const actor = await this.prisma.user.findUnique({ where: { id: actorId } });
+      if (actor) medecinNom = `Dr. ${actor.prenom} ${actor.nom}`;
+    }
+
     const consultation = await this.prisma.consultation.create({
       data: {
         patientId,
         motif: dto.motif.trim(),
-        medecinNom: dto.medecinNom?.trim(),
+        medecinId: actorId !== patientId ? actorId : null,
+        medecinNom: medecinNom?.trim(),
         diagnostic: dto.diagnostic?.trim(),
         notes: dto.notes?.trim(),
         structureId: dto.structureId || structureId,
@@ -237,6 +285,7 @@ export class CarnetSanteService {
       },
       include: {
         structure: { select: { id: true, nom: true, type: true } },
+        medecin: { select: { id: true, nom: true, prenom: true } },
       },
     });
 
@@ -263,6 +312,12 @@ export class CarnetSanteService {
   async getOrdonnances(userId: string) {
     const ordonnances = await this.prisma.ordonnance.findMany({
       where: { patientId: userId },
+      include: {
+        medecin: { select: { id: true, nom: true, prenom: true } },
+        consultation: {
+          include: { structure: { select: { id: true, nom: true } } }
+        }
+      },
       orderBy: { dateEmission: 'desc' },
     });
 
@@ -270,6 +325,7 @@ export class CarnetSanteService {
       data: ordonnances.map((o) => ({
         ...o,
         medicaments: this.safeJsonParse(o.medicaments),
+        medecinNom: o.medecinNom || (o.medecin ? `Dr. ${o.medecin.prenom} ${o.medecin.nom}` : null)
       })),
       message: `${ordonnances.length} ordonnance(s)`,
       success: true,
@@ -288,11 +344,19 @@ export class CarnetSanteService {
       if (!c) throw new NotFoundException('Consultation non trouvée');
     }
 
+    // Récupérer le nom du médecin si c'est un professionnel
+    let medecinNom = dto.medecinNom;
+    if (!medecinNom && actorId !== patientId) {
+      const actor = await this.prisma.user.findUnique({ where: { id: actorId } });
+      if (actor) medecinNom = `Dr. ${actor.prenom} ${actor.nom}`;
+    }
+
     const ordonnance = await this.prisma.ordonnance.create({
       data: {
         patientId,
+        medecinId: actorId !== patientId ? actorId : null,
         consultationId: dto.consultationId,
-        medecinNom: dto.medecinNom?.trim(),
+        medecinNom: medecinNom?.trim(),
         medicaments: JSON.stringify(dto.medicaments),
         notes: dto.notes?.trim(),
         dateExpiration: dto.dateExpiration
@@ -325,10 +389,18 @@ export class CarnetSanteService {
   async getAnalyses(userId: string) {
     const analyses = await this.prisma.resultatAnalyse.findMany({
       where: { patientId: userId },
+      include: { medecin: { select: { id: true, nom: true, prenom: true } } },
       orderBy: { dateAnalyse: 'desc' },
     });
 
-    return { data: analyses, message: `${analyses.length} résultat(s)`, success: true };
+    return { 
+      data: analyses.map(a => ({
+        ...a,
+        laboratoire: a.laboratoire || (a.medecin ? `Dr. ${a.medecin.prenom} ${a.medecin.nom}` : null)
+      })), 
+      message: `${analyses.length} résultat(s)`, 
+      success: true 
+    };
   }
 
   async createAnalyse(actorId: string, dto: CreateResultatAnalyseDto, structureId?: string) {
@@ -336,11 +408,22 @@ export class CarnetSanteService {
     const patientId = dto.patientId || actorId;
     await this.checkAccess(actorId, patientId, structureId);
 
+    // Déterminer le laboratoire par défaut (nom de la structure de l'acteur)
+    let laboratoire = dto.laboratoire;
+    if (!laboratoire && actorId !== patientId) {
+      const actor = await this.prisma.user.findUnique({ 
+        where: { id: actorId },
+        include: { structure: true }
+      });
+      if (actor?.structure) laboratoire = actor.structure.nom;
+    }
+
     const analyse = await this.prisma.resultatAnalyse.create({
       data: {
         patientId,
+        medecinId: actorId !== patientId ? actorId : null,
         typeAnalyse: dto.typeAnalyse.trim(),
-        laboratoire: dto.laboratoire?.trim(),
+        laboratoire: laboratoire?.trim(),
         resultats: dto.resultats.trim(),
         fichierUrl: dto.fichierUrl,
         dateAnalyse: new Date(dto.dateAnalyse),
@@ -367,10 +450,18 @@ export class CarnetSanteService {
   async getVaccinations(userId: string) {
     const vaccinations = await this.prisma.vaccination.findMany({
       where: { patientId: userId },
+      include: { medecin: { select: { id: true, nom: true, prenom: true } } },
       orderBy: { dateVaccin: 'desc' },
     });
 
-    return { data: vaccinations, message: `${vaccinations.length} vaccination(s)`, success: true };
+    return { 
+      data: vaccinations.map(v => ({
+        ...v,
+        administrePar: v.administrePar || (v.medecin ? `Dr. ${v.medecin.prenom} ${v.medecin.nom}` : null)
+      })), 
+      message: `${vaccinations.length} vaccination(s)`, 
+      success: true 
+    };
   }
 
   async createVaccination(actorId: string, dto: CreateVaccinationDto, structureId?: string) {
@@ -378,14 +469,28 @@ export class CarnetSanteService {
     const patientId = dto.patientId || actorId;
     await this.checkAccess(actorId, patientId, structureId);
 
+    // Déterminer qui administre (Dr. Nom si pro)
+    let administrePar = dto.administrePar;
+    if (!administrePar && actorId !== patientId) {
+      const actor = await this.prisma.user.findUnique({ 
+        where: { id: actorId },
+        include: { structure: true }
+      });
+      if (actor) {
+        administrePar = `Dr. ${actor.prenom} ${actor.nom}`;
+        if (actor.structure) administrePar += ` (${actor.structure.nom})`;
+      }
+    }
+
     const vaccination = await this.prisma.vaccination.create({
       data: {
         patientId,
+        medecinId: actorId !== patientId ? actorId : null,
         vaccin: dto.vaccin.trim(),
         dateVaccin: new Date(dto.dateVaccin),
         prochainRappel: dto.prochainRappel ? new Date(dto.prochainRappel) : null,
         lotNumero: dto.lotNumero?.trim(),
-        administrePar: dto.administrePar?.trim(),
+        administrePar: administrePar?.trim(),
         notes: dto.notes?.trim(),
       },
     });
@@ -536,7 +641,12 @@ export class CarnetSanteService {
     return {
       data: {
         profilMedical,
-        stats: { nbConsultations, nbOrdonnances, nbAnalyses, nbVaccinations },
+        stats: { 
+          consultations: nbConsultations, 
+          ordonnances: nbOrdonnances, 
+          analyses: nbAnalyses, 
+          vaccinations: nbVaccinations 
+        },
         prochainRappelVaccinal: prochainRappel,
       },
       message: 'Résumé du carnet de santé',

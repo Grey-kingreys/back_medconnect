@@ -5,6 +5,10 @@ import {
     Matches,
     IsString,
     IsOptional,
+    IsNumber,
+    Min,
+    Max,
+    IsDateString,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -74,4 +78,23 @@ export class UpdateProfileDto {
     @IsString()
     @Length(8, 20)
     telephone?: string;
+
+    @ApiPropertyOptional({ example: '1990-05-15', description: 'Date de naissance (YYYY-MM-DD)' })
+    @IsOptional()
+    @IsDateString({}, { message: 'La date de naissance doit être une date valide (YYYY-MM-DD)' })
+    dateNaissance?: string;
+
+    @ApiPropertyOptional({ example: 175, description: 'Taille en cm' })
+    @IsOptional()
+    @IsNumber()
+    @Min(50)
+    @Max(250)
+    taille?: number;
+
+    @ApiPropertyOptional({ example: 70.5, description: 'Poids en kg' })
+    @IsOptional()
+    @IsNumber()
+    @Min(1)
+    @Max(500)
+    poids?: number;
 }

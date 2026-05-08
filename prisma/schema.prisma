@@ -33,7 +33,9 @@ model User {
   nom       String
   prenom    String
   telephone String?
-  age       Int?
+  dateNaissance DateTime?
+  taille    Int?     // Taille en cm
+  poids     Float?   // Poids en kg
   role      Role     @default(PATIENT)
   isActive  Boolean  @default(true)
   specialite String?  // Spécialité médicale (pour MEDECIN)
@@ -51,12 +53,18 @@ model User {
   // Structure dont cet user est l'admin
   administeredStructure Structure? @relation("StructureAdmin")
 
-  // Carnet de santé
+  // Carnet de santé (Patient side)
   profilMedical  ProfilMedical?
-  consultations  Consultation[]
-  ordonnances    Ordonnance[]
-  analyses       ResultatAnalyse[]
-  vaccinations   Vaccination[]
+  consultations  Consultation[] @relation("PatientConsultations")
+  ordonnances    Ordonnance[]   @relation("PatientOrdonnances")
+  analyses       ResultatAnalyse[] @relation("PatientAnalyses")
+  vaccinations   Vaccination[]   @relation("PatientVaccinations")
+  
+  // Medical records created by this user (Doctor side)
+  consultationsCreees Consultation[] @relation("DoctorConsultations")
+  ordonnancesCreees   Ordonnance[]   @relation("DoctorOrdonnances")
+  analysesCreees      ResultatAnalyse[] @relation("DoctorAnalyses")
+  vaccinationsCreees  Vaccination[]   @relation("DoctorVaccinations")
   autoDiagnostics AutoDiagnostic[]
 
   // Autorisations données aux structures (Niveau 1)
@@ -163,11 +171,15 @@ model ProfilMedical {
 model Consultation {
   id          String   @id @default(uuid())
   patientId   String
-  patient     User     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patient     User     @relation("PatientConsultations", fields: [patientId], references: [id], onDelete: Cascade)
+  
+  medecinId   String?
+  medecin     User?     @relation("DoctorConsultations", fields: [medecinId], references: [id], onDelete: SetNull)
+  
   structureId String?
   structure   Structure? @relation(fields: [structureId], references: [id], onDelete: SetNull)
 
-  medecinNom   String?   // Nom du médecin (peut être externe)
+  medecinNom   String?   // Nom du médecin (peut être externe ou backup)
   motif        String
   diagnostic   String?
   notes        String?
@@ -183,7 +195,11 @@ model Consultation {
 model Ordonnance {
   id            String   @id @default(uuid())
   patientId     String
-  patient       User     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patient       User     @relation("PatientOrdonnances", fields: [patientId], references: [id], onDelete: Cascade)
+  
+  medecinId     String?
+  medecin       User?     @relation("DoctorOrdonnances", fields: [medecinId], references: [id], onDelete: SetNull)
+  
   consultationId String?
   consultation  Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
 
@@ -200,7 +216,10 @@ model Ordonnance {
 model ResultatAnalyse {
   id          String   @id @default(uuid())
   patientId   String
-  patient     User     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patient     User     @relation("PatientAnalyses", fields: [patientId], references: [id], onDelete: Cascade)
+  
+  medecinId   String?
+  medecin     User?     @relation("DoctorAnalyses", fields: [medecinId], references: [id], onDelete: SetNull)
 
   typeAnalyse String   // "Bilan sanguin", "Radiographie", etc.
   laboratoire String?
@@ -216,7 +235,10 @@ model ResultatAnalyse {
 model Vaccination {
   id          String   @id @default(uuid())
   patientId   String
-  patient     User     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patient     User     @relation("PatientVaccinations", fields: [patientId], references: [id], onDelete: Cascade)
+  
+  medecinId   String?
+  medecin     User?     @relation("DoctorVaccinations", fields: [medecinId], references: [id], onDelete: SetNull)
 
   vaccin       String
   dateVaccin   DateTime
