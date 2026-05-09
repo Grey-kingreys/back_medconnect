@@ -9,6 +9,6 @@ import { JwtModule } from '@nestjs/jwt';
   imports: [JwtModule.register({})],
   controllers: [ChatController],
   providers: [ChatService, ChatGateway, PrismaService],
-  exports: [ChatService],
+  exports: [ChatService, ChatGateway],
 })
 export class ChatModule {}

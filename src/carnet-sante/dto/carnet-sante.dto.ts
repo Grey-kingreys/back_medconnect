@@ -75,11 +75,20 @@ export class UpsertProfilMedicalDto {
     @IsString()
     genre?: string;
 
-    @ApiPropertyOptional({ example: 'Mamadou Diallo — +224622000000' })
+    @ApiPropertyOptional({ example: 'Mamadou Diallo' })
     @IsOptional()
     @IsString()
-    @Length(0, 200)
-    contactUrgence?: string;
+    contactNom?: string;
+
+    @ApiPropertyOptional({ example: '+224622000000' })
+    @IsOptional()
+    @IsString()
+    contactTelephone?: string;
+
+    @ApiPropertyOptional({ example: 'proche@email.com' })
+    @IsOptional()
+    @IsString()
+    contactEmail?: string;
 }
 
 // ─── Consultation ─────────────────────────────────────────────────────────────
@@ -345,4 +354,30 @@ export class AutoDiagnosticResponseDto {
     constructor(partial: Partial<AutoDiagnosticResponseDto>) {
         Object.assign(this, partial);
     }
+}
+
+// ─── Urgences ───────────────────────────────────────────────────────────────
+
+export enum UrgenceStatusEnum {
+    LANCE = 'LANCE',
+    PRIS_EN_CHARGE = 'PRIS_EN_CHARGE',
+    TERMINE = 'TERMINE',
+    ANNULE = 'ANNULE',
+}
+
+export class CreateUrgenceDto {
+    @ApiPropertyOptional({ example: 9.5370 })
+    @IsOptional()
+    @IsNumber()
+    latitude?: number;
+
+    @ApiPropertyOptional({ example: -13.6773 })
+    @IsOptional()
+    @IsNumber()
+    longitude?: number;
+
+    @ApiPropertyOptional({ example: 'Accident domestique, besoin de secours' })
+    @IsOptional()
+    @IsString()
+    message?: string;
 }
