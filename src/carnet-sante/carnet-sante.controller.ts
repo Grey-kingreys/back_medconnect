@@ -18,6 +18,7 @@ import {
   ApiParam,
   ApiResponse,
 } from '@nestjs/swagger';
+import { Role } from 'generated/prisma/client';
 import { CarnetSanteService } from './carnet-sante.service';
 import { AuthGuard } from 'src/common/guards/auth.guard';
 import { RolesGuard } from 'src/common/guards/roles.guard';
@@ -31,6 +32,7 @@ import {
   CreateAutoDiagnosticDto,
   AutoDiagnosticResponseDto,
   CreateRendezVousDto,
+  CreateUrgenceDto,
 } from './dto/carnet-sante.dto';
 import { plainToInstance } from 'class-transformer';
 
@@ -57,7 +59,7 @@ export class CarnetSanteController {
   @Get('patient/:patientId')
   @Roles('MEDECIN', 'STRUCTURE_ADMIN')
   @ApiParam({ name: 'patientId', description: 'ID du patient' })
-  @ApiOperation({ summary: 'Voir le carnet d\'un patient (médecin traitant ou structure)' })
+  @ApiOperation({ summary: "Voir le carnet d'un patient (médecin traitant ou structure)" })
   async getPatientCarnet(@Req() req: any, @Param('patientId') patientId: string) {
     return this.carnetSanteService.getPatientCarnetForDoctor(req.user.userId, patientId, req.user.structureId);
   }
@@ -193,7 +195,7 @@ export class CarnetSanteController {
   }
 
   @Post('rendez-vous/:id/status')
-  @ApiOperation({ summary: 'Mettre à jour le statut d\'un rendez-vous' })
+  @ApiOperation({ summary: "Mettre à jour le statut d'un rendez-vous" })
   updateRendezVousStatus(@Param('id') id: string, @Body('status') status: string) {
     return this.carnetSanteService.updateRendezVousStatus(id, status);
   }
@@ -215,7 +217,7 @@ export class CarnetSanteController {
   @ApiOperation({
     summary: 'Lancer un auto-diagnostic IA',
     description:
-      'Enregistre les symptômes et lance l\'analyse IA. ⚠️ Non substitutable à une consultation médicale.',
+      "Enregistre les symptômes et lance l'analyse IA. ⚠️ Non substitutable à une consultation médicale.",
   })
   async createAutoDiagnostic(@Req() req: any, @Body() dto: CreateAutoDiagnosticDto) {
     const res = await this.carnetSanteService.createAutoDiagnostic(req.user.userId, dto);
@@ -224,4 +226,33 @@ export class CarnetSanteController {
       data: plainToInstance(AutoDiagnosticResponseDto, res.data, { excludeExtraneousValues: true }),
     };
   }
-}
+
+  // ─── Urgences (SOS) ──────────────────────────────────────────
+
+  @Post('sos')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Lancer une alerte SOS' })
+  createUrgence(@Req() req: any, @Body() dto: CreateUrgenceDto) {
+    return this.carnetSanteService.createUrgence(req.user.userId, dto);
+  }
+
+  @Post('sos/:id/take-charge')
+  @Roles(Role.MEDECIN, Role.STRUCTURE_ADMIN, Role.ADMIN)
+  takeCharge(@Param('id') id: string, @Req() req: any) {
+    return this.carnetSanteService.takeCharge(id, req.user.userId);
+  }
+
+  @Get('sos/actives')
+  @Roles('MEDECIN', 'STRUCTURE_ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: 'Voir les urgences actives (Hôpitaux/Admin)' })
+  getActiveUrgences() {
+    return this.carnetSanteService.getActiveUrgences();
+  }
+
+  @Post('sos/:id/status')
+  @Roles('MEDECIN', 'STRUCTURE_ADMIN', 'SUPER_ADMIN')
+  @ApiOperation({ summary: "Mettre à jour le statut d'une urgence" })
+  updateUrgenceStatus(@Param('id') id: string, @Body('status') status: string) {
+    return this.carnetSanteService.updateUrgenceStatus(id, status);
+  }
+}

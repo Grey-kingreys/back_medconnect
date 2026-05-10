@@ -104,4 +104,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     return message;
   }
+
+  // --- SOS / EMERGENCY ALERTS ---
+  
+  async sendEmergencyAlert(userIds: string[], data: any) {
+    userIds.forEach(userId => {
+      if (this.userSockets.has(userId)) {
+        for (const socketId of this.userSockets.get(userId)!) {
+          this.server.to(socketId).emit('emergencyAlert', data);
+        }
+      }
+    });
+  }
 }

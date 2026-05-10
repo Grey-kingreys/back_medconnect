@@ -164,6 +164,65 @@ export class EmailService {
     }
   }
 
+  // ─── Emails Urgence (SOS) ──────────────────────────────────────
+
+  async sendEmergencyAlertEmail(
+    contactEmail: string,
+    contactNom: string,
+    patientNom: string,
+    patientPrenom: string,
+    location?: { lat: number; lng: number },
+    message?: string,
+  ): Promise<void> {
+    const mapsUrl = location 
+      ? `https://www.google.com/maps/search/?api=1&query=${location.lat},${location.lng}` 
+      : null;
+
+    try {
+      await this.resend.emails.send({
+        from: 'SOS MedConnect <sos@resend.dev>', // Ou this.fromEmail
+        to: contactEmail,
+        subject: `🚨 ALERTE URGENCE : ${patientPrenom} ${patientNom} a besoin d'aide !`,
+        html: this.buildLayout(
+          `ALERTE URGENCE CRITIQUE`,
+          `
+          <div style="background:#fee2e2;border:2px solid #ef4444;padding:20px;border-radius:12px;margin-bottom:20px">
+            <h2 style="color:#b91c1c;margin-top:0">⚠️ ALERTE SOS DÉCLENCHÉE</h2>
+            <p style="font-size:16px;color:#7f1d1d">Bonjour <strong>${contactNom}</strong>,</p>
+            <p style="font-size:18px;font-weight:bold;color:#b91c1c">
+              ${patientPrenom} ${patientNom} vient de déclencher une alerte d'urgence vitale via MedConnect.
+            </p>
+          </div>
+
+          <div style="margin:20px 0;padding:15px;background:#f8fafb;border-radius:8px">
+            <p style="margin:0 0 10px"><strong>Message d'urgence :</strong><br>${message || "Aucun message spécifié."}</p>
+            ${mapsUrl ? `
+              <p style="margin:20px 0;text-align:center">
+                <a href="${mapsUrl}" style="${this.btnStyle('#dc2626')}">📍 Voir la position sur Maps</a>
+              </p>
+              <p style="font-size:12px;color:#64748b;text-align:center">
+                Coordonnées : ${location!.lat.toFixed(6)}, ${location!.lng.toFixed(6)}
+              </p>
+            ` : '<p><em>Position non disponible</em></p>'}
+          </div>
+
+          <div style="background:#f1f5f9;padding:15px;border-radius:8px;margin-top:20px">
+            <p style="margin:0;font-size:14px;color:#475569">
+              <strong>Conseils :</strong><br>
+              1. Essayez de contacter ${patientPrenom} immédiatement.<br>
+              2. Appelez les services d'urgence (SAMU: 15) si vous ne parvenez pas à le joindre.<br>
+              3. Dirigez-vous vers sa position si possible.
+            </p>
+          </div>
+        `,
+        ),
+      });
+      console.log(`🚀 Email SOS envoyé avec succès à ${contactEmail}`);
+    } catch (error) {
+      console.error(`❌ Erreur envoi email SOS à ${contactEmail}:`, error);
+    }
+  }
+
   // ─── Helpers ──────────────────────────────────────────────────
 
   private buildLayout(title: string, content: string): string {
