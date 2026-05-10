@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from 'src/common/services/prisma.service';
 import {
@@ -15,6 +16,7 @@ import {
   CreateRendezVousDto,
   CreateUrgenceDto,
   UrgenceStatusEnum,
+  AiEmergencyRequestDto,
 } from './dto/carnet-sante.dto';
 import { AiService } from 'src/common/services/ai.service';
 import { EmailService } from 'src/common/services/email.service';
@@ -28,6 +30,8 @@ export class CarnetSanteService {
     private readonly emailService: EmailService,
     private readonly chatGateway: ChatGateway,
   ) { }
+
+  private readonly logger = new Logger(CarnetSanteService.name);
 
   // ─── Private Helper: Vérifier l'accès au patient ────────────────
   private async checkAccess(actorId: string, patientId: string, structureId?: string) {
@@ -638,6 +642,21 @@ export class CarnetSanteService {
     } catch {
       return value;
     }
+  }
+
+  // ─── AI Emergency (First Aid) ─────────────────────────────────
+
+  async getAiEmergencyInstructions(dto: AiEmergencyRequestDto) {
+    this.logger.log(`Demande d'instructions de secours IA: "${dto.question}"`);
+    const result = await this.aiService.getEmergencyFirstAid(dto.question);
+    
+    return {
+      success: true,
+      data: result,
+      message: result.certain 
+        ? 'Instructions de secours récupérées.' 
+        : 'Instructions imprécises. En cas de doute, contactez les secours.'
+    };
   }
 
   // ─── Urgences (SOS) ──────────────────────────────────────────

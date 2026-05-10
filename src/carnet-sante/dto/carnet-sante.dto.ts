@@ -381,3 +381,13 @@ export class CreateUrgenceDto {
     @IsString()
     message?: string;
 }
+
+// ─── AI Emergency (First Aid) ────────────────────────────────────────────────
+
+export class AiEmergencyRequestDto {
+    @ApiProperty({ example: 'Que faire en cas d\'étouffement ?' })
+    @IsNotEmpty()
+    @IsString()
+    @Length(2, 500)
+    question: string;
+}

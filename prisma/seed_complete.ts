@@ -12,7 +12,19 @@ const prisma = new PrismaClient({ adapter });
 
 async function main() {
     console.log('🚀 Début du seed massif (Guinée)...');
+    
+    // Helper pour nettoyer les emails
+    const cleanForEmail = (str: string) => {
+        return str
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "") // Supprime les accents
+            .toLowerCase()
+            .replace(/[^\w\.]/g, '') // Garde seulement alphanumérique et points
+            .replace(/\s+/g, ''); // Supprime les espaces
+    };
+
     const hashed = await bcrypt.hash('Password123!', 12);
+    const hashedAdmin = await bcrypt.hash('AdminStructure123!', 12);
 
     const villes = [
         { nom: 'Conakry', lat: 9.5370, lng: -13.6773 },
@@ -26,11 +38,11 @@ async function main() {
 
     const types = ['HOPITAL', 'CLINIQUE', 'PHARMACIE'];
     const nomsStructures = [
-        'Hôpital Donka', 'Clinique Ambroise Paré', 'Hôpital Ignace Deen', 'Clinique Pasteur',
-        'Pharmacie Centrale', 'Hôpital Régional de Labé', 'Clinique de la Paix', 'Hôpital de Kankan',
-        'Pharmacie Guinéenne', 'Clinique Mère-Enfant', 'Hôpital de Nzérékoré', 'Centre de Santé Ratoma',
-        'Clinique Saint-Gabriel', 'Hôpital de Kindia', 'Pharmacie de l\'Amitié', 'Clinique des Anges',
-        'Hôpital de Boké', 'Centre Médical Kaloum', 'Pharmacie Moderne', 'Clinique Espérance'
+        'Hopital Donka', 'Clinique Ambroise Pare', 'Hopital Ignace Deen', 'Clinique Pasteur',
+        'Pharmacie Centrale', 'Hopital Regional de Labe', 'Clinique de la Paix', 'Hopital de Kankan',
+        'Pharmacie Guineenne', 'Clinique Mere-Enfant', 'Hopital de Nzerekore', 'Centre de Sante Ratoma',
+        'Clinique Saint-Gabriel', 'Hopital de Kindia', 'Pharmacie de l Amitie', 'Clinique des Anges',
+        'Hopital de Boke', 'Centre Medical Kaloum', 'Pharmacie Moderne', 'Clinique Esperance'
     ];
 
     // 1. Création des 20 structures
@@ -38,15 +50,18 @@ async function main() {
     const structures: any[] = [];
     for (let i = 0; i < 20; i++) {
         const ville = villes[i % villes.length];
-        // On ajoute un petit offset aléatoire pour ne pas qu'elles soient toutes au même point
         const latOffset = (Math.random() - 0.5) * 0.05;
         const lngOffset = (Math.random() - 0.5) * 0.05;
 
-        const structure = await prisma.structure.create({
-            data: {
+        const structureEmail = `contact@${cleanForEmail(nomsStructures[i])}.gn`;
+
+        const structure = await prisma.structure.upsert({
+            where: { email: structureEmail },
+            update: {}, // On ne change rien si elle existe déjà
+            create: {
                 nom: nomsStructures[i],
                 type: types[i % types.length] as any,
-                email: `contact@${nomsStructures[i].toLowerCase().replace(/ /g, '-')}.gn`,
+                email: structureEmail,
                 telephone: `+224622${Math.floor(Math.random() * 1000000).toString().padStart(6, '0')}`,
                 ville: ville.nom,
                 latitude: ville.lat + latOffset,
@@ -62,12 +77,18 @@ async function main() {
     console.log('👨‍⚕️ Création des membres (~300 professionnels)...');
     for (const s of structures) {
         const nbMembres = Math.floor(Math.random() * 11) + 10; // 10 à 20
+        const domain = s.email.split('@')[1];
+        
         for (let j = 0; j < nbMembres; j++) {
             const role = j === 0 ? 'STRUCTURE_ADMIN' : (s.type === 'PHARMACIE' ? 'PHARMACIEN' : 'MEDECIN');
-            await prisma.user.create({
-                data: {
-                    email: `member${j}@${s.email.split('@')[1]}`,
-                    password: hashed,
+            const userEmail = j === 0 ? `admin@${domain}` : `member${j}@${domain}`;
+            
+            await prisma.user.upsert({
+                where: { email: userEmail },
+                update: {},
+                create: {
+                    email: userEmail,
+                    password: role === 'STRUCTURE_ADMIN' ? hashedAdmin : hashed,
                     nom: `Nom${j}`,
                     prenom: `Prenom${j}`,
                     role: role as any,
@@ -81,11 +102,13 @@ async function main() {
     // 3. Création des 30 patients avec profils médicaux
     console.log('👤 Création des 30 patients...');
     const groupes = ['A_POSITIF', 'B_POSITIF', 'O_POSITIF', 'AB_POSITIF', 'O_NEGATIF'];
-    const pathologiesList = ['Diabète', 'Hypertension', 'Asthme', 'Anémie', 'Allergie Pollen'];
+    const pathologiesList = ['Diabete', 'Hypertension', 'Asthme', 'Anemie', 'Allergie Pollen'];
     
     for (let k = 0; k < 30; k++) {
-        const user = await prisma.user.create({
-            data: {
+        const user = await prisma.user.upsert({
+            where: { email: `patient${k}@gmail.com` },
+            update: {},
+            create: {
                 email: `patient${k}@gmail.com`,
                 password: hashed,
                 nom: `PatientNom${k}`,
@@ -95,11 +118,13 @@ async function main() {
             }
         });
 
-        await prisma.profilMedical.create({
-            data: {
+        await prisma.profilMedical.upsert({
+            where: { userId: user.id },
+            update: {},
+            create: {
                 userId: user.id,
                 groupeSanguin: groupes[k % groupes.length] as any,
-                allergies: k % 3 === 0 ? ['Pénicilline'] : [],
+                allergies: k % 3 === 0 ? ['Penicilline'] : [],
                 pathologies: k % 4 === 0 ? [pathologiesList[k % pathologiesList.length]] : [],
                 contactNom: 'Proche Secours',
                 contactTelephone: '+224620000000',

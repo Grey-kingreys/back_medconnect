@@ -33,6 +33,7 @@ import {
   AutoDiagnosticResponseDto,
   CreateRendezVousDto,
   CreateUrgenceDto,
+  AiEmergencyRequestDto,
 } from './dto/carnet-sante.dto';
 import { plainToInstance } from 'class-transformer';
 
@@ -254,5 +255,11 @@ export class CarnetSanteController {
   @ApiOperation({ summary: "Mettre à jour le statut d'une urgence" })
   updateUrgenceStatus(@Param('id') id: string, @Body('status') status: string) {
     return this.carnetSanteService.updateUrgenceStatus(id, status);
+  }
+
+  @Post('sos/ai-instructions')
+  @ApiOperation({ summary: 'Obtenir des instructions de premiers secours via IA' })
+  getAiEmergencyInstructions(@Body() dto: AiEmergencyRequestDto) {
+    return this.carnetSanteService.getAiEmergencyInstructions(dto);
   }
 }
