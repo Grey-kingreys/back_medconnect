@@ -13,13 +13,18 @@ import {
   UpdateStockQuantiteDto,
 } from './dto/pharmacie.dto';
 
+import { NotificationsService } from 'src/notifications/notifications.service';
+
 @Injectable()
 export class PharmacieService {
-  constructor(private readonly prisma: PrismaService) { }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService
+  ) { }
 
   // ─── Catalogue Global (ADMIN/SUPER_ADMIN) ─────────────────────
 
-  async createMedicament(dto: CreateMedicamentDto) {
+  async createMedicament(dto: CreateMedicamentDto, actorId?: string) {
     // Vérifier doublon par nom
     const existing = await this.prisma.medicament.findFirst({
       where: { nom: { equals: dto.nom.trim(), mode: 'insensitive' } },
@@ -27,6 +32,11 @@ export class PharmacieService {
     if (existing) {
       throw new ConflictException(`Un médicament nommé "${dto.nom}" existe déjà dans le catalogue`);
     }
+
+    // Vérifier si c'est une nouvelle catégorie
+    const existingCategory = await this.prisma.medicament.findFirst({
+      where: { categorie: { equals: dto.categorie.trim(), mode: 'insensitive' } },
+    });
 
     const med = await this.prisma.medicament.create({
       data: {
@@ -38,6 +48,29 @@ export class PharmacieService {
         formes: dto.formes || [],
       },
     });
+
+    if (!existingCategory) {
+      let actorName = 'Un administrateur';
+      if (actorId) {
+        const actor = await this.prisma.user.findUnique({
+          where: { id: actorId },
+          include: { structure: true }
+        });
+        if (actor) {
+          actorName = `${actor.prenom} ${actor.nom}${actor.structure ? ` (${actor.structure.nom})` : ''}`;
+        }
+      }
+
+      const superAdmins = await this.prisma.user.findMany({ where: { role: 'SUPER_ADMIN' }, select: { id: true } });
+      await this.notificationsService.createManyNotifications(
+        superAdmins.map(u => u.id),
+        {
+          type: 'CATALOGUE_MODIF',
+          titre: 'Nouvelle catégorie ajoutée',
+          message: `${actorName} a ajouté la catégorie "${dto.categorie.trim()}" au catalogue via le médicament "${med.nom}".`,
+        }
+      );
+    }
 
     return { data: med, message: 'Médicament ajouté au catalogue', success: true };
   }
@@ -100,10 +133,11 @@ export class PharmacieService {
     return { data: med, message: 'Médicament trouvé', success: true };
   }
 
-  async updateMedicament(medicamentId: string, dto: UpdateMedicamentDto) {
+  async updateMedicament(medicamentId: string, dto: UpdateMedicamentDto, actorId?: string) {
     const med = await this.prisma.medicament.findUnique({ where: { id: medicamentId } });
     if (!med) throw new NotFoundException('Médicament non trouvé');
 
+    const oldCategory = med.categorie;
     const updated = await this.prisma.medicament.update({
       where: { id: medicamentId },
       data: {
@@ -116,14 +150,67 @@ export class PharmacieService {
       },
     });
 
+    if (dto.categorie && dto.categorie.trim().toLowerCase() !== oldCategory.toLowerCase()) {
+      let actorName = 'Un administrateur';
+      if (actorId) {
+        const actor = await this.prisma.user.findUnique({
+          where: { id: actorId },
+          include: { structure: true }
+        });
+        if (actor) {
+          actorName = `${actor.prenom} ${actor.nom}${actor.structure ? ` (${actor.structure.nom})` : ''}`;
+        }
+      }
+
+      const superAdmins = await this.prisma.user.findMany({ where: { role: 'SUPER_ADMIN' }, select: { id: true } });
+      await this.notificationsService.createManyNotifications(
+        superAdmins.map(u => u.id),
+        {
+          type: 'CATALOGUE_MODIF',
+          titre: 'Catégorie modifiée',
+          message: `${actorName} a changé la catégorie de "${updated.nom}" (de "${oldCategory}" à "${updated.categorie}").`,
+        }
+      );
+    }
+
     return { data: updated, message: 'Médicament mis à jour', success: true };
   }
 
-  async deleteMedicament(medicamentId: string) {
+  async deleteMedicament(medicamentId: string, actorId?: string) {
     const med = await this.prisma.medicament.findUnique({ where: { id: medicamentId } });
     if (!med) throw new NotFoundException('Médicament non trouvé');
 
+    const categoryToDelete = med.categorie;
     await this.prisma.medicament.delete({ where: { id: medicamentId } });
+
+    // Vérifier si c'était le dernier de sa catégorie
+    const remainingInCategory = await this.prisma.medicament.count({
+      where: { categorie: categoryToDelete }
+    });
+
+    if (remainingInCategory === 0) {
+      let actorName = 'Un administrateur';
+      if (actorId) {
+        const actor = await this.prisma.user.findUnique({
+          where: { id: actorId },
+          include: { structure: true }
+        });
+        if (actor) {
+          actorName = `${actor.prenom} ${actor.nom}${actor.structure ? ` (${actor.structure.nom})` : ''}`;
+        }
+      }
+
+      const superAdmins = await this.prisma.user.findMany({ where: { role: 'SUPER_ADMIN' }, select: { id: true } });
+      await this.notificationsService.createManyNotifications(
+        superAdmins.map(u => u.id),
+        {
+          type: 'CATALOGUE_MODIF',
+          titre: 'Catégorie supprimée',
+          message: `${actorName} a supprimé le dernier médicament de la catégorie "${categoryToDelete}", celle-ci disparaît donc du catalogue.`,
+        }
+      );
+    }
+
     return { data: null, message: 'Médicament supprimé du catalogue', success: true };
   }
 
@@ -180,6 +267,22 @@ export class PharmacieService {
       },
     });
 
+    // Alerte stock bas
+    if (dto.quantite < 10) {
+      const staff = await this.prisma.user.findMany({
+        where: { structureId, role: { in: ['PHARMACIEN', 'STRUCTURE_ADMIN'] } },
+        select: { id: true }
+      });
+      await this.notificationsService.createManyNotifications(
+        staff.map(u => u.id),
+        {
+          type: 'STOCK_ALERTE',
+          titre: 'Stock critique',
+          message: `Le stock de "${stock.medicament.nom}" est ${dto.quantite === 0 ? 'épuisé' : `bas (${dto.quantite} unités)`}.`,
+        }
+      );
+    }
+
     return {
       data: stock,
       message: 'Stock mis à jour',
@@ -213,6 +316,22 @@ export class PharmacieService {
         medicament: { select: { id: true, nom: true, categorie: true } },
       },
     });
+
+    // Alerte stock bas
+    if (newQuantite < 10 && stock.quantite >= 10) {
+      const staff = await this.prisma.user.findMany({
+        where: { structureId, role: { in: ['PHARMACIEN', 'STRUCTURE_ADMIN'] } },
+        select: { id: true }
+      });
+      await this.notificationsService.createManyNotifications(
+        staff.map(u => u.id),
+        {
+          type: 'STOCK_ALERTE',
+          titre: 'Stock critique',
+          message: `Le stock de "${updated.medicament.nom}" est descendu à ${newQuantite} unités.`,
+        }
+      );
+    }
 
     return {
       data: updated,

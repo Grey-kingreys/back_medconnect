@@ -10,6 +10,7 @@ import { CarnetSanteModule } from './carnet-sante/carnet-sante.module';
 import { PharmacieModule } from './pharmacie/pharmacie.module';
 import { GeoModule } from './geo/geo.module';
 import { ChatModule } from './common/services/chat.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { ChatModule } from './common/services/chat.module';
     PharmacieModule,
     GeoModule,
     ChatModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

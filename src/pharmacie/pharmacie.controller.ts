@@ -99,8 +99,8 @@ export class PharmacieController {
   @HttpCode(HttpStatus.CREATED)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Ajouter un médicament au catalogue (Admin)' })
-  createMedicament(@Body() dto: CreateMedicamentDto) {
-    return this.pharmacieService.createMedicament(dto);
+  createMedicament(@Body() dto: CreateMedicamentDto, @Req() req: any) {
+    return this.pharmacieService.createMedicament(dto, req.user.userId);
   }
 
   @UseGuards(AuthGuard, RolesGuard)
@@ -112,8 +112,9 @@ export class PharmacieController {
   updateMedicament(
     @Param('medicamentId') medicamentId: string,
     @Body() dto: UpdateMedicamentDto,
+    @Req() req: any
   ) {
-    return this.pharmacieService.updateMedicament(medicamentId, dto);
+    return this.pharmacieService.updateMedicament(medicamentId, dto, req.user.userId);
   }
 
   @UseGuards(AuthGuard, RolesGuard)
@@ -122,8 +123,8 @@ export class PharmacieController {
   @ApiBearerAuth()
   @ApiParam({ name: 'medicamentId' })
   @ApiOperation({ summary: 'Supprimer un médicament du catalogue (Admin)' })
-  deleteMedicament(@Param('medicamentId') medicamentId: string) {
-    return this.pharmacieService.deleteMedicament(medicamentId);
+  deleteMedicament(@Param('medicamentId') medicamentId: string, @Req() req: any) {
+    return this.pharmacieService.deleteMedicament(medicamentId, req.user.userId);
   }
 
   // ─── Gestion Stock (STRUCTURE_ADMIN de pharmacie) ─────────────

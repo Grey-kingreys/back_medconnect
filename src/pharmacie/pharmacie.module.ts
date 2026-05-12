@@ -4,8 +4,10 @@ import { PharmacieController } from './pharmacie.controller';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { AuthModule } from 'src/auth/auth.module';
 
+import { NotificationsModule } from 'src/notifications/notifications.module';
+
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, NotificationsModule],
   controllers: [PharmacieController],
   providers: [PharmacieService, PrismaService],
 })

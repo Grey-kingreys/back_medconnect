@@ -10,6 +10,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { ChatService } from './chat.service';
 import { JwtService } from '@nestjs/jwt';
+import { NotificationsService } from 'src/notifications/notifications.service';
 
 @WebSocketGateway({
   cors: {
@@ -24,7 +25,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   constructor(
     private readonly chatService: ChatService,
-    private readonly jwtService: JwtService
+    private readonly jwtService: JwtService,
+    private readonly notificationsService: NotificationsService
   ) {}
 
   async handleConnection(client: Socket) {
@@ -90,7 +92,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     this.server.to(`conv_${payload.conversationId}`).emit('newMessage', message);
     
-    // Notification (Si on veut alerter le receiver s'il n'est pas dans la room)
+    // Notification persistante (DB)
+    if (payload.receiverId) {
+      await this.notificationsService.createNotification({
+        userId: payload.receiverId,
+        type: 'MESSAGE',
+        titre: `Nouveau message de ${message.sender.prenom} ${message.sender.nom}`,
+        message: payload.isLocation ? '📍 Position partagée' : payload.content,
+        lien: `/dashboard/chat?conv=${payload.conversationId}`
+      });
+    }
+
+    // Notification temps réel (Socket)
     if (payload.receiverId && this.userSockets.has(payload.receiverId)) {
       for (const socketId of this.userSockets.get(payload.receiverId)!) {
         this.server.to(socketId).emit('notification', {

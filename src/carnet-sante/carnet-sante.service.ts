@@ -22,6 +22,8 @@ import { AiService } from 'src/common/services/ai.service';
 import { EmailService } from 'src/common/services/email.service';
 import { ChatGateway } from 'src/common/services/chat.gateway';
 
+import { NotificationsService } from 'src/notifications/notifications.service';
+
 @Injectable()
 export class CarnetSanteService {
   constructor(
@@ -29,6 +31,7 @@ export class CarnetSanteService {
     private readonly aiService: AiService,
     private readonly emailService: EmailService,
     private readonly chatGateway: ChatGateway,
+    private readonly notificationsService: NotificationsService
   ) { }
 
   private readonly logger = new Logger(CarnetSanteService.name);
@@ -287,6 +290,17 @@ export class CarnetSanteService {
       },
     });
 
+    // Notification Patient
+    if (actorId !== patientId) {
+      await this.notificationsService.createNotification({
+        userId: patientId,
+        type: 'SYSTEME',
+        titre: 'Nouvelle consultation',
+        message: `Une nouvelle consultation a été enregistrée par ${consultation.medecinNom || 'un médecin'}.`,
+        lien: `/dashboard/carnet-sante/consultations/${consultation.id}`
+      });
+    }
+
     return {
       data: consultation,
       message: 'Consultation ajoutée au carnet de santé',
@@ -363,6 +377,17 @@ export class CarnetSanteService {
       },
     });
 
+    // Notification Patient
+    if (actorId !== patientId) {
+      await this.notificationsService.createNotification({
+        userId: patientId,
+        type: 'NOUVELLE_ORDONNANCE',
+        titre: 'Nouvelle ordonnance',
+        message: `${medecinNom || 'Un médecin'} vous a prescrit une nouvelle ordonnance.`,
+        lien: `/dashboard/carnet-sante/ordonnances`
+      });
+    }
+
     return {
       data: { ...ordonnance, medicaments: dto.medicaments },
       message: 'Ordonnance enregistrée',
@@ -429,6 +454,17 @@ export class CarnetSanteService {
       },
     });
 
+    // Notification Patient
+    if (actorId !== patientId) {
+      await this.notificationsService.createNotification({
+        userId: patientId,
+        type: 'NOUVELLE_ORDONNANCE', // On pourrait utiliser SYSTEME si pas de type ANALYSE
+        titre: 'Résultats d\'analyses',
+        message: `Vos résultats pour "${analyse.typeAnalyse}" sont disponibles.`,
+        lien: `/dashboard/carnet-sante/analyses`
+      });
+    }
+
     return { data: analyse, message: 'Résultat ajouté', success: true };
   }
 
@@ -491,6 +527,17 @@ export class CarnetSanteService {
         notes: dto.notes?.trim(),
       },
     });
+
+    // Notification Patient
+    if (actorId !== patientId) {
+      await this.notificationsService.createNotification({
+        userId: patientId,
+        type: 'SYSTEME',
+        titre: 'Vaccination enregistrée',
+        message: `Votre vaccination contre "${vaccination.vaccin}" a été ajoutée à votre carnet.`,
+        lien: `/dashboard/carnet-sante/vaccinations`
+      });
+    }
 
     return { data: vaccination, message: 'Vaccination enregistrée', success: true };
   }
@@ -757,9 +804,28 @@ export class CarnetSanteService {
         const memberIds = members.map(m => m.id);
         if (memberIds.length > 0) {
           this.chatGateway.sendEmergencyAlert(memberIds, alertData);
+          
+          // Ajouter une notification persistante
+          await this.notificationsService.createManyNotifications(
+            memberIds,
+            {
+              type: 'SOS_ALERTE',
+              titre: 'Alerte SOS à proximité',
+              message: `URGENCE : Un patient (${alertData.patientName}) a besoin d'aide à proximité.`,
+              lien: '/dashboard/urgences'
+            }
+          );
         }
       }
     }
+
+    // Notification Patient
+    await this.notificationsService.createNotification({
+      userId: userId,
+      type: 'SOS_DECLENCHE',
+      titre: 'SOS Lancé',
+      message: 'Votre alerte SOS a été transmise aux structures médicales proches. Restez calme.',
+    });
 
     return { success: true, data: urgence, message: "Alerte SOS envoyée avec succès" };
   }
@@ -785,6 +851,14 @@ export class CarnetSanteService {
       where: { id: urgenceId },
       data: { status: UrgenceStatusEnum.PRIS_EN_CHARGE },
       include: { patient: true }
+    });
+
+    // Notification Patient
+    await this.notificationsService.createNotification({
+      userId: updatedUrgence.patientId,
+      type: 'SOS_PRIS_EN_CHARGE',
+      titre: 'SOS Pris en charge',
+      message: `${user.structure?.nom || 'Une structure'} a pris en charge votre alerte SOS.`,
     });
 
     // Broadcast à TOUS les médecins/structures pour informer que c'est pris

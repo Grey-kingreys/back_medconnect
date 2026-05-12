@@ -9,8 +9,10 @@ import { EmailService } from 'src/common/services/email.service';
 import { ConfigModule } from '@nestjs/config';
 import { ChatModule } from 'src/common/services/chat.module';
 
+import { NotificationsModule } from 'src/notifications/notifications.module';
+
 @Module({
-  imports: [AuthModule, HttpModule, ConfigModule, ChatModule],
+  imports: [AuthModule, HttpModule, ConfigModule, ChatModule, NotificationsModule],
   controllers: [CarnetSanteController],
   providers: [CarnetSanteService, PrismaService, AiService, EmailService],
   exports: [CarnetSanteService],
