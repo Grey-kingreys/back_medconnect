@@ -87,13 +87,14 @@ export class AuthService {
     res.cookie('refresh_token', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 jours
     });
 
     return {
       data: {
         access_token: access_token,
+        refresh_token: refreshToken, // Ajouté pour le stockage local en cas de cookies bloqués
         user: {
           id: user.id,
           email: user.email,
@@ -161,7 +162,7 @@ export class AuthService {
     res.cookie('refresh_token', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 jours
     });
 
@@ -173,6 +174,7 @@ export class AuthService {
     return {
       data: {
         access_token: access_token,
+        refresh_token: refreshToken, // Ajouté
         user: {
           id: user.id,
           email: user.email,
@@ -462,12 +464,15 @@ export class AuthService {
     res.cookie('refresh_token', newRefresh, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
       maxAge: 30 * 24 * 60 * 60 * 1000,
     });
 
     return {
-      data: { access_token },
+      data: { 
+        access_token,
+        refresh_token: newRefresh // Ajouté
+      },
       message: 'Token renouvelé',
       success: true,
     };
