@@ -35,23 +35,20 @@ export class UpsertProfilMedicalDto {
     @IsEnum(GroupeSanguinEnum)
     groupeSanguin?: GroupeSanguinEnum;
 
-    @ApiPropertyOptional({ example: ['Pénicilline', 'Arachides'] })
+    @ApiPropertyOptional({ example: '["Pénicilline", "Arachides"]' })
     @IsOptional()
-    @IsArray()
-    @IsString({ each: true })
-    allergies?: string[];
+    @IsString()
+    allergies?: string;
 
-    @ApiPropertyOptional({ example: ['Diabète type 2', 'Hypertension'] })
+    @ApiPropertyOptional({ example: '["Diabète type 2", "Hypertension"]' })
     @IsOptional()
-    @IsArray()
-    @IsString({ each: true })
-    pathologies?: string[];
+    @IsString()
+    pathologies?: string;
 
-    @ApiPropertyOptional({ example: ['Metformine 500mg', 'Amlodipine 5mg'] })
+    @ApiPropertyOptional({ example: '["Metformine 500mg", "Amlodipine 5mg"]' })
     @IsOptional()
-    @IsArray()
-    @IsString({ each: true })
-    traitements?: string[];
+    @IsString()
+    traitements?: string;
 
     @ApiPropertyOptional({ example: 175 })
     @IsOptional()

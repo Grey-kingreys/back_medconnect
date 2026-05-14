@@ -20,9 +20,11 @@ import {
 } from './dto/carnet-sante.dto';
 import { AiService } from 'src/common/services/ai.service';
 import { EmailService } from 'src/common/services/email.service';
-import { ChatGateway } from 'src/common/services/chat.gateway';
+import { ChatGateway } from 'src/chat/chat.gateway';
 
 import { NotificationsService } from 'src/notifications/notifications.service';
+import { EncryptionService } from 'src/common/services/encryption.service';
+import { SmsService } from 'src/common/services/sms.service';
 
 @Injectable()
 export class CarnetSanteService {
@@ -31,7 +33,9 @@ export class CarnetSanteService {
     private readonly aiService: AiService,
     private readonly emailService: EmailService,
     private readonly chatGateway: ChatGateway,
-    private readonly notificationsService: NotificationsService
+    private readonly notificationsService: NotificationsService,
+    private readonly encryptionService: EncryptionService,
+    private readonly smsService: SmsService
   ) { }
 
   private readonly logger = new Logger(CarnetSanteService.name);
@@ -165,23 +169,22 @@ export class CarnetSanteService {
           dateNaissance: patient.dateNaissance, taille: patient.taille, poids: patient.poids
         },
         isMedecinTraitant,
-        profilMedical: profil,
+        profilMedical: profil ? this.decryptProfil(profil) : null,
         stats,
         consultations: consultations.map(c => ({
-          ...c,
+          ...this.decryptConsultation(c),
           medecinNom: c.medecinNom || (c.medecin ? `Dr. ${c.medecin.prenom} ${c.medecin.nom}` : null)
         })),
         ordonnances: ordonnances.map(o => ({
-          ...o,
-          medicaments: this.safeJsonParse(o.medicaments),
+          ...this.decryptOrdonnance(o),
           medecinNom: o.medecinNom || (o.medecin ? `Dr. ${o.medecin.prenom} ${o.medecin.nom}` : null)
         })),
         vaccinations: vaccinations.map(v => ({
-          ...v,
+          ...this.decryptVaccination(v),
           administrePar: v.administrePar || (v.medecin ? `Dr. ${v.medecin.prenom} ${v.medecin.nom}` : null)
         })),
         analyses: analyses.map(a => ({
-          ...a,
+          ...this.decryptAnalyse(a),
           laboratoire: a.laboratoire || (a.medecin ? `Dr. ${a.medecin.prenom} ${a.medecin.nom}` : null)
         })),
       },
@@ -192,15 +195,19 @@ export class CarnetSanteService {
 
   async getProfilMedical(userId: string) {
     const profil = await this.prisma.profilMedical.findUnique({ where: { userId } });
-    return { data: profil || null, message: profil ? 'Profil médical trouvé' : 'Aucun profil médical créé', success: true };
+    return { 
+      data: profil ? this.decryptProfil(profil) : null, 
+      message: profil ? 'Profil médical trouvé' : 'Aucun profil médical créé', 
+      success: true 
+    };
   }
 
   async upsertProfilMedical(userId: string, dto: UpsertProfilMedicalDto) {
     const data: any = {};
     if (dto.groupeSanguin !== undefined) data.groupeSanguin = dto.groupeSanguin;
-    if (dto.allergies !== undefined) data.allergies = dto.allergies;
-    if (dto.pathologies !== undefined) data.pathologies = dto.pathologies;
-    if (dto.traitements !== undefined) data.traitements = dto.traitements;
+    if (dto.allergies !== undefined) data.allergies = this.encryptionService.encrypt(dto.allergies);
+    if (dto.pathologies !== undefined) data.pathologies = this.encryptionService.encrypt(dto.pathologies);
+    if (dto.traitements !== undefined) data.traitements = this.encryptionService.encrypt(dto.traitements);
     if (dto.taille !== undefined) data.taille = dto.taille;
     if (dto.poids !== undefined) data.poids = dto.poids;
     if (dto.dateNaissance !== undefined) data.dateNaissance = new Date(dto.dateNaissance);
@@ -214,15 +221,24 @@ export class CarnetSanteService {
       create: { userId, ...data },
       update: data,
     });
-    return { data: profil, message: 'Profil médical enregistré', success: true };
+    return { data: this.decryptProfil(profil), message: 'Profil médical enregistré', success: true };
   }
 
-  async getConsultations(userId: string) {
+  async getConsultations(userId: string, role?: string) {
+    const isDoctor = role === 'MEDECIN' || role === 'STRUCTURE_ADMIN';
+
+    const where = isDoctor
+      ? { medecinId: userId }   // Le médecin voit celles qu'il a rédigées
+      : { patientId: userId };  // Le patient voit les siennes
+
     const consultations = await this.prisma.consultation.findMany({
-      where: { patientId: userId },
+      where,
       include: {
         structure: { select: { id: true, nom: true, type: true, ville: true } },
         medecin: { select: { id: true, nom: true, prenom: true } },
+        patient: isDoctor
+          ? { select: { id: true, nom: true, prenom: true } }
+          : false,
         ordonnances: { select: { id: true, dateEmission: true, medecinNom: true } },
       },
       orderBy: { dateConsultation: 'desc' },
@@ -230,8 +246,12 @@ export class CarnetSanteService {
 
     return { 
       data: consultations.map(c => ({
-        ...c,
-        medecinNom: c.medecinNom || (c.medecin ? `Dr. ${c.medecin.prenom} ${c.medecin.nom}` : null)
+        ...this.decryptConsultation(c),
+        medecinNom: c.medecinNom || (c.medecin ? `Dr. ${c.medecin.prenom} ${c.medecin.nom}` : null),
+        ...(isDoctor && (c as any).patient ? {
+          patientNom: `${(c as any).patient.prenom} ${(c as any).patient.nom}`,
+          patientId: (c as any).patient.id,
+        } : {}),
       })), 
       message: `${consultations.length} consultation(s)`, 
       success: true 
@@ -249,7 +269,11 @@ export class CarnetSanteService {
 
     if (!consultation) throw new NotFoundException('Consultation non trouvée');
 
-    return { data: consultation, message: 'Consultation trouvée', success: true };
+    return { 
+      data: this.decryptConsultation(consultation), 
+      message: 'Consultation trouvée', 
+      success: true 
+    };
   }
 
   async createConsultation(actorId: string, dto: CreateConsultationDto, structureId?: string) {
@@ -274,11 +298,11 @@ export class CarnetSanteService {
     const consultation = await this.prisma.consultation.create({
       data: {
         patientId,
-        motif: dto.motif.trim(),
+        motif: this.encryptionService.encrypt(dto.motif.trim()),
         medecinId: actorId !== patientId ? actorId : null,
         medecinNom: medecinNom?.trim(),
-        diagnostic: dto.diagnostic?.trim(),
-        notes: dto.notes?.trim(),
+        diagnostic: this.encryptionService.encrypt(dto.diagnostic?.trim() || ''),
+        notes: this.encryptionService.encrypt(dto.notes?.trim() || ''),
         structureId: dto.structureId || structureId,
         dateConsultation: dto.dateConsultation
           ? new Date(dto.dateConsultation)
@@ -335,8 +359,7 @@ export class CarnetSanteService {
 
     return {
       data: ordonnances.map((o) => ({
-        ...o,
-        medicaments: this.safeJsonParse(o.medicaments),
+        ...this.decryptOrdonnance(o),
         medecinNom: o.medecinNom || (o.medecin ? `Dr. ${o.medecin.prenom} ${o.medecin.nom}` : null)
       })),
       message: `${ordonnances.length} ordonnance(s)`,
@@ -369,8 +392,8 @@ export class CarnetSanteService {
         medecinId: actorId !== patientId ? actorId : null,
         consultationId: dto.consultationId,
         medecinNom: medecinNom?.trim(),
-        medicaments: JSON.stringify(dto.medicaments),
-        notes: dto.notes?.trim(),
+        medicaments: this.encryptionService.encrypt(JSON.stringify(dto.medicaments)),
+        notes: this.encryptionService.encrypt(dto.notes?.trim() || ''),
         dateExpiration: dto.dateExpiration
           ? new Date(dto.dateExpiration)
           : null,
@@ -418,7 +441,7 @@ export class CarnetSanteService {
 
     return { 
       data: analyses.map(a => ({
-        ...a,
+        ...this.decryptAnalyse(a),
         laboratoire: a.laboratoire || (a.medecin ? `Dr. ${a.medecin.prenom} ${a.medecin.nom}` : null)
       })), 
       message: `${analyses.length} résultat(s)`, 
@@ -445,12 +468,12 @@ export class CarnetSanteService {
       data: {
         patientId,
         medecinId: actorId !== patientId ? actorId : null,
-        typeAnalyse: dto.typeAnalyse.trim(),
-        laboratoire: laboratoire?.trim(),
-        resultats: dto.resultats.trim(),
+        typeAnalyse: this.encryptionService.encrypt(dto.typeAnalyse.trim()),
+        laboratoire: this.encryptionService.encrypt(laboratoire?.trim() || ''),
+        resultats: this.encryptionService.encrypt(dto.resultats.trim()),
         fichierUrl: dto.fichierUrl,
         dateAnalyse: new Date(dto.dateAnalyse),
-        notes: dto.notes?.trim(),
+        notes: this.encryptionService.encrypt(dto.notes?.trim() || ''),
       },
     });
 
@@ -490,7 +513,7 @@ export class CarnetSanteService {
 
     return { 
       data: vaccinations.map(v => ({
-        ...v,
+        ...this.decryptVaccination(v),
         administrePar: v.administrePar || (v.medecin ? `Dr. ${v.medecin.prenom} ${v.medecin.nom}` : null)
       })), 
       message: `${vaccinations.length} vaccination(s)`, 
@@ -519,12 +542,12 @@ export class CarnetSanteService {
       data: {
         patientId,
         medecinId: actorId !== patientId ? actorId : null,
-        vaccin: dto.vaccin.trim(),
+        vaccin: this.encryptionService.encrypt(dto.vaccin.trim()),
         dateVaccin: new Date(dto.dateVaccin),
         prochainRappel: dto.prochainRappel ? new Date(dto.prochainRappel) : null,
         lotNumero: dto.lotNumero?.trim(),
         administrePar: administrePar?.trim(),
-        notes: dto.notes?.trim(),
+        notes: this.encryptionService.encrypt(dto.notes?.trim() || ''),
       },
     });
 
@@ -597,6 +620,55 @@ export class CarnetSanteService {
     return { data: rv, message: 'Statut du rendez-vous mis à jour', success: true };
   }
 
+
+
+  // ─── Helpers de Décryptage ───────────────────────────────────
+
+  private decryptProfil(profil: any) {
+    return {
+      ...profil,
+      allergies: this.encryptionService.decrypt(profil.allergies || ''),
+      pathologies: this.encryptionService.decrypt(profil.pathologies || ''),
+      traitements: this.encryptionService.decrypt(profil.traitements || ''),
+    };
+  }
+
+  private decryptConsultation(c: any) {
+    return {
+      ...c,
+      motif: this.encryptionService.decrypt(c.motif),
+      diagnostic: this.encryptionService.decrypt(c.diagnostic),
+      notes: this.encryptionService.decrypt(c.notes),
+    };
+  }
+
+  private decryptOrdonnance(o: any) {
+    const decryptedMedicaments = this.encryptionService.decrypt(o.medicaments);
+    return {
+      ...o,
+      medicaments: this.safeJsonParse(decryptedMedicaments),
+      notes: this.encryptionService.decrypt(o.notes),
+    };
+  }
+
+  private decryptAnalyse(a: any) {
+    return {
+      ...a,
+      typeAnalyse: this.encryptionService.decrypt(a.typeAnalyse),
+      laboratoire: this.encryptionService.decrypt(a.laboratoire),
+      resultats: this.encryptionService.decrypt(a.resultats),
+      notes: this.encryptionService.decrypt(a.notes),
+    };
+  }
+
+  private decryptVaccination(v: any) {
+    return {
+      ...v,
+      vaccin: this.encryptionService.decrypt(v.vaccin),
+      notes: this.encryptionService.decrypt(v.notes),
+    };
+  }
+
   // ─── Auto-diagnostics ─────────────────────────────────────────
 
   async getAutoDiagnostics(userId: string) {
@@ -608,6 +680,8 @@ export class CarnetSanteService {
     return {
       data: diagnostics.map((d) => ({
         ...d,
+        symptomes: this.encryptionService.decrypt(d.symptomes),
+        recommendation: this.encryptionService.decrypt(d.recommendation || ''),
         analyseia: d.analyseia ? this.safeJsonParse(d.analyseia) : null,
       })),
       message: `${diagnostics.length} auto-diagnostic(s)`,
@@ -620,7 +694,7 @@ export class CarnetSanteService {
     const diagnostic = await this.prisma.autoDiagnostic.create({
       data: {
         patientId: userId,
-        symptomes: dto.symptomes.trim(),
+        symptomes: this.encryptionService.encrypt(dto.symptomes.trim()),
       },
     });
 
@@ -632,13 +706,15 @@ export class CarnetSanteService {
       where: { id: diagnostic.id },
       data: {
         analyseia: JSON.stringify(result),
-        recommendation: result.reponse || result.maladie,
+        recommendation: this.encryptionService.encrypt(result.reponse || result.maladie),
       },
     });
 
     return {
       data: {
         ...updated,
+        symptomes: dto.symptomes,
+        recommendation: result.reponse || result.maladie,
         analyseia: result
       },
       message: 'Analyse IA terminée avec succès.',
@@ -667,21 +743,22 @@ export class CarnetSanteService {
 
     return {
       data: {
-        profilMedical,
+        profilMedical: profilMedical ? this.decryptProfil(profilMedical) : null,
         stats: { 
           consultations: nbConsultations, 
           ordonnances: nbOrdonnances, 
           analyses: nbAnalyses, 
           vaccinations: nbVaccinations 
         },
-        prochainRappelVaccinal: prochainRappel,
+        prochainRappelVaccinal: prochainRappel ? {
+          ...prochainRappel,
+          vaccin: this.encryptionService.decrypt(prochainRappel.vaccin || '')
+        } : null,
       },
       message: 'Résumé du carnet de santé',
       success: true,
     };
   }
-
-  // ─── Helper ───────────────────────────────────────────────────
 
   private safeJsonParse(value: string): any {
     try {
@@ -706,7 +783,7 @@ export class CarnetSanteService {
     };
   }
 
-  // ─── Urgences (SOS) ──────────────────────────────────────────
+
 
   async createUrgence(userId: string, dto: CreateUrgenceDto) {
     const urgence = await this.prisma.urgence.create({
@@ -746,10 +823,14 @@ export class CarnetSanteService {
       );
     }
 
-    // 2. Simulation SMS
+    // 2. SMS REEL via Nimba SMS
     if (contactTel) {
-      const posStr = hasLocation ? `${dto.latitude},${dto.longitude}` : "Position non disponible";
-      console.log(`[SOS-SMS] Simulation SMS envoyé à ${contactTel} : "${urgence.patient.prenom} a besoin d'aide ! Position: ${posStr}"`);
+      const locationStr = hasLocation ? `Position: https://www.google.com/maps?q=${dto.latitude},${dto.longitude}` : undefined;
+      await this.smsService.sendEmergencySms(
+        String(contactTel),
+        `${urgence.patient.prenom} ${urgence.patient.nom}`,
+        locationStr
+      );
     }
 
     // 3. Notifier les 5 structures les plus proches
@@ -783,7 +864,7 @@ export class CarnetSanteService {
         longitude: dto.longitude,
         message: dto.message,
         createdAt: urgence.createdAt,
-        profilMedical: urgence.patient.profilMedical
+        profilMedical: urgence.patient.profilMedical ? this.decryptProfil(urgence.patient.profilMedical) : null
       };
 
       for (const s of sortedStructures) {
@@ -891,7 +972,17 @@ export class CarnetSanteService {
       orderBy: { createdAt: 'desc' }
     });
 
-    return { data: urgences, message: `${urgences.length} alerte(s) active(s)`, success: true };
+    return { 
+      data: urgences.map(u => ({
+        ...u,
+        patient: {
+          ...u.patient,
+          profilMedical: u.patient.profilMedical ? this.decryptProfil(u.patient.profilMedical) : null
+        }
+      })), 
+      message: `${urgences.length} alerte(s) active(s)`, 
+      success: true 
+    };
   }
 
   async updateUrgenceStatus(id: string, status: any) {

@@ -88,7 +88,7 @@ export class CarnetSanteController {
   @Get('consultations')
   @ApiOperation({ summary: 'Mes consultations' })
   getConsultations(@Req() req: any) {
-    return this.carnetSanteService.getConsultations(req.user.userId);
+    return this.carnetSanteService.getConsultations(req.user.userId, req.user.role);
   }
 
   @Get('consultations/:id')

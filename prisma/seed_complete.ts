@@ -124,8 +124,8 @@ async function main() {
             create: {
                 userId: user.id,
                 groupeSanguin: groupes[k % groupes.length] as any,
-                allergies: k % 3 === 0 ? ['Penicilline'] : [],
-                pathologies: k % 4 === 0 ? [pathologiesList[k % pathologiesList.length]] : [],
+                allergies: k % 3 === 0 ? JSON.stringify(['Penicilline']) : JSON.stringify([]),
+                pathologies: k % 4 === 0 ? JSON.stringify([pathologiesList[k % pathologiesList.length]]) : JSON.stringify([]),
                 contactNom: 'Proche Secours',
                 contactTelephone: '+224620000000',
                 contactEmail: 'soulmamoudou0@gmail.com'

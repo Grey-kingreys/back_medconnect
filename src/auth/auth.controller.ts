@@ -7,10 +7,12 @@ import {
   Param,
   UseGuards,
   Req,
+  Res,
   HttpCode,
   HttpStatus,
   BadRequestException,
 } from '@nestjs/common';
+import { Response } from 'express';
 import {
   ApiTags,
   ApiOperation,
@@ -38,8 +40,8 @@ export class AuthController {
   @ApiOperation({ summary: 'Inscription patient', description: 'Crée un compte patient (accès public)' })
   @ApiResponse({ status: 201, description: 'Compte créé' })
   @ApiResponse({ status: 409, description: 'Email déjà utilisé' })
-  register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto);
+  register(@Body() dto: RegisterDto, @Res({ passthrough: true }) res: Response) {
+    return this.authService.register(dto, res);
   }
 
   @Post('login')
@@ -47,8 +49,8 @@ export class AuthController {
   @ApiOperation({ summary: 'Connexion', description: 'Authentifie un utilisateur (tous rôles)' })
   @ApiResponse({ status: 200, description: 'Connexion réussie' })
   @ApiResponse({ status: 401, description: 'Email ou mot de passe incorrect' })
-  login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
+    return this.authService.login(dto, res);
   }
 
   @UseGuards(AuthGuard)
@@ -111,9 +113,16 @@ export class AuthController {
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Renouveler le access token via refresh token' })
-  refresh(@Body() body: { refresh_token: string }) {
-    if (!body.refresh_token) throw new BadRequestException('refresh_token requis');
-    return this.authService.refreshAccessToken(body.refresh_token);
+  refresh(
+    @Req() req: any,
+    @Res({ passthrough: true }) res: Response,
+    @Body() body: { refresh_token?: string }
+  ) {
+    // Essayer de lire depuis le cookie d'abord, puis le body
+    const token = req.cookies['refresh_token'] || body.refresh_token;
+    
+    if (!token) throw new BadRequestException('refresh_token requis');
+    return this.authService.refreshAccessToken(token, res);
   }
 
   @UseGuards(AuthGuard)
@@ -121,7 +130,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Déconnexion (invalide le refresh token)' })
-  logout(@Req() req: any) {
-    return this.authService.logout(req.user.userId);
+  logout(@Req() req: any, @Res({ passthrough: true }) res: Response) {
+    return this.authService.logout(req.user.userId, res);
   }
 }

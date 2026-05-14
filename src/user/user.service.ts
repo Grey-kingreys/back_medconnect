@@ -8,6 +8,7 @@ import {
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { EmailService } from 'src/common/services/email.service';
+import { EncryptionService } from 'src/common/services/encryption.service';
 import {
   CreateUserByAdminDto,
   UpdateUserDto,
@@ -19,6 +20,7 @@ export class UserService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
+    private readonly encryptionService: EncryptionService,
   ) { }
 
   // ─── Créer un utilisateur (par ADMIN/SUPER_ADMIN) ─────────────
@@ -312,7 +314,7 @@ export class UserService {
         patientMap.set(c.patientId, {
           ...c.patient,
           derniereConsultation: c.dateConsultation,
-          dernierMotif: c.motif,
+          dernierMotif: this.encryptionService.decrypt(c.motif),
         });
       }
     });

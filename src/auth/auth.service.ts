@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { Response } from 'express';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { PrismaService } from 'src/common/services/prisma.service';
@@ -35,7 +36,7 @@ export class AuthService {
 
   // ─── Login ────────────────────────────────────────────────────
 
-  async login(loginDto: LoginDto) {
+  async login(loginDto: LoginDto, res: Response) {
     const { email, password } = loginDto;
 
     const user = await this.prisma.user.findUnique({
@@ -82,10 +83,17 @@ export class AuthService {
       data: { refreshToken: hashedRefresh, refreshTokenExpires },
     });
 
+    // Envoyer le refresh token dans un cookie sécurisé
+    res.cookie('refresh_token', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 jours
+    });
+
     return {
       data: {
         access_token: access_token,
-        refreshToken: refreshToken,
         user: {
           id: user.id,
           email: user.email,
@@ -105,7 +113,7 @@ export class AuthService {
 
   // ─── Register (patients uniquement) ──────────────────────────
 
-  async register(registerDto: RegisterDto) {
+  async register(registerDto: RegisterDto, res: Response) {
     const { nom, prenom, email, password, telephone, dateNaissance, taille, poids } = registerDto;
 
     const existingUser = await this.prisma.user.findUnique({
@@ -149,6 +157,14 @@ export class AuthService {
       data: { refreshToken: hashedRefresh, refreshTokenExpires },
     });
 
+    // Envoyer le refresh token dans un cookie sécurisé
+    res.cookie('refresh_token', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 jours
+    });
+
     // Email de bienvenue (non bloquant)
     this.emailService
       .sendWelcomeEmail(user.email, user.nom, user.prenom)
@@ -157,7 +173,6 @@ export class AuthService {
     return {
       data: {
         access_token: access_token,
-        refreshToken: refreshToken,
         user: {
           id: user.id,
           email: user.email,
@@ -400,15 +415,15 @@ export class AuthService {
   generateTokens(payload: UserPayload) {
     const access_token = this.jwtService.sign(payload, {
       secret: process.env.JWT_SECRET,
-      expiresIn: '15m', // ← raccourcir le access token
+      expiresIn: '15m', // ← 15 minutes au lieu de 5
     });
-
+ 
     const refreshToken = crypto.randomBytes(40).toString('hex');
     const refreshTokenExpires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 jours
-
+ 
     return { access_token, refreshToken, refreshTokenExpires };
   }
-
+ 
   generateToken(payload: UserPayload): string {
     return this.jwtService.sign(payload, {
       secret: process.env.JWT_SECRET,
@@ -417,7 +432,7 @@ export class AuthService {
   }
 
 
-  async refreshAccessToken(rawRefreshToken: string) {
+  async refreshAccessToken(rawRefreshToken: string, res: Response) {
     const hashed = crypto.createHash('sha256').update(rawRefreshToken).digest('hex');
 
     const user = await this.prisma.user.findFirst({
@@ -443,18 +458,30 @@ export class AuthService {
       data: { refreshToken: hashedNew, refreshTokenExpires },
     });
 
+    // Mettre à jour le cookie avec le nouveau refresh token
+    res.cookie('refresh_token', newRefresh, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    });
+
     return {
-      data: { access_token, refresh_token: newRefresh },
+      data: { access_token },
       message: 'Token renouvelé',
       success: true,
     };
   }
 
-  async logout(userId: string) {
+  async logout(userId: string, res: Response) {
     await this.prisma.user.update({
       where: { id: userId },
       data: { refreshToken: null, refreshTokenExpires: null },
     });
+
+    // Effacer le cookie
+    res.clearCookie('refresh_token');
+
     return { data: null, message: 'Déconnexion réussie', success: true };
   }
 }
