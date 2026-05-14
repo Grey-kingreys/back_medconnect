@@ -2,10 +2,10 @@ import { Module } from '@nestjs/common';
 import { ChatService } from './chat.service';
 import { ChatGateway } from './chat.gateway';
 import { ChatController } from './chat.controller';
-import { PrismaService } from './prisma.service';
+import { PrismaService } from '../common/services/prisma.service';
 import { JwtModule } from '@nestjs/jwt';
 
-import { NotificationsModule } from 'src/notifications/notifications.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [JwtModule.register({}), NotificationsModule],

@@ -2,9 +2,17 @@ import { NestFactory, Reflector } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe, ClassSerializerInterceptor } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // Cookies
+  app.use(cookieParser());
+
+  // Sécurité des en-têtes HTTP
+  app.use(helmet());
 
   // Sérialisation globale (conformément aux Skills Expert)
   app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));

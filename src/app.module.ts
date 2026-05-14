@@ -9,12 +9,20 @@ import { SuperAdminModule } from './super-admin/super-admin.module';
 import { CarnetSanteModule } from './carnet-sante/carnet-sante.module';
 import { PharmacieModule } from './pharmacie/pharmacie.module';
 import { GeoModule } from './geo/geo.module';
-import { ChatModule } from './common/services/chat.module';
+import { ChatModule } from './chat/chat.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { SecurityModule } from './common/security.module';
+
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ThrottlerModule.forRoot([{
+      ttl: 60000,
+      limit: 60,
+    }]),
     AuthModule,
     UserModule,
     StructureModule,
@@ -24,8 +32,15 @@ import { NotificationsModule } from './notifications/notifications.module';
     GeoModule,
     ChatModule,
     NotificationsModule,
+    SecurityModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule { }

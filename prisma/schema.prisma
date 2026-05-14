@@ -157,9 +157,9 @@ model ProfilMedical {
   user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   groupeSanguin  GroupeSanguin  @default(INCONNU)
-  allergies      String[]       @default([])
-  pathologies    String[]       @default([])
-  traitements    String[]       @default([])  // Traitements en cours
+  allergies      String?
+  pathologies    String?
+  traitements    String?  // Traitements en cours
   taille         Float?         // en cm
   poids          Float?         // en kg
   dateNaissance  DateTime?
