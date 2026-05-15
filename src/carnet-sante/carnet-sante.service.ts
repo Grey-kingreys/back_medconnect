@@ -169,7 +169,7 @@ export class CarnetSanteService {
           dateNaissance: patient.dateNaissance, taille: patient.taille, poids: patient.poids
         },
         isMedecinTraitant,
-        profilMedical: profil ? this.decryptProfil(profil) : null,
+        profil: profil ? this.decryptProfil(profil) : null,
         stats,
         consultations: consultations.map(c => ({
           ...this.decryptConsultation(c),
@@ -743,7 +743,7 @@ export class CarnetSanteService {
 
     return {
       data: {
-        profilMedical: profilMedical ? this.decryptProfil(profilMedical) : null,
+        profil: profilMedical ? this.decryptProfil(profilMedical) : null,
         stats: { 
           consultations: nbConsultations, 
           ordonnances: nbOrdonnances, 
