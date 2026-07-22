@@ -43,29 +43,60 @@ export class CarnetSanteService {
   private readonly logger = new Logger(CarnetSanteService.name);
 
   // ─── Private Helper: Vérifier l'accès au patient ────────────────
-  private async checkAccess(actorId: string, patientId: string, structureId?: string) {
-    if (actorId === patientId) return; // Le patient accède à son propre dossier
 
-    const patient = await this.prisma.user.findUnique({
-      where: { id: patientId },
-      select: { medecinTraitantId: true }
-    });
+  /**
+   * Périmètre patient : QUEL dossier l'acteur peut atteindre (médecin traitant
+   * ou structure explicitement autorisée par le patient). Le TYPE d'action
+   * (lire / écrire) est porté par les permissions du rôle, vérifiées en amont
+   * par `PermissionsGuard` — les deux contrôles sont complémentaires.
+   *
+   * @returns `isMedecinTraitant` — le médecin traitant voit tout le carnet,
+   *   une structure autorisée ne voit que ce qu'elle y a elle-même produit.
+   */
+  private async checkAccess(
+    actorId: string,
+    patientId: string,
+    structureId?: string,
+    mode: 'lecture' | 'ecriture' = 'ecriture',
+  ): Promise<{ isMedecinTraitant: boolean }> {
+    if (actorId === patientId) return { isMedecinTraitant: false }; // Son propre dossier
+
+    const [patient, actor] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: patientId },
+        select: { medecinTraitantId: true },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: actorId },
+        select: { structureId: true },
+      }),
+    ]);
 
     if (!patient) throw new NotFoundException('Patient non trouvé');
 
     const isMedecinTraitant = patient.medecinTraitantId === actorId;
 
+    // `structureId` provient du JWT, figé à l'émission du token. On le
+    // reconfronte à l'appartenance réelle en base : sans cela, un membre retiré
+    // d'une structure garde l'accès aux carnets de ses patients jusqu'à
+    // l'expiration de son token.
     let hasStructureAccess = false;
-    if (structureId) {
-      const auth = await this.prisma.autorisationStructure.findFirst({
-        where: { patientId, structureId }
+    if (structureId && actor?.structureId === structureId) {
+      const auth = await this.prisma.autorisationStructure.findUnique({
+        where: { patientId_structureId: { patientId, structureId } },
       });
-      if (auth) hasStructureAccess = true;
+      hasStructureAccess = !!auth;
     }
 
     if (!isMedecinTraitant && !hasStructureAccess) {
-      throw new ForbiddenException('Vous n\'êtes pas autorisé à modifier le dossier de ce patient.');
+      throw new ForbiddenException(
+        mode === 'lecture'
+          ? "Vous n'êtes pas autorisé à consulter le dossier de ce patient."
+          : "Vous n'êtes pas autorisé à modifier le dossier de ce patient.",
+      );
     }
+
+    return { isMedecinTraitant };
   }
 
   // ─── Vue Médecin : Carnet complet d'un patient ─────────────────
@@ -88,26 +119,17 @@ export class CarnetSanteService {
 
     if (!patient) throw new NotFoundException('Patient non trouvé');
 
-    const isMedecinTraitant = patient.medecinTraitantId === medecinId;
-    
-    // Vérifier l'autorisation via la structure (Niveau 2)
-    let hasStructureAccess = false;
-    if (structureId) {
-      const auth = await this.prisma.autorisationStructure.findFirst({
-        where: { patientId, structureId }
-      });
-      if (auth) hasStructureAccess = true;
-    }
+    // Même contrôle de périmètre que les écritures (lève 403 si hors périmètre).
+    const { isMedecinTraitant } = await this.checkAccess(
+      medecinId,
+      patientId,
+      structureId,
+      'lecture',
+    );
 
-    if (!isMedecinTraitant && !hasStructureAccess) {
-      throw new ForbiddenException('Vous n\'êtes pas autorisé à consulter le dossier de ce patient.');
-    }
-
-    // Récupérer le profil pour le Médecin Traitant OU si la structure est autorisée
-    let profil: any = null;
-    if (isMedecinTraitant || hasStructureAccess) {
-      profil = await this.prisma.profilMedical.findUnique({ where: { userId: patientId } });
-    }
+    const profil = await this.prisma.profilMedical.findUnique({
+      where: { userId: patientId },
+    });
 
     // Récupérer les consultations et ordonnances
     // Si Médecin traitant (Niveau 1) -> Tout voir. 
@@ -129,23 +151,21 @@ export class CarnetSanteService {
       take: 50
     });
 
-    // Analyses et Vaccinations : Pour le Médecin Traitant ET les structures autorisées
-    let analyses: any[] = [];
-    let vaccinations: any[] = [];
-    
-    if (isMedecinTraitant || hasStructureAccess) {
-      analyses = await this.prisma.resultatAnalyse.findMany({
+    // Analyses et Vaccinations : Médecin traitant comme structure autorisée
+    // (au-delà de `checkAccess`, l'accès est déjà refusé).
+    const [analyses, vaccinations] = await Promise.all([
+      this.prisma.resultatAnalyse.findMany({
         where: { patientId },
         include: { medecin: { select: { nom: true, prenom: true } } },
         orderBy: { dateAnalyse: 'desc' },
         take: 20
-      });
-      vaccinations = await this.prisma.vaccination.findMany({
+      }),
+      this.prisma.vaccination.findMany({
         where: { patientId },
         include: { medecin: { select: { nom: true, prenom: true } } },
         orderBy: { dateVaccin: 'desc' }
-      });
-    }
+      }),
+    ]);
 
     // Récupérer les STATISTIQUES GLOBALES
     const [totalConsultations, totalOrdonnances, totalAnalyses, totalVaccinations] = await Promise.all([
@@ -166,8 +186,8 @@ export class CarnetSanteService {
       data: {
         patient: { 
           id: patient.id, nom: patient.nom, prenom: patient.prenom, 
-          email: (isMedecinTraitant || hasStructureAccess) ? patient.email : null,
-          telephone: (isMedecinTraitant || hasStructureAccess) ? patient.telephone : null,
+          email: patient.email,
+          telephone: patient.telephone,
           dateNaissance: patient.dateNaissance, taille: patient.taille, poids: patient.poids
         },
         isMedecinTraitant,
