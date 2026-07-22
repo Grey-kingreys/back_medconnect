@@ -273,7 +273,7 @@ export class UserService {
     if (!structureId) return { data: [], message: 'Aucune structure', success: true };
 
     const consultations = await this.prisma.consultation.findMany({
-      where: { structureId },
+      where: { structureId, deletedAt: null },
       include: {
         patient: {
           select: {

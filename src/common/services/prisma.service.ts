@@ -22,9 +22,6 @@ export class PrismaService
     async onModuleInit() {
         await this.$connect();
         this.logger.log('✅ Base de données connectée');
-
-        // Brancher les middlewares Prisma pour soft-delete
-        this.applySoftDeleteMiddleware();
     }
 
     async onModuleDestroy() {
@@ -32,43 +29,21 @@ export class PrismaService
         await this.pool.end();
         this.logger.log('🔌 Base de données déconnectée');
     }
-
-    /**
-     * Middleware Prisma pour soft-delete (Consultation, Ordonnance,
-     * ResultatAnalyse, Vaccination). Intercepte `delete`/`deleteMany` et les
-     * transforme en `update`/`updateMany` avec `deletedAt: now()`. Filtre les
-     * lectures pour exclure les enregistrements soft-deleted par défaut.
-     */
-    private applySoftDeleteMiddleware() {
-        const softDeleteModels = ['consultation', 'ordonnance', 'resultatAnalyse', 'vaccination'];
-
-        (this as any).$use(async (params, next) => {
-            // Si le modèle est marqué pour soft-delete
-            if (softDeleteModels.includes(params.model?.toLowerCase())) {
-                // Intercepter delete → update avec deletedAt
-                if (params.action === 'delete') {
-                    params.action = 'update';
-                    params.args.data = { deletedAt: new Date() };
-                }
-                // Intercepter deleteMany → updateMany avec deletedAt
-                else if (params.action === 'deleteMany') {
-                    params.action = 'updateMany';
-                    params.args.data = { deletedAt: new Date() };
-                }
-                // Ajouter un filtre par défaut pour findUnique/findFirst/findMany : excluder les soft-deleted
-                else if (['findUnique', 'findFirst', 'findMany'].includes(params.action)) {
-                    if (params.args.where) {
-                        // Vérifier que deletedAt n'est pas explicitement cherché
-                        if (!('deletedAt' in params.args.where)) {
-                            params.args.where.deletedAt = null;
-                        }
-                    } else {
-                        params.args.where = { deletedAt: null };
-                    }
-                }
-            }
-
-            return next(params);
-        });
-    }
 }
+
+/**
+ * ⚠️ SOFT-DELETE — règle applicative, sans interception automatique.
+ *
+ * `Consultation`, `Ordonnance`, `ResultatAnalyse` et `Vaccination` portent un
+ * `deletedAt` : ces données de santé ne sont jamais supprimées physiquement.
+ *
+ * Conséquence pour tout nouveau code touchant ces quatre modèles :
+ *   - supprimer  → `update({ data: { deletedAt: new Date() } })`, jamais `delete()`
+ *   - lire       → ajouter `deletedAt: null` au `where`
+ *
+ * Une version antérieure branchait un middleware `$use` global : cette API a été
+ * retirée de Prisma 5 et n'existe plus en Prisma 7 (seul `$extends` subsiste),
+ * l'appel échouait donc au démarrage. `$extends` n'a pas été retenu car il
+ * retourne un *nouveau* client sans les champs propres à ce service (`pool`,
+ * `logger`) : le filtrage explicite reste ici plus sûr que l'implicite.
+ */

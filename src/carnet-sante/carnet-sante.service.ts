@@ -135,7 +135,7 @@ export class CarnetSanteService {
     // Si Médecin traitant (Niveau 1) -> Tout voir. 
     // Si Structure (Niveau 2) -> Ne voir QUE les consultations et ordonnances de sa structure.
     const consultations = await this.prisma.consultation.findMany({
-      where: isMedecinTraitant ? { patientId } : { patientId, structureId: structureId as string },
+      where: isMedecinTraitant ? { patientId, deletedAt: null } : { patientId, deletedAt: null, structureId: structureId as string },
       include: { 
         structure: { select: { id: true, nom: true, type: true } },
         medecin: { select: { nom: true, prenom: true } }
@@ -145,7 +145,7 @@ export class CarnetSanteService {
     });
 
     const ordonnances = await this.prisma.ordonnance.findMany({
-      where: isMedecinTraitant ? { patientId } : { patientId, consultation: { structureId: structureId as string } },
+      where: isMedecinTraitant ? { patientId, deletedAt: null } : { patientId, deletedAt: null, consultation: { structureId: structureId as string } },
       include: { medecin: { select: { nom: true, prenom: true } } },
       orderBy: { dateEmission: 'desc' },
       take: 50
@@ -155,13 +155,13 @@ export class CarnetSanteService {
     // (au-delà de `checkAccess`, l'accès est déjà refusé).
     const [analyses, vaccinations] = await Promise.all([
       this.prisma.resultatAnalyse.findMany({
-        where: { patientId },
+        where: { patientId, deletedAt: null },
         include: { medecin: { select: { nom: true, prenom: true } } },
         orderBy: { dateAnalyse: 'desc' },
         take: 20
       }),
       this.prisma.vaccination.findMany({
-        where: { patientId },
+        where: { patientId, deletedAt: null },
         include: { medecin: { select: { nom: true, prenom: true } } },
         orderBy: { dateVaccin: 'desc' }
       }),
@@ -169,10 +169,10 @@ export class CarnetSanteService {
 
     // Récupérer les STATISTIQUES GLOBALES
     const [totalConsultations, totalOrdonnances, totalAnalyses, totalVaccinations] = await Promise.all([
-      this.prisma.consultation.count({ where: { patientId } }),
-      this.prisma.ordonnance.count({ where: { patientId } }),
-      this.prisma.resultatAnalyse.count({ where: { patientId } }),
-      this.prisma.vaccination.count({ where: { patientId } }),
+      this.prisma.consultation.count({ where: { patientId, deletedAt: null } }),
+      this.prisma.ordonnance.count({ where: { patientId, deletedAt: null } }),
+      this.prisma.resultatAnalyse.count({ where: { patientId, deletedAt: null } }),
+      this.prisma.vaccination.count({ where: { patientId, deletedAt: null } }),
     ]);
 
     const stats = {
@@ -250,8 +250,8 @@ export class CarnetSanteService {
     const isDoctor = role === 'MEDECIN' || role === 'STRUCTURE_ADMIN';
 
     const where = isDoctor
-      ? { medecinId: userId }   // Le médecin voit celles qu'il a rédigées
-      : { patientId: userId };  // Le patient voit les siennes
+      ? { medecinId: userId, deletedAt: null }   // Le médecin voit celles qu'il a rédigées
+      : { patientId: userId, deletedAt: null };  // Le patient voit les siennes
 
     const consultations = await this.prisma.consultation.findMany({
       where,
@@ -282,7 +282,7 @@ export class CarnetSanteService {
 
   async getConsultation(userId: string, consultationId: string) {
     const consultation = await this.prisma.consultation.findFirst({
-      where: { id: consultationId, patientId: userId },
+      where: { id: consultationId, patientId: userId, deletedAt: null },
       include: {
         structure: { select: { id: true, nom: true, type: true, adresse: true, ville: true } },
         ordonnances: true,
@@ -356,11 +356,11 @@ export class CarnetSanteService {
 
   async deleteConsultation(userId: string, consultationId: string) {
     const consultation = await this.prisma.consultation.findFirst({
-      where: { id: consultationId, patientId: userId },
+      where: { id: consultationId, patientId: userId, deletedAt: null },
     });
     if (!consultation) throw new NotFoundException('Consultation non trouvée');
 
-    await this.prisma.consultation.delete({ where: { id: consultationId } });
+    await this.prisma.consultation.update({ where: { id: consultationId }, data: { deletedAt: new Date() } });
 
     return { data: null, message: 'Consultation supprimée', success: true };
   }
@@ -369,7 +369,7 @@ export class CarnetSanteService {
 
   async getOrdonnances(userId: string) {
     const ordonnances = await this.prisma.ordonnance.findMany({
-      where: { patientId: userId },
+      where: { patientId: userId, deletedAt: null },
       include: {
         medecin: { select: { id: true, nom: true, prenom: true } },
         consultation: {
@@ -396,7 +396,7 @@ export class CarnetSanteService {
     // Vérifier que la consultation appartient bien à cet utilisateur
     if (dto.consultationId) {
       const c = await this.prisma.consultation.findFirst({
-        where: { id: dto.consultationId, patientId },
+        where: { id: dto.consultationId, patientId, deletedAt: null },
       });
       if (!c) throw new NotFoundException('Consultation non trouvée');
     }
@@ -442,11 +442,11 @@ export class CarnetSanteService {
 
   async deleteOrdonnance(userId: string, ordonnanceId: string) {
     const ordonnance = await this.prisma.ordonnance.findFirst({
-      where: { id: ordonnanceId, patientId: userId },
+      where: { id: ordonnanceId, patientId: userId, deletedAt: null },
     });
     if (!ordonnance) throw new NotFoundException('Ordonnance non trouvée');
 
-    await this.prisma.ordonnance.delete({ where: { id: ordonnanceId } });
+    await this.prisma.ordonnance.update({ where: { id: ordonnanceId }, data: { deletedAt: new Date() } });
 
     return { data: null, message: 'Ordonnance supprimée', success: true };
   }
@@ -456,7 +456,7 @@ export class CarnetSanteService {
 
   async getAnalyses(userId: string) {
     const analyses = await this.prisma.resultatAnalyse.findMany({
-      where: { patientId: userId },
+      where: { patientId: userId, deletedAt: null },
       include: { medecin: { select: { id: true, nom: true, prenom: true } } },
       orderBy: { dateAnalyse: 'desc' },
     });
@@ -515,11 +515,11 @@ export class CarnetSanteService {
 
   async deleteAnalyse(userId: string, analyseId: string) {
     const analyse = await this.prisma.resultatAnalyse.findFirst({
-      where: { id: analyseId, patientId: userId },
+      where: { id: analyseId, patientId: userId, deletedAt: null },
     });
     if (!analyse) throw new NotFoundException('Résultat non trouvé');
 
-    await this.prisma.resultatAnalyse.delete({ where: { id: analyseId } });
+    await this.prisma.resultatAnalyse.update({ where: { id: analyseId }, data: { deletedAt: new Date() } });
     return { data: null, message: 'Résultat supprimé', success: true };
   }
 
@@ -528,7 +528,7 @@ export class CarnetSanteService {
 
   async getVaccinations(userId: string) {
     const vaccinations = await this.prisma.vaccination.findMany({
-      where: { patientId: userId },
+      where: { patientId: userId, deletedAt: null },
       include: { medecin: { select: { id: true, nom: true, prenom: true } } },
       orderBy: { dateVaccin: 'desc' },
     });
@@ -589,11 +589,11 @@ export class CarnetSanteService {
 
   async deleteVaccination(userId: string, vaccinationId: string) {
     const vac = await this.prisma.vaccination.findFirst({
-      where: { id: vaccinationId, patientId: userId },
+      where: { id: vaccinationId, patientId: userId, deletedAt: null },
     });
     if (!vac) throw new NotFoundException('Vaccination non trouvée');
 
-    await this.prisma.vaccination.delete({ where: { id: vaccinationId } });
+    await this.prisma.vaccination.update({ where: { id: vaccinationId }, data: { deletedAt: new Date() } });
     return { data: null, message: 'Vaccination supprimée', success: true };
   }
 
@@ -748,14 +748,15 @@ export class CarnetSanteService {
     const [profilMedical, nbConsultations, nbOrdonnances, nbAnalyses, nbVaccinations, prochainRappel] =
       await Promise.all([
         this.prisma.profilMedical.findUnique({ where: { userId } }),
-        this.prisma.consultation.count({ where: { patientId: userId } }),
-        this.prisma.ordonnance.count({ where: { patientId: userId } }),
-        this.prisma.resultatAnalyse.count({ where: { patientId: userId } }),
-        this.prisma.vaccination.count({ where: { patientId: userId } }),
+        this.prisma.consultation.count({ where: { patientId: userId, deletedAt: null } }),
+        this.prisma.ordonnance.count({ where: { patientId: userId, deletedAt: null } }),
+        this.prisma.resultatAnalyse.count({ where: { patientId: userId, deletedAt: null } }),
+        this.prisma.vaccination.count({ where: { patientId: userId, deletedAt: null } }),
         // Prochain rappel vaccinal
         this.prisma.vaccination.findFirst({
           where: {
             patientId: userId,
+            deletedAt: null,
             prochainRappel: { gt: new Date() },
           },
           orderBy: { prochainRappel: 'asc' },
