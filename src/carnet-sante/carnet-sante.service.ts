@@ -857,7 +857,11 @@ export class CarnetSanteService {
         .sort((a, b) => a.dist - b.dist)
         .slice(0, 5);
 
-      console.log(`[SOS-PROXIMITÉ] Notification envoyée aux 5 structures les plus proches :`);
+      // Ni les coordonnées GPS du patient ni son identité ne sont journalisées :
+      // seuls l'ID de l'urgence et les structures notifiées le sont (audit #8).
+      this.logger.log(
+        `sos.proximite_notifiee urgenceId=${urgence.id} structures=${sortedStructures.length}`,
+      );
       const alertData = {
         urgenceId: urgence.id,
         patientId: urgence.patientId,
@@ -870,8 +874,10 @@ export class CarnetSanteService {
       };
 
       for (const s of sortedStructures) {
-        console.log(` - ${s.nom} (${s.type}) à env. ${(s.dist * 111).toFixed(2)} km`);
-        
+        this.logger.debug(
+          `sos.structure_notifiee structureId=${s.id} distanceKm=${(s.dist * 111).toFixed(2)}`,
+        );
+
         // Trouver tous les membres de la structure (admin + membres)
         const members = await this.prisma.user.findMany({
           where: {

@@ -3,136 +3,149 @@ import {
   NestInterceptor,
   ExecutionContext,
   CallHandler,
+  Logger,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { PrismaService } from '../services/prisma.service';
 
+/** Segment de route → type d'entité auditée. */
+const ENTITES: Record<string, string> = {
+  consultations: 'Consultation',
+  ordonnances: 'Ordonnance',
+  analyses: 'ResultatAnalyse',
+  vaccinations: 'Vaccination',
+  'profil-medical': 'ProfilMedical',
+};
+
 /**
- * Intercepteur d'audit trail pour les mutations du carnet de santé
- * (consultations, ordonnances, analyses, vaccinations).
- * Enregistre qui a fait quoi, quand et d'où (IP source).
- * Capturé APRÈS succès de la requête pour ne logger que les changements réels.
+ * Audit trail des données de santé : qui a lu ou modifié quoi, quand et depuis
+ * quelle IP. Enregistré en `APP_INTERCEPTOR` (cf. `app.module.ts`).
+ *
+ * Périmètre : les accès au carnet d'un patient par un tiers (médecin), les
+ * lectures unitaires et toutes les mutations d'entités médicales. Les listes
+ * (« mes consultations ») ne sont pas journalisées : elles ne portent pas sur une
+ * entité identifiable et noieraient les accès réellement sensibles.
+ *
+ * L'écriture de l'audit ne doit jamais faire échouer la requête métier : toute
+ * erreur est logguée et avalée.
  */
 @Injectable()
 export class AuditInterceptor implements NestInterceptor {
+  private readonly logger = new Logger(AuditInterceptor.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
+    if (context.getType() !== 'http') return next.handle();
+
     const request = context.switchToHttp().getRequest();
-    const { method, path, user } = request;
-    const userId = user?.userId;
-    const ip = this.extractClientIp(request);
+    const { method } = request;
+    // `trust proxy` est configuré dans main.ts : `req.ip` résout déjà
+    // X-Forwarded-For pour les proxies de confiance, sans être falsifiable
+    // par le client (contrairement à une lecture brute de l'en-tête).
+    const ip = request.ip ?? null;
+    const userId = request.user?.userId ?? null;
+    const path: string = request.route?.path ?? request.url ?? '';
 
     return next.handle().pipe(
-      tap(async (response) => {
-        // Déterminer le type d'entité et l'ID en fonction de la route et de la réponse
-        const { entityType, entityId } = this.extractEntityInfo(path, response);
-
-        if (entityType && entityId) {
-          // Déterminer l'action
-          const action = this.extractAction(method, path);
-
-          // Enregistrer dans AuditLog
-          await this.prisma.auditLog.create({
-            data: {
-              userId,
-              action,
-              entityType,
-              entityId,
-              ip,
-              metadata: {
-                path,
-                method,
-                timestamp: new Date().toISOString(),
-              },
-            },
+      tap({
+        next: (response) => {
+          const cible = this.resoudreCible(request, response);
+          if (!cible) return;
+          void this.enregistrer({
+            userId,
+            action: this.actionDepuisMethode(method),
+            ...cible,
+            ip,
+            path,
+            method,
           });
-        }
+        },
+        error: (error) => {
+          // Un accès refusé à des données médicales est précisément ce qu'un
+          // audit doit retenir.
+          if (error?.status !== 403) return;
+          const cible = this.resoudreCible(request, null);
+          if (!cible) return;
+          void this.enregistrer({
+            userId,
+            action: 'denied',
+            ...cible,
+            ip,
+            path,
+            method,
+          });
+        },
       }),
     );
   }
 
   /**
-   * Extraire l'adresse IP réelle du client (derrière un proxy comme Caddy)
+   * Détermine l'entité visée à partir de l'URL et, à défaut, de la réponse
+   * (cas d'une création où l'ID n'existe pas encore dans l'URL).
    */
-  private extractClientIp(request: any): string {
-    // Ordre : X-Forwarded-For (Caddy/proxy), X-Real-IP, connection.remoteAddress
-    return (
-      request.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
-      request.headers['x-real-ip'] ||
-      request.connection?.remoteAddress ||
-      'unknown'
-    );
-  }
-
-  /**
-   * Extraire le type et l'ID de l'entité mutée depuis le path et la réponse
-   */
-  private extractEntityInfo(
-    path: string,
+  private resoudreCible(
+    request: any,
     response: any,
-  ): { entityType: string | null; entityId: string | null } {
-    // Pattern: POST/PATCH/DELETE /carnet-sante/consultations/:id
-    const consultationMatch = path.match(/\/carnet-sante\/consultations\/([\w-]+)/);
-    if (consultationMatch) {
-      return {
-        entityType: 'Consultation',
-        entityId: consultationMatch[1] || response?.id,
-      };
+  ): { entityType: string; entityId: string } | null {
+    const url: string = request.originalUrl ?? request.url ?? '';
+    const chemin = url.split('?')[0];
+
+    // Consultation du carnet d'un patient par un tiers (médecin).
+    const carnetPatient = chemin.match(/\/carnet-sante\/patient\/([\w-]+)/);
+    if (carnetPatient) {
+      return { entityType: 'CarnetSante', entityId: carnetPatient[1] };
     }
 
-    const ordonnanceMatch = path.match(/\/carnet-sante\/ordonnances\/([\w-]+)/);
-    if (ordonnanceMatch) {
-      return {
-        entityType: 'Ordonnance',
-        entityId: ordonnanceMatch[1] || response?.id,
-      };
-    }
+    const segments = chemin.match(/\/carnet-sante\/([\w-]+)(?:\/([\w-]+))?/);
+    if (!segments) return null;
 
-    const analyseMatch = path.match(/\/carnet-sante\/analyses\/([\w-]+)/);
-    if (analyseMatch) {
-      return {
-        entityType: 'ResultatAnalyse',
-        entityId: analyseMatch[1] || response?.id,
-      };
-    }
+    const entityType = ENTITES[segments[1]];
+    if (!entityType) return null;
 
-    const vaccinMatch = path.match(/\/carnet-sante\/vaccinations\/([\w-]+)/);
-    if (vaccinMatch) {
-      return {
-        entityType: 'Vaccination',
-        entityId: vaccinMatch[1] || response?.id,
-      };
-    }
+    // ID dans l'URL (lecture unitaire, suppression) sinon ID de l'entité créée.
+    const entityId = segments[2] ?? response?.id;
+    if (!entityId) return null;
 
-    // Fallback : tirer l'ID de la réponse si c'est un objet avec `id`
-    if (response?.id) {
-      if (path.includes('consultation')) {
-        return { entityType: 'Consultation', entityId: response.id };
-      }
-      if (path.includes('ordonnance')) {
-        return { entityType: 'Ordonnance', entityId: response.id };
-      }
-      if (path.includes('analyse')) {
-        return { entityType: 'ResultatAnalyse', entityId: response.id };
-      }
-      if (path.includes('vaccin')) {
-        return { entityType: 'Vaccination', entityId: response.id };
-      }
-    }
-
-    return { entityType: null, entityId: null };
+    return { entityType, entityId };
   }
 
-  /**
-   * Mapper la méthode HTTP vers une action d'audit
-   */
-  private extractAction(method: string, path: string): string {
-    if (method === 'POST') return 'create';
-    if (method === 'PATCH') return 'update';
-    if (method === 'PUT') return 'update';
-    if (method === 'DELETE') return 'delete';
-    return 'unknown';
+  private actionDepuisMethode(method: string): string {
+    switch (method) {
+      case 'GET':
+        return 'read';
+      case 'POST':
+        return 'create';
+      case 'PATCH':
+      case 'PUT':
+        return 'update';
+      case 'DELETE':
+        return 'delete';
+      default:
+        return 'unknown';
+    }
+  }
+
+  private async enregistrer(entree: {
+    userId: string | null;
+    action: string;
+    entityType: string;
+    entityId: string;
+    ip: string | null;
+    path: string;
+    method: string;
+  }): Promise<void> {
+    const { path, method, ...donnees } = entree;
+    try {
+      await this.prisma.auditLog.create({
+        data: { ...donnees, metadata: { path, method } },
+      });
+    } catch (error) {
+      this.logger.error(
+        `audit.write_failed — ${entree.action} ${entree.entityType}:${entree.entityId}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
   }
 }

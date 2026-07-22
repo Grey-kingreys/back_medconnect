@@ -1,15 +1,23 @@
 import { NestFactory, Reflector } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
-import { ValidationPipe, ClassSerializerInterceptor, Logger } from '@nestjs/common';
+import { ValidationPipe, ClassSerializerInterceptor } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
+import { Logger } from 'nestjs-pino';
 import { RedisIoAdapter } from './common/redis-io.adapter';
-import pino from 'pino';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // `bufferLogs` : conserve les logs émis avant que Pino ne soit prêt.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bufferLogs: true,
+  });
+
+  // Logger structuré (Pino) pour toute l'application, y compris les logs
+  // internes de Nest. Masquage des données sensibles configuré dans app.module.
+  const logger = app.get(Logger);
+  app.useLogger(logger);
 
   // Derrière Caddy (reverse proxy) : faire confiance au 1er proxy pour que `req.ip`
   // reflète l'IP réelle du client (via X-Forwarded-For) et non celle de Caddy.
@@ -59,7 +67,6 @@ async function bootstrap() {
   const port = process.env.PORT ?? 3001;
   await app.listen(port);
 
-  const logger = new Logger('Bootstrap');
   logger.log(`🚀 MedConnecte API démarrée sur http://localhost:${port}`);
   logger.log(`📚 Swagger disponible sur http://localhost:${port}/api`);
 }

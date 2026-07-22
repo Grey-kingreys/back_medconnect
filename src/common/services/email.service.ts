@@ -1,15 +1,28 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Resend } from 'resend';
 
 @Injectable()
 export class EmailService {
-  private resend: Resend;
+  private readonly logger = new Logger(EmailService.name);
+  private resendInstance: Resend | null = null;
   private fromEmail: string;
 
   constructor() {
-    this.resend = new Resend(process.env.RESEND_API_KEY);
     this.fromEmail =
       process.env.RESEND_FROM_EMAIL || 'MedConnecte <onboarding@resend.dev>';
+  }
+
+  /**
+   * Init paresseux : le constructeur de Resend lève si la clé est absente.
+   * L'instancier ici plutôt que dans le constructeur du service évite de faire
+   * échouer le boot de toute l'application sur une dépendance d'envoi d'emails
+   * (cf. audit #6). `validateEnv` signale déjà l'absence de clé au démarrage.
+   */
+  private get resend(): Resend {
+    if (!this.resendInstance) {
+      this.resendInstance = new Resend(process.env.RESEND_API_KEY);
+    }
+    return this.resendInstance;
   }
 
   // ─── Emails Auth ──────────────────────────────────────────────
@@ -43,7 +56,7 @@ export class EmailService {
         ),
       });
     } catch (error) {
-      console.error(`❌ Erreur email bienvenue à ${email}:`, error);
+      this.logger.error(`email.welcome_failed`, error instanceof Error ? error.stack : String(error));
     }
   }
 
@@ -77,7 +90,7 @@ export class EmailService {
         ),
       });
     } catch (error) {
-      console.error(`❌ Erreur email reset à ${email}:`, error);
+      this.logger.error(`email.reset_failed`, error instanceof Error ? error.stack : String(error));
       throw new Error("Impossible d'envoyer l'email de réinitialisation");
     }
   }
@@ -118,7 +131,7 @@ export class EmailService {
         ),
       });
     } catch (error) {
-      console.error(`❌ Erreur email alerte connexion à ${email}:`, error);
+      this.logger.error(`email.login_alert_failed`, error instanceof Error ? error.stack : String(error));
       // Non bloquant : l'échec d'envoi ne doit pas perturber le flux d'authentification.
     }
   }
@@ -162,9 +175,9 @@ export class EmailService {
         `,
         ),
       });
-      console.log(`✅ Email invitation envoyé à ${email}`);
+      this.logger.log('email.invitation_sent');
     } catch (error) {
-      console.error(`❌ Erreur email invitation à ${email}:`, error);
+      this.logger.error(`email.invitation_failed`, error instanceof Error ? error.stack : String(error));
       throw new Error("Impossible d'envoyer l'email d'invitation");
     }
   }
@@ -201,7 +214,7 @@ export class EmailService {
         ),
       });
     } catch (error) {
-      console.error(`❌ Erreur email membre à ${email}:`, error);
+      this.logger.error(`email.member_failed`, error instanceof Error ? error.stack : String(error));
     }
   }
 
@@ -258,9 +271,9 @@ export class EmailService {
         `,
         ),
       });
-      console.log(`🚀 Email SOS envoyé avec succès à ${contactEmail}`);
+      this.logger.log('email.sos_sent');
     } catch (error) {
-      console.error(`❌ Erreur envoi email SOS à ${contactEmail}:`, error);
+      this.logger.error(`email.sos_failed`, error instanceof Error ? error.stack : String(error));
     }
   }
 
