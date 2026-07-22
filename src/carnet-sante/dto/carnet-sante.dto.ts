@@ -212,7 +212,7 @@ export class CreateResultatAnalyseDto {
     @IsString()
     resultats: string;
 
-    @ApiPropertyOptional({ example: 'https://storage.medconnect.gn/analyses/abc.pdf' })
+    @ApiPropertyOptional({ example: 'https://storage.medconnecte.gn/analyses/abc.pdf' })
     @IsOptional()
     @IsString()
     fichierUrl?: string;

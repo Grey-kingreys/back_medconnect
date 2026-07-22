@@ -1,9 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/services/prisma.service';
+import { PermissionsService } from '../common/rbac/permissions.service';
+import { PERMISSIONS } from '../common/rbac/permissions.constants';
 
 @Injectable()
 export class ChatService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private permissionsService: PermissionsService,
+  ) {}
 
   async getConversations(userId: string) {
     const user = await this.prisma.user.findUnique({
@@ -15,8 +20,16 @@ export class ChatService {
       { patientId: userId },
       { medecinId: userId },
     ];
+
+    // Vérifier la permission chat:structure au lieu du simple check structureId
     if (user?.structureId) {
-      orConditions.push({ structureId: user.structureId });
+      const hasChatStructurePermission = await this.permissionsService.hasPermissions(
+        userId,
+        [PERMISSIONS.CHAT_STRUCTURE]
+      );
+      if (hasChatStructurePermission) {
+        orConditions.push({ structureId: user.structureId });
+      }
     }
 
     return this.prisma.conversation.findMany({

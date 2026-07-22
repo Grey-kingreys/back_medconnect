@@ -7,9 +7,11 @@ import {
   Param,
   UseGuards,
   Req,
+  Res,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { Response } from 'express';
 import {
   ApiTags,
   ApiOperation,
@@ -19,8 +21,9 @@ import {
 } from '@nestjs/swagger';
 import { StructureService } from './structure.service';
 import { AuthGuard } from 'src/common/guards/auth.guard';
-import { RolesGuard } from 'src/common/guards/roles.guard';
-import { Roles } from 'src/common/decorators/roles.decorator';
+import { PermissionsGuard } from 'src/common/rbac/permissions.guard';
+import { RequirePermissions } from 'src/common/rbac/require-permissions.decorator';
+import { PERMISSIONS } from 'src/common/rbac/permissions.constants';
 import {
   SetupStructureDto,
   CreateMembreDto,
@@ -70,14 +73,18 @@ export class StructureController {
   @ApiResponse({ status: 201, description: 'Espace configuré, JWT retourné' })
   @ApiResponse({ status: 401, description: 'Token invalide ou expiré' })
   @ApiResponse({ status: 409, description: 'Compte déjà existant avec cet email' })
-  setupStructure(@Param('token') token: string, @Body() dto: SetupStructureDto) {
-    return this.structureService.setupStructure(token, dto);
+  setupStructure(
+    @Param('token') token: string,
+    @Body() dto: SetupStructureDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    return this.structureService.setupStructure(token, dto, res);
   }
 
   // ─── Routes protégées (STRUCTURE_ADMIN) ───────────────────────
 
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles('STRUCTURE_ADMIN', 'PHARMACIEN', 'MEDECIN')
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.STRUCTURE_READ)
   @Get('my')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Ma structure', description: 'Retourne les infos de la structure de l\'admin connecté' })
@@ -85,8 +92,8 @@ export class StructureController {
     return this.structureService.getMyStructure(req.user.structureId);
   }
 
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles('STRUCTURE_ADMIN')
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.STRUCTURE_WRITE)
   @Patch('my')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Modifier ma structure' })
@@ -98,8 +105,8 @@ export class StructureController {
     );
   }
 
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles('STRUCTURE_ADMIN', 'PHARMACIEN', 'MEDECIN')
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.MEMBRE_READ)
   @Get(':structureId/membres')
   @ApiBearerAuth()
   @ApiParam({ name: 'structureId' })
@@ -111,8 +118,8 @@ export class StructureController {
     return this.structureService.getMembres(structureId, req.user.userId);
   }
 
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles('STRUCTURE_ADMIN')
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.MEMBRE_MANAGE)
   @Post(':structureId/membres')
   @HttpCode(HttpStatus.CREATED)
   @ApiBearerAuth()
@@ -133,8 +140,8 @@ export class StructureController {
     return this.structureService.createMembre(structureId, req.user.userId, dto);
   }
 
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles('STRUCTURE_ADMIN')
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.MEMBRE_MANAGE)
   @Patch(':structureId/membres/:membreId/toggle-active')
   @ApiBearerAuth()
   @ApiParam({ name: 'structureId' })
@@ -152,8 +159,8 @@ export class StructureController {
     );
   }
 
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles('STRUCTURE_ADMIN')
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.MEMBRE_MANAGE)
   @Post(':structureId/membres/:membreId/delete')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()

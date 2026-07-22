@@ -26,6 +26,45 @@ enum StructureType {
 
 // ====== MODELS =======================
 
+// ─── RBAC dynamique (permissions) ─────────────────────────────
+// Cf. PLAN-REMEDIATION §2.5. Le catalogue de `Permission` est défini en code et
+// seedé (les structures ne créent pas de permissions, elles les piochent). Les
+// `AppRole` sont des données : rôles système (structureId = null) ou rôles custom
+// propres à une structure. `AppRole` coexiste avec l'enum `Role` (transition).
+
+model Permission {
+  id        String           @id @default(uuid())
+  code      String           @unique // ex. "carnet:write"
+  libelle   String                   // ex. "Modifier le carnet de santé"
+  categorie String                   // ex. "Carnet de santé"
+  roles     RolePermission[]
+  createdAt DateTime         @default(now())
+}
+
+model AppRole {
+  id          String           @id @default(uuid())
+  nom         String
+  description String?
+  isSystem    Boolean          @default(false) // non éditable / non supprimable
+  structureId String?                           // null = rôle système global
+  structure   Structure?       @relation("StructureRoles", fields: [structureId], references: [id], onDelete: Cascade)
+  permissions RolePermission[]
+  users       User[]           @relation("UserAppRole")
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([structureId, nom])
+}
+
+model RolePermission {
+  appRoleId    String
+  appRole      AppRole    @relation(fields: [appRoleId], references: [id], onDelete: Cascade)
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([appRoleId, permissionId])
+}
+
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
@@ -52,6 +91,10 @@ model User {
 
   // Structure dont cet user est l'admin
   administeredStructure Structure? @relation("StructureAdmin")
+
+  // Rôle dynamique (RBAC permissions) — coexiste avec `role` (enum) le temps de la transition
+  appRoleId String?
+  appRole   AppRole? @relation("UserAppRole", fields: [appRoleId], references: [id])
 
   // Carnet de santé (Patient side)
   profilMedical  ProfilMedical?
@@ -86,6 +129,9 @@ model User {
   rendezVousEnTantQuePatient RendezVous[] @relation("PatientRendezVous")
   rendezVousEnTantQueMedecin RendezVous[] @relation("MedecinRendezVous")
 
+  // Audit trail
+  auditLogs AuditLog[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -117,6 +163,9 @@ model Structure {
 
   // Membres (médecins, pharmaciens...)
   membres User[] @relation("StructureMembers")
+
+  // Rôles personnalisés définis par l'admin de cette structure
+  appRoles AppRole[] @relation("StructureRoles")
 
   // Stock médicaments (pharmacies)
   medicaments StockMedicament[]
@@ -192,6 +241,8 @@ model Consultation {
   // Ordonnances liées
   ordonnances Ordonnance[]
 
+  deletedAt   DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -213,6 +264,8 @@ model Ordonnance {
   dateEmission  DateTime @default(now())
   dateExpiration DateTime?
 
+  deletedAt   DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -231,6 +284,8 @@ model ResultatAnalyse {
   fichierUrl  String?  // lien vers le fichier PDF/image
   dateAnalyse DateTime
   notes       String?
+
+  deletedAt   DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -251,8 +306,26 @@ model Vaccination {
   administrePar String?
   notes        String?
 
+  deletedAt   DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ====== AUDIT TRAIL ==================
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String?  // NULL si action système
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  action      String   // ex. "create", "update", "delete"
+  entityType  String   // ex. "Consultation", "Ordonnance", "Vaccination", "ResultatAnalyse"
+  entityId    String   // ID de l'entité modifiée
+  ip          String?  // adresse IP source
+  metadata    Json?    // données contextuelles supplémentaires (ex. ancienne/nouvelle valeur)
+
+  createdAt   DateTime @default(now())
 }
 
 enum AppointmentStatus {

@@ -18,11 +18,12 @@ import {
   ApiParam,
   ApiResponse,
 } from '@nestjs/swagger';
-import { Role } from 'generated/prisma/client';
+import { Throttle } from '@nestjs/throttler';
 import { CarnetSanteService } from './carnet-sante.service';
 import { AuthGuard } from 'src/common/guards/auth.guard';
-import { RolesGuard } from 'src/common/guards/roles.guard';
-import { Roles } from 'src/common/decorators/roles.decorator';
+import { PermissionsGuard } from 'src/common/rbac/permissions.guard';
+import { RequirePermissions } from 'src/common/rbac/require-permissions.decorator';
+import { PERMISSIONS } from 'src/common/rbac/permissions.constants';
 import {
   UpsertProfilMedicalDto,
   CreateConsultationDto,
@@ -39,7 +40,7 @@ import { plainToInstance } from 'class-transformer';
 
 @ApiTags('Carnet de Santé')
 @Controller('carnet-sante')
-@UseGuards(AuthGuard, RolesGuard)
+@UseGuards(AuthGuard, PermissionsGuard)
 @ApiBearerAuth()
 export class CarnetSanteController {
   constructor(private readonly carnetSanteService: CarnetSanteService) { }
@@ -58,7 +59,7 @@ export class CarnetSanteController {
   // ─── Vue Médecin : Carnet d'un patient ────────────────────────
 
   @Get('patient/:patientId')
-  @Roles('MEDECIN', 'STRUCTURE_ADMIN')
+  @RequirePermissions(PERMISSIONS.CARNET_READ)
   @ApiParam({ name: 'patientId', description: 'ID du patient' })
   @ApiOperation({ summary: "Voir le carnet d'un patient (médecin traitant ou structure)" })
   async getPatientCarnet(@Req() req: any, @Param('patientId') patientId: string) {
@@ -99,6 +100,7 @@ export class CarnetSanteController {
   }
 
   @Post('consultations')
+  @RequirePermissions(PERMISSIONS.CONSULTATION_WRITE)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Ajouter une consultation' })
   @ApiResponse({ status: 201, description: 'Consultation ajoutée' })
@@ -122,6 +124,7 @@ export class CarnetSanteController {
   }
 
   @Post('ordonnances')
+  @RequirePermissions(PERMISSIONS.ORDONNANCE_WRITE)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Ajouter une ordonnance' })
   createOrdonnance(@Req() req: any, @Body() dto: CreateOrdonnanceDto) {
@@ -144,6 +147,7 @@ export class CarnetSanteController {
   }
 
   @Post('analyses')
+  @RequirePermissions(PERMISSIONS.ANALYSE_WRITE)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: "Ajouter un résultat d'analyse" })
   createAnalyse(@Req() req: any, @Body() dto: CreateResultatAnalyseDto) {
@@ -166,6 +170,7 @@ export class CarnetSanteController {
   }
 
   @Post('vaccinations')
+  @RequirePermissions(PERMISSIONS.VACCINATION_WRITE)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Ajouter une vaccination' })
   createVaccination(@Req() req: any, @Body() dto: CreateVaccinationDto) {
@@ -188,8 +193,8 @@ export class CarnetSanteController {
   }
 
   @Post('rendez-vous')
+  @RequirePermissions(PERMISSIONS.RENDEZVOUS_WRITE)
   @HttpCode(HttpStatus.CREATED)
-  @Roles('MEDECIN', 'STRUCTURE_ADMIN')
   @ApiOperation({ summary: 'Programmer un rendez-vous (Médecin)' })
   createRendezVous(@Req() req: any, @Body() dto: CreateRendezVousDto) {
     return this.carnetSanteService.createRendezVous(req.user.userId, dto, req.user.structureId);
@@ -214,6 +219,7 @@ export class CarnetSanteController {
   }
 
   @Post('auto-diagnostics')
+  @Throttle({ default: { limit: 10, ttl: 3_600_000 } }) // IA coûteuse : ~10/h/user.
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Lancer un auto-diagnostic IA',
@@ -231,6 +237,7 @@ export class CarnetSanteController {
   // ─── Urgences (SOS) ──────────────────────────────────────────
 
   @Post('sos')
+  @Throttle({ default: { limit: 5, ttl: 3_600_000 } }) // Anti-spam SOS : ~5/h/user.
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Lancer une alerte SOS' })
   createUrgence(@Req() req: any, @Body() dto: CreateUrgenceDto) {
@@ -238,20 +245,20 @@ export class CarnetSanteController {
   }
 
   @Post('sos/:id/take-charge')
-  @Roles(Role.MEDECIN, Role.STRUCTURE_ADMIN, Role.ADMIN)
+  @RequirePermissions(PERMISSIONS.SOS_RESPOND)
   takeCharge(@Param('id') id: string, @Req() req: any) {
     return this.carnetSanteService.takeCharge(id, req.user.userId);
   }
 
   @Get('sos/actives')
-  @Roles('MEDECIN', 'STRUCTURE_ADMIN', 'SUPER_ADMIN')
+  @RequirePermissions(PERMISSIONS.SOS_RESPOND)
   @ApiOperation({ summary: 'Voir les urgences actives (Hôpitaux/Admin)' })
   getActiveUrgences() {
     return this.carnetSanteService.getActiveUrgences();
   }
 
   @Post('sos/:id/status')
-  @Roles('MEDECIN', 'STRUCTURE_ADMIN', 'SUPER_ADMIN')
+  @RequirePermissions(PERMISSIONS.SOS_RESPOND)
   @ApiOperation({ summary: "Mettre à jour le statut d'une urgence" })
   updateUrgenceStatus(@Param('id') id: string, @Body('status') status: string) {
     return this.carnetSanteService.updateUrgenceStatus(id, status);

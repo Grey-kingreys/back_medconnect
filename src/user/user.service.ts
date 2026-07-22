@@ -9,6 +9,7 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { EmailService } from 'src/common/services/email.service';
 import { EncryptionService } from 'src/common/services/encryption.service';
+import { RolesService } from 'src/common/rbac/roles.service';
 import {
   CreateUserByAdminDto,
   UpdateUserDto,
@@ -21,6 +22,7 @@ export class UserService {
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
     private readonly encryptionService: EncryptionService,
+    private readonly rolesService: RolesService,
   ) { }
 
   // ─── Créer un utilisateur (par ADMIN/SUPER_ADMIN) ─────────────
@@ -42,6 +44,15 @@ export class UserService {
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
+    // Rôle RBAC : résolu pour les rôles système (PATIENT/ADMIN). Pour un rôle de
+    // structure sans structure rattachée ici, reste null → le backfill rattrape. Non bloquant.
+    let appRoleId: string | undefined;
+    try {
+      appRoleId = (await this.rolesService.resolveAssignableRoleId({ legacyRole: role as string })) ?? undefined;
+    } catch (e) {
+      console.error('Résolution appRole (createByAdmin) échouée:', e);
+    }
+
     const user = await this.prisma.user.create({
       data: {
         nom: nom.trim(),
@@ -50,6 +61,7 @@ export class UserService {
         password: hashedPassword,
         telephone: telephone?.trim(),
         role: role as any,
+        appRoleId,
         isActive: true,
         specialite: (role === 'MEDECIN') ? (dto as any).specialite : undefined,
       },

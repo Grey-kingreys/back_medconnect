@@ -6,11 +6,13 @@ import {
   ForbiddenException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Response } from 'express';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { EmailService } from 'src/common/services/email.service';
 import { AuthService } from 'src/auth/auth.service';
+import { RolesService } from 'src/common/rbac/roles.service';
 import {
   SetupStructureDto,
   CreateMembreDto,
@@ -34,6 +36,7 @@ export class StructureService {
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
     private readonly authService: AuthService,
+    private readonly rolesService: RolesService,
   ) { }
 
   // ─── Vérifier un token d'invitation ──────────────────────────
@@ -57,7 +60,7 @@ export class StructureService {
 
     if (!structure) {
       throw new UnauthorizedException(
-        'Lien d\'invitation invalide ou expiré. Contactez l\'administrateur MedConnect.',
+        'Lien d\'invitation invalide ou expiré. Contactez l\'administrateur MedConnecte.',
       );
     }
 
@@ -147,7 +150,7 @@ export class StructureService {
 
   // ─── Setup structure (admin clique sur le lien) ───────────────
 
-  async setupStructure(rawToken: string, dto: SetupStructureDto) {
+  async setupStructure(rawToken: string, dto: SetupStructureDto, res: Response) {
     const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
 
     const structure = await this.prisma.structure.findFirst({
@@ -160,7 +163,7 @@ export class StructureService {
 
     if (!structure) {
       throw new UnauthorizedException(
-        'Lien d\'invitation invalide ou expiré. Contactez l\'administrateur MedConnect.',
+        'Lien d\'invitation invalide ou expiré. Contactez l\'administrateur MedConnecte.',
       );
     }
 
@@ -227,6 +230,19 @@ export class StructureService {
       return { admin, structure: updatedStructure };
     });
 
+    // Rattacher l'admin au rôle « Administrateur de structure » (RBAC). Non bloquant.
+    try {
+      const appRoleId = await this.rolesService.resolveAssignableRoleId({
+        legacyRole: 'STRUCTURE_ADMIN',
+        structureId: structure.id,
+      });
+      if (appRoleId) {
+        await this.prisma.user.update({ where: { id: result.admin.id }, data: { appRoleId } });
+      }
+    } catch (e) {
+      console.error('Assignation appRole admin structure échouée:', e);
+    }
+
     // Générer le JWT
     const { access_token, refreshToken, refreshTokenExpires } = this.authService.generateTokens({
       userId: result.admin.id,
@@ -241,14 +257,21 @@ export class StructureService {
       data: { refreshToken: hashedRefresh, refreshTokenExpires },
     });
 
+    // Refresh token uniquement dans le cookie httpOnly (jamais dans le JSON).
+    res.cookie('refresh_token', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 jours
+    });
+
     return {
       data: {
         access_token,
-        refresh_token: refreshToken,
         user: result.admin,
         structure: result.structure,
       },
-      message: 'Votre espace a été configuré avec succès. Bienvenue sur MedConnect !',
+      message: 'Votre espace a été configuré avec succès. Bienvenue sur MedConnecte !',
       success: true,
     };
   }
@@ -292,6 +315,25 @@ export class StructureService {
       throw new ConflictException('Un compte avec cet email existe déjà');
     }
 
+    // Résoudre le rôle RBAC : soit celui choisi par l'admin (validé), soit le rôle
+    // par défaut correspondant à `role`. Non bloquant (le backfill rattrape sinon).
+    let appRoleId: string | undefined;
+    try {
+      if (dto.appRoleId) {
+        await this.rolesService.assertAssignableStructureRole(dto.appRoleId, structureId);
+        appRoleId = dto.appRoleId;
+      } else {
+        appRoleId =
+          (await this.rolesService.resolveAssignableRoleId({
+            legacyRole: dto.role,
+            structureId,
+          })) ?? undefined;
+      }
+    } catch (e) {
+      if (dto.appRoleId) throw e; // un rôle explicitement invalide doit être rejeté
+      console.error('Résolution appRole membre échouée:', e);
+    }
+
     // Générer un mot de passe temporaire
     const tempPassword = generateTempPassword();
     const hashedPassword = await bcrypt.hash(tempPassword, 12);
@@ -304,6 +346,7 @@ export class StructureService {
         password: hashedPassword,
         telephone: dto.telephone?.trim(),
         role: dto.role as any,
+        appRoleId,
         isActive: true,
         structureId: structureId,
         specialite: dto.role === 'MEDECIN' ? (dto as any).specialite : undefined,

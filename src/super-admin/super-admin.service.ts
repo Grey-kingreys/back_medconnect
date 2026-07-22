@@ -8,6 +8,7 @@ import * as crypto from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { EmailService } from 'src/common/services/email.service';
+import { RolesService } from 'src/common/rbac/roles.service';
 import { CreateStructureDto, CreateSuperAdminDto } from './dto/super-admin.dto';
 
 @Injectable()
@@ -15,6 +16,7 @@ export class SuperAdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
+    private readonly rolesService: RolesService,
   ) { }
 
   // ─── Créer une structure + envoyer l'invitation ───────────────
@@ -61,6 +63,15 @@ export class SuperAdminService {
         isActive: true,
       },
     });
+
+    // Seeder les rôles par défaut de la structure (Médecin/Accueil/Admin… selon le type).
+    // Non bloquant : un échec de seed ne doit pas annuler la création de la structure.
+    try {
+      await this.rolesService.seedStructureDefaultRoles(structure.id, structure.type);
+    } catch (e) {
+      // Le seeder de boot rattrapera cette structure au prochain démarrage.
+      console.error('Seed des rôles par défaut échoué pour la structure', structure.id, e);
+    }
 
     // Envoyer l'email d'invitation
     await this.emailService.sendStructureInviteEmail(

@@ -145,6 +145,14 @@ export class CreateMembreDto {
     @IsOptional()
     @IsString()
     specialite?: string;
+
+    @ApiPropertyOptional({
+        description:
+            "Rôle (RBAC) à attribuer, choisi parmi les rôles de la structure. À défaut, le rôle par défaut correspondant à `role` est utilisé.",
+    })
+    @IsOptional()
+    @IsString()
+    appRoleId?: string;
 }
 
 // ─── Update structure ─────────────────────────────────────────────────────────

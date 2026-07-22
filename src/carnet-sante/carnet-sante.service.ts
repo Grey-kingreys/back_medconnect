@@ -25,6 +25,7 @@ import { ChatGateway } from 'src/chat/chat.gateway';
 import { NotificationsService } from 'src/notifications/notifications.service';
 import { EncryptionService } from 'src/common/services/encryption.service';
 import { SmsService } from 'src/common/services/sms.service';
+import { QueueService } from 'src/queue/queue.service';
 
 @Injectable()
 export class CarnetSanteService {
@@ -35,7 +36,8 @@ export class CarnetSanteService {
     private readonly chatGateway: ChatGateway,
     private readonly notificationsService: NotificationsService,
     private readonly encryptionService: EncryptionService,
-    private readonly smsService: SmsService
+    private readonly smsService: SmsService,
+    private readonly queueService: QueueService
   ) { }
 
   private readonly logger = new Logger(CarnetSanteService.name);
@@ -811,26 +813,26 @@ export class CarnetSanteService {
     const contactTel = urgence.patient.profilMedical?.contactTelephone;
     const hasLocation = dto.latitude !== undefined && dto.longitude !== undefined && dto.latitude !== null && dto.longitude !== null;
     
-    // 1. Envoyer l'email REEL
+    // 1. Email d'alerte → file asynchrone (réponse immédiate, retries automatiques).
     if (contactEmail) {
-      await this.emailService.sendEmergencyAlertEmail(
-        contactEmail,
+      await this.queueService.enqueueEmergencyEmail({
+        to: contactEmail,
         contactNom,
-        urgence.patient.nom,
-        urgence.patient.prenom,
-        hasLocation ? { lat: dto.latitude!, lng: dto.longitude! } : undefined,
-        dto.message
-      );
+        patientNom: urgence.patient.nom,
+        patientPrenom: urgence.patient.prenom,
+        location: hasLocation ? { lat: dto.latitude!, lng: dto.longitude! } : undefined,
+        message: dto.message,
+      });
     }
 
-    // 2. SMS REEL via Nimba SMS
+    // 2. SMS d'urgence (Nimba) → file asynchrone.
     if (contactTel) {
       const locationStr = hasLocation ? `Position: https://www.google.com/maps?q=${dto.latitude},${dto.longitude}` : undefined;
-      await this.smsService.sendEmergencySms(
-        String(contactTel),
-        `${urgence.patient.prenom} ${urgence.patient.nom}`,
-        locationStr
-      );
+      await this.queueService.enqueueSos({
+        recipients: [String(contactTel)],
+        patientName: `${urgence.patient.prenom} ${urgence.patient.nom}`,
+        location: locationStr,
+      });
     }
 
     // 3. Notifier les 5 structures les plus proches
