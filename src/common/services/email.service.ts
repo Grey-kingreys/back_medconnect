@@ -9,7 +9,7 @@ export class EmailService {
   constructor() {
     this.resend = new Resend(process.env.RESEND_API_KEY);
     this.fromEmail =
-      process.env.RESEND_FROM_EMAIL || 'MedConnect <onboarding@resend.dev>';
+      process.env.RESEND_FROM_EMAIL || 'MedConnecte <onboarding@resend.dev>';
   }
 
   // ─── Emails Auth ──────────────────────────────────────────────
@@ -23,12 +23,12 @@ export class EmailService {
       await this.resend.emails.send({
         from: this.fromEmail,
         to: email,
-        subject: '🎉 Bienvenue sur MedConnect !',
+        subject: '🎉 Bienvenue sur MedConnecte !',
         html: this.buildLayout(
-          'Bienvenue sur MedConnect !',
+          'Bienvenue sur MedConnecte !',
           `
           <p>Bonjour <strong>${prenom} ${nom}</strong>,</p>
-          <p>Votre compte a été créé avec succès. Vous pouvez maintenant accéder à toutes les fonctionnalités de MedConnect :</p>
+          <p>Votre compte a été créé avec succès. Vous pouvez maintenant accéder à toutes les fonctionnalités de MedConnecte :</p>
           <ul>
             <li>Gérer votre carnet de santé numérique</li>
             <li>Localiser des services médicaux près de vous</li>
@@ -38,7 +38,7 @@ export class EmailService {
           <div style="text-align:center;margin:30px 0">
             <a href="${process.env.FRONTEND_URL}/auth/login" style="${this.btnStyle('#2563eb')}">Se connecter</a>
           </div>
-          <p>Cordialement,<br>L'équipe MedConnect</p>
+          <p>Cordialement,<br>L'équipe MedConnecte</p>
         `,
         ),
       });
@@ -58,7 +58,7 @@ export class EmailService {
       await this.resend.emails.send({
         from: this.fromEmail,
         to: email,
-        subject: '🔐 Réinitialisation de votre mot de passe — MedConnect',
+        subject: '🔐 Réinitialisation de votre mot de passe — MedConnecte',
         html: this.buildLayout(
           'Réinitialisation de mot de passe',
           `
@@ -72,13 +72,54 @@ export class EmailService {
             Si vous n'avez pas demandé cette réinitialisation, ignorez cet email.
           </div>
           <p>Lien direct : <a href="${resetUrl}" style="color:#2563eb;word-break:break-all">${resetUrl}</a></p>
-          <p>Cordialement,<br>L'équipe MedConnect</p>
+          <p>Cordialement,<br>L'équipe MedConnecte</p>
         `,
         ),
       });
     } catch (error) {
       console.error(`❌ Erreur email reset à ${email}:`, error);
       throw new Error("Impossible d'envoyer l'email de réinitialisation");
+    }
+  }
+
+  // ─── Email Alerte Sécurité (tentatives de connexion) ──────────
+
+  async sendSuspiciousLoginEmail(
+    email: string,
+    nom: string,
+    prenom: string,
+    ip: string,
+  ): Promise<void> {
+    const resetUrl = `${process.env.FRONTEND_URL}/auth/forgot-password`;
+    try {
+      await this.resend.emails.send({
+        from: this.fromEmail,
+        to: email,
+        subject: '🔒 Tentatives de connexion suspectes — MedConnecte',
+        html: this.buildLayout(
+          'Alerte de sécurité',
+          `
+          <p>Bonjour <strong>${prenom} ${nom}</strong>,</p>
+          <p>Nous avons détecté un nombre inhabituel de tentatives de connexion échouées
+          sur votre compte. Par précaution, les connexions depuis cette source ont été
+          temporairement bloquées.</p>
+          <div style="background:#fef2f2;border-left:4px solid #dc2626;padding:15px;margin:20px 0;border-radius:4px">
+            <strong>⚠️ Si ce n'était pas vous :</strong> votre mot de passe est peut-être
+            la cible d'une attaque. Nous vous recommandons de le réinitialiser dès que possible.
+          </div>
+          <p style="font-size:13px;color:#64748b">Origine approximative : <code>${ip}</code></p>
+          <div style="text-align:center;margin:30px 0">
+            <a href="${resetUrl}" style="${this.btnStyle('#dc2626')}">Réinitialiser mon mot de passe</a>
+          </div>
+          <p>Si vous êtes à l'origine de ces tentatives (mot de passe oublié), vous pouvez
+          ignorer cet email ; l'accès sera rétabli automatiquement après quelques minutes.</p>
+          <p>Cordialement,<br>L'équipe MedConnecte</p>
+        `,
+        ),
+      });
+    } catch (error) {
+      console.error(`❌ Erreur email alerte connexion à ${email}:`, error);
+      // Non bloquant : l'échec d'envoi ne doit pas perturber le flux d'authentification.
     }
   }
 
@@ -97,12 +138,12 @@ export class EmailService {
       await this.resend.emails.send({
         from: this.fromEmail,
         to: email,
-        subject: `🏥 Invitation — Configurez votre ${typeLabel} sur MedConnect`,
+        subject: `🏥 Invitation — Configurez votre ${typeLabel} sur MedConnecte`,
         html: this.buildLayout(
-          `Bienvenue sur MedConnect`,
+          `Bienvenue sur MedConnecte`,
           `
           <p>Bonjour,</p>
-          <p>Votre ${typeLabel} <strong>${structureNom}</strong> a été enregistrée sur la plateforme <strong>MedConnect</strong>.</p>
+          <p>Votre ${typeLabel} <strong>${structureNom}</strong> a été enregistrée sur la plateforme <strong>MedConnecte</strong>.</p>
           <p>Pour finaliser la configuration de votre espace, cliquez sur le bouton ci-dessous :</p>
           <div style="text-align:center;margin:30px 0">
             <a href="${setupUrl}" style="${this.btnStyle('#059669')}">Configurer mon espace</a>
@@ -117,7 +158,7 @@ export class EmailService {
             <strong>⚠️ Ce lien expire dans 72 heures.</strong>
           </div>
           <p>Lien direct : <a href="${setupUrl}" style="color:#2563eb;word-break:break-all">${setupUrl}</a></p>
-          <p>Cordialement,<br>L'équipe MedConnect</p>
+          <p>Cordialement,<br>L'équipe MedConnecte</p>
         `,
         ),
       });
@@ -141,12 +182,12 @@ export class EmailService {
       await this.resend.emails.send({
         from: this.fromEmail,
         to: email,
-        subject: `🏥 Votre compte ${roleLabel} sur MedConnect — ${structureNom}`,
+        subject: `🏥 Votre compte ${roleLabel} sur MedConnecte — ${structureNom}`,
         html: this.buildLayout(
-          `Votre compte MedConnect`,
+          `Votre compte MedConnecte`,
           `
           <p>Bonjour <strong>${prenom} ${nom}</strong>,</p>
-          <p>Un compte <strong>${roleLabel}</strong> vous a été créé sur MedConnect pour la structure <strong>${structureNom}</strong>.</p>
+          <p>Un compte <strong>${roleLabel}</strong> vous a été créé sur MedConnecte pour la structure <strong>${structureNom}</strong>.</p>
           <div style="background:#f0fdf4;border:1px solid #86efac;padding:20px;border-radius:8px;margin:20px 0">
             <p style="margin:0"><strong>Email :</strong> ${email}</p>
             <p style="margin:8px 0 0"><strong>Mot de passe temporaire :</strong> <code style="background:#e2e8f0;padding:2px 6px;border-radius:4px">${temporaryPassword}</code></p>
@@ -155,7 +196,7 @@ export class EmailService {
           <div style="text-align:center;margin:30px 0">
             <a href="${process.env.FRONTEND_URL}/auth/login" style="${this.btnStyle('#2563eb')}">Se connecter</a>
           </div>
-          <p>Cordialement,<br>L'équipe MedConnect</p>
+          <p>Cordialement,<br>L'équipe MedConnecte</p>
         `,
         ),
       });
@@ -180,7 +221,7 @@ export class EmailService {
 
     try {
       await this.resend.emails.send({
-        from: 'SOS MedConnect <sos@resend.dev>', // Ou this.fromEmail
+        from: 'SOS MedConnecte <sos@resend.dev>', // Ou this.fromEmail
         to: contactEmail,
         subject: `🚨 ALERTE URGENCE : ${patientPrenom} ${patientNom} a besoin d'aide !`,
         html: this.buildLayout(
@@ -190,7 +231,7 @@ export class EmailService {
             <h2 style="color:#b91c1c;margin-top:0">⚠️ ALERTE SOS DÉCLENCHÉE</h2>
             <p style="font-size:16px;color:#7f1d1d">Bonjour <strong>${contactNom}</strong>,</p>
             <p style="font-size:18px;font-weight:bold;color:#b91c1c">
-              ${patientPrenom} ${patientNom} vient de déclencher une alerte d'urgence vitale via MedConnect.
+              ${patientPrenom} ${patientNom} vient de déclencher une alerte d'urgence vitale via MedConnecte.
             </p>
           </div>
 
@@ -233,12 +274,12 @@ export class EmailService {
         <body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;margin:0;padding:0;background:#f9fafb">
           <div style="max-width:600px;margin:40px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1)">
             <div style="background:linear-gradient(135deg,#2563eb,#1d4ed8);padding:30px;text-align:center">
-              <h1 style="color:#fff;margin:0;font-size:24px">🏥 MedConnect</h1>
+              <h1 style="color:#fff;margin:0;font-size:24px">🏥 MedConnecte</h1>
               <p style="color:#bfdbfe;margin:8px 0 0;font-size:14px">${title}</p>
             </div>
             <div style="padding:30px">${content}</div>
             <div style="background:#f1f5f9;padding:20px;text-align:center;font-size:12px;color:#64748b">
-              <p style="margin:0">© ${new Date().getFullYear()} MedConnect — Plateforme de Santé Numérique</p>
+              <p style="margin:0">© ${new Date().getFullYear()} MedConnecte — Plateforme de Santé Numérique</p>
               <p style="margin:4px 0 0">Cet email a été envoyé automatiquement, merci de ne pas y répondre.</p>
             </div>
           </div>

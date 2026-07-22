@@ -19,7 +19,11 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
+
+/** Palier strict pour les endpoints sensibles d'auth : 10 req/min/IP. */
+const AUTH_THROTTLE = { default: { limit: 10, ttl: 60_000 } };
 import { AuthGuard } from 'src/common/guards/auth.guard';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -45,12 +49,18 @@ export class AuthController {
   }
 
   @Post('login')
+  @Throttle(AUTH_THROTTLE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Connexion', description: 'Authentifie un utilisateur (tous rôles)' })
   @ApiResponse({ status: 200, description: 'Connexion réussie' })
   @ApiResponse({ status: 401, description: 'Email ou mot de passe incorrect' })
-  login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
-    return this.authService.login(dto, res);
+  login(
+    @Body() dto: LoginDto,
+    @Res({ passthrough: true }) res: Response,
+    @Req() req: any,
+  ) {
+    // req.ip fiable car `trust proxy` est configuré dans main.ts (derrière Caddy).
+    return this.authService.login(dto, res, req.ip);
   }
 
   @UseGuards(AuthGuard)
@@ -79,6 +89,7 @@ export class AuthController {
   }
 
   @Post('forgot-password')
+  @Throttle(AUTH_THROTTLE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Mot de passe oublié', description: 'Envoie un email de réinitialisation' })
   forgotPassword(@Body() dto: ForgotPasswordDto) {
@@ -86,6 +97,7 @@ export class AuthController {
   }
 
   @Post('reset-password')
+  @Throttle(AUTH_THROTTLE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Réinitialiser le mot de passe' })
   resetPassword(@Body() dto: ResetPasswordDto) {
@@ -116,11 +128,10 @@ export class AuthController {
   refresh(
     @Req() req: any,
     @Res({ passthrough: true }) res: Response,
-    @Body() body: { refresh_token?: string }
   ) {
-    // Essayer de lire depuis le cookie d'abord, puis le body
-    const token = req.cookies['refresh_token'] || body.refresh_token;
-    
+    // Le refresh token vit UNIQUEMENT dans le cookie httpOnly (plus de fallback body).
+    const token = req.cookies?.['refresh_token'];
+
     if (!token) throw new BadRequestException('refresh_token requis');
     return this.authService.refreshAccessToken(token, res);
   }
