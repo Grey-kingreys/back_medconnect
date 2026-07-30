@@ -19,8 +19,9 @@ async function bootstrap() {
   const logger = app.get(Logger);
   app.useLogger(logger);
 
-  // Derrière Caddy (reverse proxy) : faire confiance au 1er proxy pour que `req.ip`
-  // reflète l'IP réelle du client (via X-Forwarded-For) et non celle de Caddy.
+  // Derrière un reverse proxy (Traefik en prod via Dokploy) : faire confiance au
+  // 1er proxy pour que `req.ip` reflète l'IP réelle du client (via X-Forwarded-For)
+  // et non celle du proxy.
   // Indispensable au rate-limiting/anti-brute-force par IP.
   app.set('trust proxy', 1);
 

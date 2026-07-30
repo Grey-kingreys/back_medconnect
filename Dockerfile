@@ -55,6 +55,13 @@ COPY --from=build /app/tsconfig.json       ./tsconfig.json
 COPY --from=build /app/tsconfig.build.json ./tsconfig.build.json
 COPY package.json package-lock.json        ./
 EXPOSE 3001
+# Sonde de santé : l'orchestrateur (Docker Swarm, derrière Dokploy) n'ajoute le
+# conteneur au routage Traefik qu'une fois « healthy ». `GET /` est le health check
+# de l'API (AppController, @SkipThrottle → jamais throttlé). L'image node:*-slim
+# n'embarque ni curl ni wget → on passe par le `fetch` global de Node 22.
+# start-period généreux : l'entrypoint joue `prisma migrate deploy` avant le boot.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 # `import { PrismaClient } from 'generated/prisma/client'` est un bare specifier :
 # tsconfig-paths/register le résout via baseUrl (./) → ./generated/prisma/client au runtime.
 CMD ["node", "-r", "tsconfig-paths/register", "dist/src/main.js"]
