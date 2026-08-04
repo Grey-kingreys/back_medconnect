@@ -19,9 +19,7 @@ async function bootstrap() {
   const logger = app.get(Logger);
   app.useLogger(logger);
 
-  // Derrière un reverse proxy (Traefik en prod via Dokploy) : faire confiance au
-  // 1er proxy pour que `req.ip` reflète l'IP réelle du client (via X-Forwarded-For)
-  // et non celle du proxy.
+  // Derrière Traefik (Dokploy) : `req.ip` = IP réelle du client via X-Forwarded-For.
   // Indispensable au rate-limiting/anti-brute-force par IP.
   app.set('trust proxy', 1);
 
