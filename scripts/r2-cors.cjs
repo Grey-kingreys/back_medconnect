@@ -3,10 +3,15 @@
  * direct (PUT présigné) depuis le navigateur. Sans ça, le PUT cross-origin est
  * bloqué par le navigateur (« Erreur réseau ») — curl n'est pas concerné.
  *
- * Usage (dans le conteneur backend, qui a les env R2_* et @aws-sdk/client-s3) :
+ * Exige un token R2 de niveau ADMIN : le token de l'application est limité aux objets
+ * et se heurte à AccessDenied sur la config d'un bucket. Sans token admin, passer par
+ * le tableau de bord Cloudflare (R2 > bucket > Settings > CORS Policy).
+ *
+ * Usage (dans le conteneur backend, qui a @aws-sdk/client-s3) :
  *   docker compose exec -T backend node scripts/r2-cors.cjs
  * Origines autorisées : CORS_ORIGINS (CSV) ou http://localhost:3000 par défaut.
- * En prod, passer les origines réelles : CORS_ORIGINS=https://medconnecte.com
+ * Remplace la politique en bloc : lister toutes les origines d'un coup.
+ * En prod : CORS_ORIGINS=http://localhost:3000,https://medconnecte.com
  */
 const {
   S3Client,
