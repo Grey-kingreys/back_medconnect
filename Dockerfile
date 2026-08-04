@@ -53,6 +53,8 @@ COPY --from=build /app/prisma              ./prisma
 COPY --from=build /app/prisma.config.ts    ./prisma.config.ts
 COPY --from=build /app/tsconfig.json       ./tsconfig.json
 COPY --from=build /app/tsconfig.build.json ./tsconfig.build.json
+# Utilitaires d'exploitation lancés à la main (r2-cors.cjs), jamais au démarrage.
+COPY --from=build /app/scripts              ./scripts
 COPY package.json package-lock.json        ./
 EXPOSE 3001
 # Sonde de santé (GET /). node:*-slim n'a ni curl ni wget → fetch global de Node 22.
