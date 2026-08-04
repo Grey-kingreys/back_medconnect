@@ -46,8 +46,11 @@ import type { IncomingMessage } from 'http';
     //    ou de localisation exposée dans un log doit être ajoutée à cette liste.
     LoggerModule.forRoot({
       pinoHttp: {
+        // `||` et non `??` : une variable déclarée mais vide (fréquent quand on colle
+        // un bloc d'env dans une UI) doit retomber sur le défaut. Avec `??`, Pino
+        // recevait level:'' et refusait de démarrer.
         level:
-          process.env.LOG_LEVEL ??
+          process.env.LOG_LEVEL ||
           (process.env.NODE_ENV === 'production' ? 'info' : 'debug'),
         transport:
           process.env.NODE_ENV === 'production'
