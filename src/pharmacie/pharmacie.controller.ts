@@ -22,8 +22,9 @@ import {
 } from '@nestjs/swagger';
 import { PharmacieService } from './pharmacie.service';
 import { AuthGuard } from 'src/common/guards/auth.guard';
-import { RolesGuard } from 'src/common/guards/roles.guard';
-import { Roles } from 'src/common/decorators/roles.decorator';
+import { PermissionsGuard } from 'src/common/rbac/permissions.guard';
+import { RequirePermissions } from 'src/common/rbac/require-permissions.decorator';
+import { PERMISSIONS } from 'src/common/rbac/permissions.constants';
 import {
   CreateMedicamentDto,
   UpdateMedicamentDto,
@@ -93,8 +94,8 @@ export class PharmacieController {
 
   // ─── Catalogue Admin (ADMIN/SUPER_ADMIN) ─────────────────────
 
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles('ADMIN', 'SUPER_ADMIN', 'PHARMACIEN', 'STRUCTURE_ADMIN')
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.CATALOGUE_WRITE)
   @Post('catalogue')
   @HttpCode(HttpStatus.CREATED)
   @ApiBearerAuth()
@@ -103,8 +104,8 @@ export class PharmacieController {
     return this.pharmacieService.createMedicament(dto, req.user.userId);
   }
 
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.CATALOGUE_MANAGE)
   @Patch('catalogue/:medicamentId')
   @ApiBearerAuth()
   @ApiParam({ name: 'medicamentId' })
@@ -117,8 +118,8 @@ export class PharmacieController {
     return this.pharmacieService.updateMedicament(medicamentId, dto, req.user.userId);
   }
 
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles('ADMIN', 'SUPER_ADMIN')
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.CATALOGUE_MANAGE)
   @Delete('catalogue/:medicamentId')
   @ApiBearerAuth()
   @ApiParam({ name: 'medicamentId' })
@@ -129,8 +130,8 @@ export class PharmacieController {
 
   // ─── Gestion Stock (STRUCTURE_ADMIN de pharmacie) ─────────────
 
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles('STRUCTURE_ADMIN', 'PHARMACIEN')
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.STOCK_READ, PERMISSIONS.STOCK_WRITE)
   @Get('stock/:structureId')
   @ApiBearerAuth()
   @ApiParam({ name: 'structureId' })
@@ -142,8 +143,8 @@ export class PharmacieController {
     return this.pharmacieService.getStockPharmacie(structureId, req.user.userId);
   }
 
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles('STRUCTURE_ADMIN', 'PHARMACIEN')
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.STOCK_READ, PERMISSIONS.STOCK_WRITE)
   @Post('stock/:structureId')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
@@ -160,8 +161,8 @@ export class PharmacieController {
     return this.pharmacieService.upsertStock(structureId, req.user.userId, dto);
   }
 
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles('STRUCTURE_ADMIN', 'PHARMACIEN')
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.STOCK_READ, PERMISSIONS.STOCK_WRITE)
   @Patch('stock/:structureId/:stockId/quantite')
   @ApiBearerAuth()
   @ApiParam({ name: 'structureId' })
@@ -184,8 +185,8 @@ export class PharmacieController {
     );
   }
 
-  @UseGuards(AuthGuard, RolesGuard)
-  @Roles('STRUCTURE_ADMIN', 'PHARMACIEN')
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.STOCK_READ, PERMISSIONS.STOCK_WRITE)
   @Delete('stock/:structureId/:stockId')
   @ApiBearerAuth()
   @ApiParam({ name: 'structureId' })

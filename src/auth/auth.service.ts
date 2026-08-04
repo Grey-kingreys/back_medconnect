@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   UnauthorizedException,
   ConflictException,
   BadRequestException,
@@ -11,6 +12,9 @@ import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { EmailService } from 'src/common/services/email.service';
+import { RolesService } from 'src/common/rbac/roles.service';
+import { PermissionsService } from 'src/common/rbac/permissions.service';
+import { LoginThrottleService } from './login-throttle.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import {
@@ -28,16 +32,33 @@ export type UserPayload = {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly emailService: EmailService,
+    private readonly loginThrottle: LoginThrottleService,
+    private readonly rolesService: RolesService,
+    private readonly permissionsService: PermissionsService,
   ) { }
+
+  /** Résout l'appRoleId à assigner (non bloquant : null en cas d'échec, le backfill rattrape). */
+  private async resolveAppRoleId(legacyRole: string, structureId?: string | null): Promise<string | null> {
+    try {
+      return await this.rolesService.resolveAssignableRoleId({ legacyRole, structureId });
+    } catch {
+      return null;
+    }
+  }
 
   // ─── Login ────────────────────────────────────────────────────
 
-  async login(loginDto: LoginDto, res: Response) {
+  async login(loginDto: LoginDto, res: Response, ip: string) {
     const { email, password } = loginDto;
+
+    // Anti-brute-force : blocage dur (429 + Retry-After) si seuil dépassé, sinon backoff progressif.
+    await this.loginThrottle.guard(email, ip, res);
 
     const user = await this.prisma.user.findUnique({
       where: { email: email.toLowerCase() },
@@ -57,6 +78,8 @@ export class AuthService {
     });
 
     if (!user) {
+      // Compté pour ne pas révéler l'inexistence de l'email (réponse uniforme).
+      await this.loginThrottle.registerFailure(email, ip);
       throw new UnauthorizedException('Email ou mot de passe incorrect');
     }
 
@@ -68,8 +91,18 @@ export class AuthService {
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
+      const blockedNow = await this.loginThrottle.registerFailure(email, ip);
+      // Notifier le titulaire uniquement au déclenchement du blocage dur (envoi unique).
+      if (blockedNow) {
+        this.emailService
+          .sendSuspiciousLoginEmail(user.email, user.nom, user.prenom, ip)
+          .catch((e) => this.logger.error("Email d'alerte de connexion échoué", e));
+      }
       throw new UnauthorizedException('Email ou mot de passe incorrect');
     }
+
+    // Connexion réussie → remise à zéro des compteurs anti-brute-force.
+    await this.loginThrottle.reset(email, ip);
 
     const { access_token, refreshToken, refreshTokenExpires } = this.generateTokens({ 
       userId: user.id, 
@@ -91,10 +124,11 @@ export class AuthService {
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 jours
     });
 
+    // Le refresh token n'est JAMAIS renvoyé dans le JSON : uniquement via le cookie
+    // httpOnly ci-dessus (sinon le bénéfice httpOnly est annulé — exposition XSS).
     return {
       data: {
         access_token: access_token,
-        refresh_token: refreshToken, // Ajouté pour le stockage local en cas de cookies bloqués
         user: {
           id: user.id,
           email: user.email,
@@ -127,6 +161,8 @@ export class AuthService {
 
     const hashedPassword = await this.hashPassword(password);
 
+    const appRoleId = await this.resolveAppRoleId('PATIENT', null);
+
     const user = await this.prisma.user.create({
       data: {
         nom: nom.trim(),
@@ -138,6 +174,7 @@ export class AuthService {
         taille: taille ?? undefined,
         poids: poids ?? undefined,
         role: 'PATIENT',
+        appRoleId: appRoleId ?? undefined,
         isActive: true,
       },
       select: {
@@ -169,12 +206,12 @@ export class AuthService {
     // Email de bienvenue (non bloquant)
     this.emailService
       .sendWelcomeEmail(user.email, user.nom, user.prenom)
-      .catch(console.error);
+      .catch((e) => this.logger.error('Email de bienvenue échoué', e));
 
+    // Refresh token uniquement dans le cookie httpOnly (cf. login).
     return {
       data: {
         access_token: access_token,
-        refresh_token: refreshToken, // Ajouté
         user: {
           id: user.id,
           email: user.email,
@@ -183,7 +220,7 @@ export class AuthService {
           role: user.role,
         },
       },
-      message: 'Inscription réussie ! Bienvenue sur MedConnect.',
+      message: 'Inscription réussie ! Bienvenue sur MedConnecte.',
       success: true,
     };
   }
@@ -205,6 +242,7 @@ export class AuthService {
         role: true,
         isActive: true,
         structureId: true,
+        avatarFile: { select: { key: true } },
         structure: {
           select: { id: true, nom: true, type: true },
         },
@@ -217,7 +255,21 @@ export class AuthService {
       throw new NotFoundException('Utilisateur non trouvé');
     }
 
-    return { data: user, message: 'Profil récupéré', success: true };
+    // Résoudre les permissions effectives de l'utilisateur
+    const permissions = await this.permissionsService.getUserPermissions(userId);
+
+    // URL publique de l'avatar (bucket public R2 servi via R2_PUBLIC_URL), null si aucun.
+    // Résolu inline (pas d'injection de StorageService : StorageModule importe déjà
+    // AuthModule → éviterait un cycle de dépendances).
+    const { avatarFile, ...rest } = user;
+    const base = (process.env.R2_PUBLIC_URL || '').replace(/\/+$/, '');
+    const avatarUrl = avatarFile ? `${base}/${avatarFile.key}` : null;
+
+    return {
+      data: { ...rest, avatarUrl, permissions },
+      message: 'Profil récupéré',
+      success: true,
+    };
   }
 
   // ─── Edit Profile ─────────────────────────────────────────────
@@ -468,10 +520,10 @@ export class AuthService {
       maxAge: 30 * 24 * 60 * 60 * 1000,
     });
 
+    // Nouveau refresh token uniquement dans le cookie httpOnly (rotation).
     return {
-      data: { 
+      data: {
         access_token,
-        refresh_token: newRefresh // Ajouté
       },
       message: 'Token renouvelé',
       success: true,

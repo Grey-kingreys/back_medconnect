@@ -39,8 +39,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
       
-      const secret = process.env.JWT_SECRET || 'secret'; 
-      const decoded = this.jwtService.verify(token, { secret });
+      // Secret centralisé (validé au boot, cf. config/env.validation.ts) — plus de fallback en dur.
+      const decoded = this.jwtService.verify(token, { secret: process.env.JWT_SECRET });
       const userId = decoded.userId;
       client.data.userId = userId;
 

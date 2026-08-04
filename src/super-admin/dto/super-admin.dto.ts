@@ -88,7 +88,7 @@ export class CreateSuperAdminDto {
     @Length(2, 100)
     prenom: string;
 
-    @ApiProperty({ example: 'superadmin@medconnect.gn' })
+    @ApiProperty({ example: 'superadmin@medconnecte.gn' })
     @IsNotEmpty({ message: "L'email est obligatoire" })
     @IsEmail({}, { message: "L'email n'est pas valide" })
     email: string;

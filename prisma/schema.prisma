@@ -16,6 +16,7 @@ enum Role {
   STRUCTURE_ADMIN
   ADMIN
   SUPER_ADMIN
+  ACCUEIL // Front desk d'une structure : oriente, prend les RDV, gère les messages structure. Pas d'accès au carnet.
 }
 
 enum StructureType {
@@ -25,6 +26,45 @@ enum StructureType {
 }
 
 // ====== MODELS =======================
+
+// ─── RBAC dynamique (permissions) ─────────────────────────────
+// Cf. PLAN-REMEDIATION §2.5. Le catalogue de `Permission` est défini en code et
+// seedé (les structures ne créent pas de permissions, elles les piochent). Les
+// `AppRole` sont des données : rôles système (structureId = null) ou rôles custom
+// propres à une structure. `AppRole` coexiste avec l'enum `Role` (transition).
+
+model Permission {
+  id        String           @id @default(uuid())
+  code      String           @unique // ex. "carnet:write"
+  libelle   String                   // ex. "Modifier le carnet de santé"
+  categorie String                   // ex. "Carnet de santé"
+  roles     RolePermission[]
+  createdAt DateTime         @default(now())
+}
+
+model AppRole {
+  id          String           @id @default(uuid())
+  nom         String
+  description String?
+  isSystem    Boolean          @default(false) // non éditable / non supprimable
+  structureId String?                           // null = rôle système global
+  structure   Structure?       @relation("StructureRoles", fields: [structureId], references: [id], onDelete: Cascade)
+  permissions RolePermission[]
+  users       User[]           @relation("UserAppRole")
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([structureId, nom])
+}
+
+model RolePermission {
+  appRoleId    String
+  appRole      AppRole    @relation(fields: [appRoleId], references: [id], onDelete: Cascade)
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([appRoleId, permissionId])
+}
 
 model User {
   id        String   @id @default(uuid())
@@ -52,6 +92,10 @@ model User {
 
   // Structure dont cet user est l'admin
   administeredStructure Structure? @relation("StructureAdmin")
+
+  // Rôle dynamique (RBAC permissions) — coexiste avec `role` (enum) le temps de la transition
+  appRoleId String?
+  appRole   AppRole? @relation("UserAppRole", fields: [appRoleId], references: [id])
 
   // Carnet de santé (Patient side)
   profilMedical  ProfilMedical?
@@ -86,6 +130,16 @@ model User {
   rendezVousEnTantQuePatient RendezVous[] @relation("PatientRendezVous")
   rendezVousEnTantQueMedecin RendezVous[] @relation("MedecinRendezVous")
 
+  // Audit trail
+  auditLogs AuditLog[]
+
+  // Fichiers stockés (R2) dont cet utilisateur est propriétaire
+  storedFiles StoredFile[] @relation("UserStoredFiles")
+
+  // Photo de profil (avatar) — fichier R2 du bucket PUBLIC. SetNull si le fichier est supprimé.
+  avatarFileId String?     @unique
+  avatarFile   StoredFile? @relation("UserAvatar", fields: [avatarFileId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -117,6 +171,13 @@ model Structure {
 
   // Membres (médecins, pharmaciens...)
   membres User[] @relation("StructureMembers")
+
+  // Rôles personnalisés définis par l'admin de cette structure
+  appRoles AppRole[] @relation("StructureRoles")
+
+  // Logo — fichier R2 du bucket PUBLIC. SetNull si le fichier est supprimé.
+  logoFileId String?     @unique
+  logoFile   StoredFile? @relation("StructureLogo", fields: [logoFileId], references: [id], onDelete: SetNull)
 
   // Stock médicaments (pharmacies)
   medicaments StockMedicament[]
@@ -192,6 +253,8 @@ model Consultation {
   // Ordonnances liées
   ordonnances Ordonnance[]
 
+  deletedAt   DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -213,6 +276,12 @@ model Ordonnance {
   dateEmission  DateTime @default(now())
   dateExpiration DateTime?
 
+  // Ordonnance scannée (PDF/image) — fichier R2 du bucket PRIVÉ. Lecture via URL présignée.
+  scanFileId String?     @unique
+  scanFile   StoredFile? @relation("OrdonnanceScan", fields: [scanFileId], references: [id], onDelete: SetNull)
+
+  deletedAt   DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -228,9 +297,14 @@ model ResultatAnalyse {
   typeAnalyse String   // "Bilan sanguin", "Radiographie", etc.
   laboratoire String?
   resultats   String   // JSON ou texte libre
-  fichierUrl  String?  // lien vers le fichier PDF/image
+  fichierUrl  String?  // ⚠️ DÉPRÉCIÉ (URL brute sans contrôle d'accès) — remplacé par documentFile. À retirer une fois le front migré.
+  // Document d'analyse (PDF/image/DICOM) — fichier R2 du bucket PRIVÉ. Lecture via URL présignée.
+  documentFileId String?     @unique
+  documentFile   StoredFile? @relation("AnalyseDocument", fields: [documentFileId], references: [id], onDelete: SetNull)
   dateAnalyse DateTime
   notes       String?
+
+  deletedAt   DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -251,8 +325,26 @@ model Vaccination {
   administrePar String?
   notes        String?
 
+  deletedAt   DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ====== AUDIT TRAIL ==================
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  userId      String?  // NULL si action système
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  action      String   // ex. "create", "update", "delete"
+  entityType  String   // ex. "Consultation", "Ordonnance", "Vaccination", "ResultatAnalyse"
+  entityId    String   // ID de l'entité modifiée
+  ip          String?  // adresse IP source
+  metadata    Json?    // données contextuelles supplémentaires (ex. ancienne/nouvelle valeur)
+
+  createdAt   DateTime @default(now())
 }
 
 enum AppointmentStatus {
@@ -260,6 +352,8 @@ enum AppointmentStatus {
   CONFIRME
   ANNULE
   TERMINE
+  EN_ATTENTE // proposé (par l'accueil ou sur la structure), en attente de validation d'un médecin
+  REFUSE     // proposition refusée par le médecin
 }
 
 model RendezVous {
@@ -267,8 +361,10 @@ model RendezVous {
   patientId   String
   patient     User     @relation("PatientRendezVous", fields: [patientId], references: [id], onDelete: Cascade)
   
-  medecinId   String
-  medecin     User     @relation("MedecinRendezVous", fields: [medecinId], references: [id], onDelete: Cascade)
+  // Optionnel : un RDV « avec la structure » (pris par l'accueil) n'est pas encore
+  // affecté à un médecin — un médecin de la structure le prend en charge ensuite.
+  medecinId   String?
+  medecin     User?    @relation("MedecinRendezVous", fields: [medecinId], references: [id], onDelete: SetNull)
 
   structureId String?
   structure   Structure? @relation(fields: [structureId], references: [id], onDelete: SetNull)
@@ -416,6 +512,45 @@ model Urgence {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ====== STOCKAGE OBJETS (Cloudflare R2) ======
+// Métadonnées des fichiers déposés sur R2 (avatars, logos, ordonnances scannées,
+// résultats d'analyses, imagerie envoyée au diagnostic IA). On ne persiste JAMAIS
+// d'URL présignée (elle expire et fuiterait un accès) — uniquement la `key` R2.
+// Cf. `src/storage/` (StorageModule) — module isolé, migration des usages métier séparée.
+
+enum StoredFileBucket {
+  PUBLIC   // bucket public (cdn.medconnecte.com) : avatars, logos, images d'articles
+  PRIVATE  // bucket privé : documents médicaux, accès par URL présignée uniquement
+}
+
+enum StoredFileStatus {
+  PENDING    // enregistrement créé lors de la demande d'URL présignée, upload non confirmé
+  CONFIRMED  // upload vérifié via HeadObject
+}
+
+model StoredFile {
+  id           String           @id @default(uuid())
+  key          String           @unique // clé R2 (jamais une URL présignée)
+  bucket       StoredFileBucket
+  mimeType     String
+  size         Int                      // taille en octets
+  originalName String                   // conservé pour l'affichage uniquement (jamais dans la clé)
+  ownerId      String
+  owner        User             @relation("UserStoredFiles", fields: [ownerId], references: [id], onDelete: Cascade)
+  status       StoredFileStatus @default(PENDING)
+  createdAt    DateTime         @default(now())
+  confirmedAt  DateTime?
+
+  // Rattachements métier (1-1, côté inverse des relations). Un fichier ne sert qu'à une chose.
+  avatarOfUser      User?            @relation("UserAvatar")
+  logoOfStructure   Structure?       @relation("StructureLogo")
+  scanOfOrdonnance  Ordonnance?      @relation("OrdonnanceScan")
+  documentOfAnalyse ResultatAnalyse? @relation("AnalyseDocument")
+
+  @@index([ownerId])
+  @@index([status, createdAt]) // purge des `pending` périmés (> 24 h)
 }
 
 // ====== NOTIFICATIONS ======

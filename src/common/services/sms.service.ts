@@ -7,7 +7,7 @@ export class SmsService {
   private readonly apiUrl = 'https://api.nimbasms.com/v1/messages';
   private readonly sid = process.env.NIMBA_SID;
   private readonly token = process.env.NIMBA_TOKEN;
-  private readonly sender = process.env.NIMBA_SENDER || 'MedConnect';
+  private readonly sender = process.env.NIMBA_SENDER || 'MedConnecte';
 
   /**
    * Envoie un SMS via Nimba SMS
@@ -65,7 +65,7 @@ export class SmsService {
    */
   async sendEmergencySms(to: string, patientName: string, location?: string): Promise<boolean> {
     const locText = location ? ` à ${location}` : '';
-    const message = `[URGENCE MedConnect] SOS déclenché par ${patientName}${locText}. Veuillez vérifier son état immédiatement.`;
+    const message = `[URGENCE MedConnecte] SOS déclenché par ${patientName}${locText}. Veuillez vérifier son état immédiatement.`;
     return this.sendSms(to, message);
   }
 }

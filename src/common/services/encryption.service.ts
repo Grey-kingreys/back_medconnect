@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 
@@ -6,6 +6,7 @@ import * as crypto from 'crypto';
 export class EncryptionService {
   private readonly algorithm = 'aes-256-gcm';
   private readonly key: Buffer;
+  private readonly logger = new Logger(EncryptionService.name);
 
   constructor(private configService: ConfigService) {
     const secret = this.configService.get<string>('ENCRYPTION_KEY');
@@ -53,7 +54,7 @@ export class EncryptionService {
 
       return decrypted;
     } catch (error) {
-      console.error('Erreur de décryptage :', error.message);
+      this.logger.error('encryption.decrypt_failed — clé may be rotated or data corrupted', { error: error.message });
       return ' [Donnée illisible] ';
     }
   }

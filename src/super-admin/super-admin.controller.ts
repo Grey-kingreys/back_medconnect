@@ -19,14 +19,15 @@ import {
 } from '@nestjs/swagger';
 import { SuperAdminService } from './super-admin.service';
 import { AuthGuard } from 'src/common/guards/auth.guard';
-import { RolesGuard } from 'src/common/guards/roles.guard';
-import { Roles } from 'src/common/decorators/roles.decorator';
+import { PermissionsGuard } from 'src/common/rbac/permissions.guard';
+import { RequirePermissions } from 'src/common/rbac/require-permissions.decorator';
+import { PERMISSIONS } from 'src/common/rbac/permissions.constants';
 import { CreateStructureDto, CreateSuperAdminDto } from './dto/super-admin.dto';
 
 @ApiTags('Super Admin')
 @Controller('super-admin')
-@UseGuards(AuthGuard, RolesGuard)
-@Roles('SUPER_ADMIN')
+@UseGuards(AuthGuard, PermissionsGuard)
+@RequirePermissions(PERMISSIONS.PLATFORM_ADMIN)
 @ApiBearerAuth()
 export class SuperAdminController {
   constructor(private readonly superAdminService: SuperAdminService) { }

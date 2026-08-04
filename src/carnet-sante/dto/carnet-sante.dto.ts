@@ -8,6 +8,7 @@ import {
     IsNotEmpty,
     IsBoolean,
     IsUrl,
+    IsUUID,
     Min,
     Length,
 } from 'class-validator';
@@ -185,6 +186,11 @@ export class CreateOrdonnanceDto {
     @IsOptional()
     @IsDateString()
     dateExpiration?: string;
+
+    @ApiPropertyOptional({ description: 'ID du StoredFile (ordonnance scannée, bucket privé) confirmé.' })
+    @IsOptional()
+    @IsUUID()
+    scanFileId?: string;
 }
 
 // ─── Résultat d'analyse ───────────────────────────────────────────────────────
@@ -212,10 +218,10 @@ export class CreateResultatAnalyseDto {
     @IsString()
     resultats: string;
 
-    @ApiPropertyOptional({ example: 'https://storage.medconnect.gn/analyses/abc.pdf' })
+    @ApiPropertyOptional({ description: 'ID du StoredFile (document PDF/image/DICOM, bucket privé) confirmé.' })
     @IsOptional()
-    @IsString()
-    fichierUrl?: string;
+    @IsUUID()
+    documentFileId?: string;
 
     @ApiProperty({ example: '2026-04-15' })
     @IsNotEmpty()
@@ -275,6 +281,8 @@ export enum AppointmentStatusEnum {
     CONFIRME = 'CONFIRME',
     ANNULE = 'ANNULE',
     TERMINE = 'TERMINE',
+    EN_ATTENTE = 'EN_ATTENTE',
+    REFUSE = 'REFUSE',
 }
 
 export class CreateRendezVousDto {
@@ -303,6 +311,14 @@ export class CreateRendezVousDto {
     @IsOptional()
     @IsString()
     structureId?: string;
+
+    @ApiPropertyOptional({
+        description:
+            'ID du médecin ciblé. Vide = RDV « avec la structure » (à prendre en charge par un médecin).',
+    })
+    @IsOptional()
+    @IsString()
+    medecinId?: string;
 
     @ApiPropertyOptional({ enum: AppointmentStatusEnum })
     @IsOptional()
