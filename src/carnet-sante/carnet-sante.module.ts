@@ -12,7 +12,16 @@ import { ChatModule } from 'src/chat/chat.module';
 import { NotificationsModule } from 'src/notifications/notifications.module';
 
 @Module({
-  imports: [AuthModule, HttpModule, ConfigModule, ChatModule, NotificationsModule],
+  // Timeout borné sur les appels IA : sans lui, axios attend indéfiniment et une
+  // requête vers un service endormi (Hugging Face Space, ~15-30 s de réveil) gèle
+  // l'endpoint. Passé ce délai, AiService retombe sur sa réponse de repli.
+  imports: [
+    AuthModule,
+    HttpModule.register({ timeout: 25000 }),
+    ConfigModule,
+    ChatModule,
+    NotificationsModule,
+  ],
   controllers: [CarnetSanteController],
   providers: [CarnetSanteService, PrismaService, AiService, EmailService],
   exports: [CarnetSanteService],
