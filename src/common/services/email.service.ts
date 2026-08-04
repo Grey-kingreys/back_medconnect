@@ -25,6 +25,23 @@ export class EmailService {
     return this.resendInstance;
   }
 
+  /**
+   * Envoie via Resend en respectant le contrat du SDK : `emails.send()` NE LÈVE PAS
+   * sur une erreur d'API (domaine non vérifié, quota dépassé, adresse invalide…) —
+   * il renvoie `{ data, error }`. Sans vérifier `error`, un échec d'envoi passait
+   * totalement inaperçu (log « sent » trompeur, réponse 201). On transforme donc un
+   * `error` en exception, que chaque appelant gère déjà (log `_failed`, et re-throw
+   * lorsque l'envoi est critique).
+   */
+  private async deliver(
+    payload: Parameters<Resend['emails']['send']>[0],
+  ): Promise<void> {
+    const { error } = await this.resend.emails.send(payload);
+    if (error) {
+      throw new Error(`${error.name ?? 'resend_error'}: ${error.message ?? 'échec inconnu'}`);
+    }
+  }
+
   // ─── Emails Auth ──────────────────────────────────────────────
 
   async sendWelcomeEmail(
@@ -33,7 +50,7 @@ export class EmailService {
     prenom: string,
   ): Promise<void> {
     try {
-      await this.resend.emails.send({
+      await this.deliver({
         from: this.fromEmail,
         to: email,
         subject: '🎉 Bienvenue sur MedConnecte !',
@@ -68,7 +85,7 @@ export class EmailService {
   ): Promise<void> {
     const resetUrl = `${process.env.FRONTEND_URL}/auth/reset-password?token=${resetToken}`;
     try {
-      await this.resend.emails.send({
+      await this.deliver({
         from: this.fromEmail,
         to: email,
         subject: '🔐 Réinitialisation de votre mot de passe — MedConnecte',
@@ -105,7 +122,7 @@ export class EmailService {
   ): Promise<void> {
     const resetUrl = `${process.env.FRONTEND_URL}/auth/forgot-password`;
     try {
-      await this.resend.emails.send({
+      await this.deliver({
         from: this.fromEmail,
         to: email,
         subject: '🔒 Tentatives de connexion suspectes — MedConnecte',
@@ -148,7 +165,7 @@ export class EmailService {
     const typeLabel = this.getTypeLabel(structureType);
 
     try {
-      await this.resend.emails.send({
+      await this.deliver({
         from: this.fromEmail,
         to: email,
         subject: `🏥 Invitation — Configurez votre ${typeLabel} sur MedConnecte`,
@@ -156,10 +173,10 @@ export class EmailService {
           `Bienvenue sur MedConnecte`,
           `
           <p>Bonjour,</p>
-          <p>Votre ${typeLabel} <strong>${structureNom}</strong> a été enregistrée sur la plateforme <strong>MedConnecte</strong>.</p>
+          <p>Nous avons bien enregistré votre ${typeLabel} <strong>${structureNom}</strong> sur la plateforme <strong>MedConnecte</strong>.</p>
           <p>Pour finaliser la configuration de votre espace, cliquez sur le bouton ci-dessous :</p>
           <div style="text-align:center;margin:30px 0">
-            <a href="${setupUrl}" style="${this.btnStyle('#059669')}">Configurer mon espace</a>
+            <a href="${setupUrl}" style="${this.btnStyle('#2563eb')}">Configurer mon espace</a>
           </div>
           <p>Vous pourrez :</p>
           <ul>
@@ -192,7 +209,7 @@ export class EmailService {
   ): Promise<void> {
     const roleLabel = this.getRoleLabel(role);
     try {
-      await this.resend.emails.send({
+      await this.deliver({
         from: this.fromEmail,
         to: email,
         subject: `🏥 Votre compte ${roleLabel} sur MedConnecte — ${structureNom}`,
@@ -233,8 +250,8 @@ export class EmailService {
       : null;
 
     try {
-      await this.resend.emails.send({
-        from: 'SOS MedConnecte <sos@resend.dev>', // Ou this.fromEmail
+      await this.deliver({
+        from: this.fromEmail, // Domaine vérifié (cf. RESEND_FROM_EMAIL) — sinon 403 Resend.
         to: contactEmail,
         subject: `🚨 ALERTE URGENCE : ${patientPrenom} ${patientNom} a besoin d'aide !`,
         html: this.buildLayout(
@@ -279,30 +296,70 @@ export class EmailService {
 
   // ─── Helpers ──────────────────────────────────────────────────
 
-  private buildLayout(title: string, content: string): string {
+  /**
+   * Coque HTML commune à tous les emails. Choix de design :
+   * - Logo réel de la marque (fond transparent) posé sur une **carte blanche** —
+   *   il ne ressortait pas sur l'ancien bandeau bleu. Servi via `FRONTEND_URL`
+   *   (les data-URI/SVG sont bloqués par Gmail/Outlook → image hébergée obligatoire).
+   * - Wordmark texte (plus d'emoji dans le titre) + filet dégradé aux teintes du logo.
+   * - `preheader` : texte d'aperçu dans la boîte de réception (défaut = titre).
+   * - Layout en `<table>` pour Outlook ; dark mode = on assombrit seulement le fond
+   *   de page et on garde la carte blanche (évite d'inverser les couleurs sémantiques
+   *   des encarts d'alerte/urgence).
+   */
+  private buildLayout(title: string, content: string, preheader = title): string {
+    const logoUrl = `${process.env.FRONTEND_URL ?? ''}/images/logo.png`;
+    const year = new Date().getFullYear();
     return `
       <!DOCTYPE html>
-      <html>
-        <head><meta charset="utf-8"></head>
-        <body style="font-family:Arial,sans-serif;line-height:1.6;color:#333;margin:0;padding:0;background:#f9fafb">
-          <div style="max-width:600px;margin:40px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1)">
-            <div style="background:linear-gradient(135deg,#2563eb,#1d4ed8);padding:30px;text-align:center">
-              <h1 style="color:#fff;margin:0;font-size:24px">🏥 MedConnecte</h1>
-              <p style="color:#bfdbfe;margin:8px 0 0;font-size:14px">${title}</p>
-            </div>
-            <div style="padding:30px">${content}</div>
-            <div style="background:#f1f5f9;padding:20px;text-align:center;font-size:12px;color:#64748b">
-              <p style="margin:0">© ${new Date().getFullYear()} MedConnecte — Plateforme de Santé Numérique</p>
-              <p style="margin:4px 0 0">Cet email a été envoyé automatiquement, merci de ne pas y répondre.</p>
-            </div>
-          </div>
+      <html lang="fr">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <meta name="color-scheme" content="light dark">
+          <meta name="supported-color-schemes" content="light dark">
+          <title>${title}</title>
+          <style>
+            @media (prefers-color-scheme: dark) { .mc-bg { background:#0b1120 !important; } }
+            a { text-decoration:none; }
+          </style>
+        </head>
+        <body class="mc-bg" style="margin:0;padding:0;background:#eef2f7;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased">
+          <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;height:0;width:0">${preheader}</div>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="mc-bg" style="background:#eef2f7">
+            <tr>
+              <td align="center" style="padding:32px 16px">
+                <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:#ffffff;border:1px solid #e5e9f0;border-radius:16px;overflow:hidden">
+                  <tr>
+                    <td style="padding:36px 32px 0;text-align:center;background:#ffffff">
+                      <img src="${logoUrl}" width="56" height="56" alt="MedConnecte" style="display:block;margin:0 auto;width:56px;height:56px;border:0;outline:none">
+                      <div style="margin-top:12px;font-size:22px;font-weight:700;letter-spacing:-0.5px;color:#0f172a">Med<span style="color:#2563eb">Connecte</span></div>
+                      <div style="height:4px;width:64px;margin:20px auto 0;border-radius:2px;background:linear-gradient(90deg,#4f46e5,#0ea5a4,#16a34a)"></div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:28px 32px 12px">
+                      <h1 style="margin:0 0 16px;font-size:20px;font-weight:700;color:#0f172a">${title}</h1>
+                      <div style="font-size:15px;line-height:1.65;color:#334155">${content}</div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:24px 32px;text-align:center;background:#f8fafc;border-top:1px solid #eef2f7">
+                      <p style="margin:0;font-size:12px;color:#64748b">© ${year} MedConnecte — Plateforme de Santé Numérique</p>
+                      <p style="margin:6px 0 0;font-size:12px;color:#94a3b8">Cet email a été envoyé automatiquement, merci de ne pas y répondre.</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
         </body>
       </html>
     `;
   }
 
   private btnStyle(color: string): string {
-    return `display:inline-block;padding:12px 32px;background:${color};color:#fff;text-decoration:none;border-radius:8px;font-weight:bold;font-size:16px`;
+    return `display:inline-block;padding:14px 34px;background:${color};color:#ffffff;text-decoration:none;border-radius:10px;font-weight:600;font-size:15px;line-height:1;box-shadow:0 1px 2px rgba(15,23,42,0.12)`;
   }
 
   private getTypeLabel(type: string): string {

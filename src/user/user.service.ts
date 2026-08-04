@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ConflictException,
   BadRequestException,
@@ -10,6 +11,7 @@ import { PrismaService } from 'src/common/services/prisma.service';
 import { EmailService } from 'src/common/services/email.service';
 import { EncryptionService } from 'src/common/services/encryption.service';
 import { RolesService } from 'src/common/rbac/roles.service';
+import { StorageService } from 'src/storage/storage.service';
 import {
   CreateUserByAdminDto,
   UpdateUserDto,
@@ -18,12 +20,50 @@ import {
 
 @Injectable()
 export class UserService {
+  private readonly logger = new Logger(UserService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
     private readonly encryptionService: EncryptionService,
     private readonly rolesService: RolesService,
+    private readonly storage: StorageService,
   ) { }
+
+  // ─── Photo de profil (avatar, bucket public R2) ───────────────
+
+  /** Rattache un avatar (fichier R2 public confirmé) à l'utilisateur courant. */
+  async setAvatar(userId: string, fileId: string) {
+    await this.storage.assertLinkable(fileId, userId, 'public');
+    const current = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { avatarFileId: true },
+    });
+    await this.prisma.user.update({ where: { id: userId }, data: { avatarFileId: fileId } });
+    // L'ancien avatar devient orphelin → suppression (bucket public, pas de conservation).
+    if (current?.avatarFileId && current.avatarFileId !== fileId) {
+      await this.storage
+        .deleteStoredFile({ id: current.avatarFileId, requester: { userId } })
+        .catch(() => undefined);
+    }
+    const avatarUrl = await this.storage.getPublicUrlById(fileId);
+    return { data: { avatarUrl }, message: 'Photo de profil mise à jour', success: true };
+  }
+
+  /** Retire l'avatar de l'utilisateur courant et supprime le fichier R2. */
+  async removeAvatar(userId: string) {
+    const current = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { avatarFileId: true },
+    });
+    if (current?.avatarFileId) {
+      await this.prisma.user.update({ where: { id: userId }, data: { avatarFileId: null } });
+      await this.storage
+        .deleteStoredFile({ id: current.avatarFileId, requester: { userId } })
+        .catch(() => undefined);
+    }
+    return { data: { avatarUrl: null }, message: 'Photo de profil supprimée', success: true };
+  }
 
   // ─── Créer un utilisateur (par ADMIN/SUPER_ADMIN) ─────────────
 
@@ -50,7 +90,7 @@ export class UserService {
     try {
       appRoleId = (await this.rolesService.resolveAssignableRoleId({ legacyRole: role as string })) ?? undefined;
     } catch (e) {
-      console.error('Résolution appRole (createByAdmin) échouée:', e);
+      this.logger.error('Résolution appRole (createByAdmin) échouée', e);
     }
 
     const user = await this.prisma.user.create({
@@ -78,7 +118,7 @@ export class UserService {
 
     this.emailService
       .sendWelcomeEmail(user.email, user.nom, user.prenom)
-      .catch(console.error);
+      .catch((e) => this.logger.error('Email de bienvenue échoué', e));
 
     return {
       data: user,

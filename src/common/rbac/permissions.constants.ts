@@ -154,6 +154,7 @@ export const DEFAULT_STRUCTURE_ROLES: Record<string, DefaultRoleDef[]> = {
     },
     {
       nom: 'Accueil',
+      legacyRole: 'ACCUEIL',
       description: 'Front desk : oriente les patients, prend les RDV, gère les messages reçus par la structure. Pas d’accès au dossier médical.',
       permissions: [
         PERMISSIONS.PATIENT_READ,

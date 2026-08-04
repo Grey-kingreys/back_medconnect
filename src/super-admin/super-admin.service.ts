@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   ConflictException,
   NotFoundException,
   BadRequestException,
@@ -13,6 +14,8 @@ import { CreateStructureDto, CreateSuperAdminDto } from './dto/super-admin.dto';
 
 @Injectable()
 export class SuperAdminService {
+  private readonly logger = new Logger(SuperAdminService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
@@ -70,7 +73,7 @@ export class SuperAdminService {
       await this.rolesService.seedStructureDefaultRoles(structure.id, structure.type);
     } catch (e) {
       // Le seeder de boot rattrapera cette structure au prochain démarrage.
-      console.error('Seed des rôles par défaut échoué pour la structure', structure.id, e);
+      this.logger.error(`Seed des rôles par défaut échoué pour la structure ${structure.id}`, e);
     }
 
     // Envoyer l'email d'invitation
@@ -250,7 +253,7 @@ export class SuperAdminService {
 
     this.emailService
       .sendWelcomeEmail(user.email, user.nom, user.prenom)
-      .catch(console.error);
+      .catch((e) => this.logger.error('Email de bienvenue échoué', e));
 
     return {
       data: user,

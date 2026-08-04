@@ -106,6 +106,7 @@ export enum MembreRoleEnum {
     MEDECIN = 'MEDECIN',
     PHARMACIEN = 'PHARMACIEN',
     STRUCTURE_ADMIN = 'STRUCTURE_ADMIN',
+    ACCUEIL = 'ACCUEIL',
 }
 
 export class CreateMembreDto {
@@ -137,7 +138,7 @@ export class CreateMembreDto {
     @ApiProperty({ enum: MembreRoleEnum, example: 'MEDECIN' })
     @IsNotEmpty()
     @IsEnum(MembreRoleEnum, {
-        message: 'Le rôle doit être MEDECIN, PHARMACIEN ou STRUCTURE_ADMIN',
+        message: 'Le rôle doit être MEDECIN, PHARMACIEN, STRUCTURE_ADMIN ou ACCUEIL',
     })
     role: MembreRoleEnum;
 

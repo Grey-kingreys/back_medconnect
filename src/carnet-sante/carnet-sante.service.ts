@@ -26,6 +26,7 @@ import { NotificationsService } from 'src/notifications/notifications.service';
 import { EncryptionService } from 'src/common/services/encryption.service';
 import { SmsService } from 'src/common/services/sms.service';
 import { QueueService } from 'src/queue/queue.service';
+import { StorageService } from 'src/storage/storage.service';
 
 @Injectable()
 export class CarnetSanteService {
@@ -37,7 +38,8 @@ export class CarnetSanteService {
     private readonly notificationsService: NotificationsService,
     private readonly encryptionService: EncryptionService,
     private readonly smsService: SmsService,
-    private readonly queueService: QueueService
+    private readonly queueService: QueueService,
+    private readonly storage: StorageService,
   ) { }
 
   private readonly logger = new Logger(CarnetSanteService.name);
@@ -408,6 +410,11 @@ export class CarnetSanteService {
       if (actor) medecinNom = `Dr. ${actor.prenom} ${actor.nom}`;
     }
 
+    // Ordonnance scannée (bucket privé) : vérifie + rattache le document au patient.
+    if (dto.scanFileId) {
+      await this.storage.claimPrivateForPatient(dto.scanFileId, actorId, patientId);
+    }
+
     const ordonnance = await this.prisma.ordonnance.create({
       data: {
         patientId,
@@ -419,6 +426,7 @@ export class CarnetSanteService {
         dateExpiration: dto.dateExpiration
           ? new Date(dto.dateExpiration)
           : null,
+        scanFileId: dto.scanFileId ?? null,
       },
     });
 
@@ -486,6 +494,11 @@ export class CarnetSanteService {
       if (actor?.structure) laboratoire = actor.structure.nom;
     }
 
+    // Document d'analyse (bucket privé) : vérifie + rattache le document au patient.
+    if (dto.documentFileId) {
+      await this.storage.claimPrivateForPatient(dto.documentFileId, actorId, patientId);
+    }
+
     const analyse = await this.prisma.resultatAnalyse.create({
       data: {
         patientId,
@@ -493,7 +506,7 @@ export class CarnetSanteService {
         typeAnalyse: this.encryptionService.encrypt(dto.typeAnalyse.trim()),
         laboratoire: this.encryptionService.encrypt(laboratoire?.trim() || ''),
         resultats: this.encryptionService.encrypt(dto.resultats.trim()),
-        fichierUrl: dto.fichierUrl,
+        documentFileId: dto.documentFileId ?? null,
         dateAnalyse: new Date(dto.dateAnalyse),
         notes: this.encryptionService.encrypt(dto.notes?.trim() || ''),
       },
@@ -599,8 +612,17 @@ export class CarnetSanteService {
 
   // ─── Rendez-vous ──────────────────────────────────────────────
 
-  async getRendezVous(userId: string, role: string) {
-    const where = role === 'PATIENT' ? { patientId: userId } : { medecinId: userId };
+  async getRendezVous(userId: string, role: string, structureId?: string) {
+    // - Patient : ses propres RDV.
+    // - Personnel de structure : tous les RDV de sa structure (l'accueil suit ce qu'il
+    //   crée, le médecin voit les propositions à valider + les RDV « structure »).
+    // - Soignant sans structure (cas limite) : uniquement les RDV qui lui sont affectés.
+    const where =
+      role === 'PATIENT'
+        ? { patientId: userId }
+        : structureId
+          ? { structureId }
+          : { medecinId: userId };
     const rv = await this.prisma.rendezVous.findMany({
       where,
       include: {
@@ -614,24 +636,109 @@ export class CarnetSanteService {
     return { data: rv, message: `${rv.length} rendez-vous`, success: true };
   }
 
-  async createRendezVous(actorId: string, dto: CreateRendezVousDto, structureId?: string) {
+  /**
+   * Création d'un RDV. Le médecin cible + le statut dépendent de qui crée le RDV :
+   *  - `medecinId` fourni == acteur → le médecin se programme lui-même (PROGRAMME) ;
+   *  - `medecinId` fourni != acteur → proposition à ce médecin (EN_ATTENTE) ;
+   *  - `medecinId` absent + acteur médecin → auto-affectation (PROGRAMME, rétro-compat) ;
+   *  - `medecinId` absent + acteur non médecin (accueil) → RDV « structure » (EN_ATTENTE,
+   *    non affecté), à prendre en charge par un médecin.
+   */
+  async createRendezVous(
+    actorId: string,
+    actorRole: string,
+    dto: CreateRendezVousDto,
+    structureId?: string,
+  ) {
+    let medecinId: string | null;
+    let status: string;
+
+    if (dto.medecinId) {
+      medecinId = dto.medecinId;
+      status = dto.medecinId === actorId ? 'PROGRAMME' : 'EN_ATTENTE';
+    } else if (actorRole === 'MEDECIN') {
+      medecinId = actorId;
+      status = 'PROGRAMME';
+    } else {
+      medecinId = null;
+      status = 'EN_ATTENTE';
+    }
+
     const rv = await this.prisma.rendezVous.create({
       data: {
         patientId: dto.patientId,
-        medecinId: actorId,
+        medecinId,
         structureId: dto.structureId || structureId,
         date: new Date(dto.date),
         motif: dto.motif.trim(),
         notes: dto.notes?.trim(),
-        status: (dto.status as any) || 'PROGRAMME',
+        status: status as any,
       },
       include: {
         patient: { select: { id: true, nom: true, prenom: true } },
+        medecin: { select: { id: true, nom: true, prenom: true, specialite: true } },
         structure: { select: { id: true, nom: true } },
       },
     });
 
-    return { data: rv, message: 'Rendez-vous programmé', success: true };
+    const message =
+      status === 'EN_ATTENTE'
+        ? medecinId
+          ? 'Rendez-vous proposé au médecin (en attente de validation)'
+          : 'Rendez-vous enregistré, en attente de prise en charge par un médecin'
+        : 'Rendez-vous programmé';
+    return { data: rv, message, success: true };
+  }
+
+  /**
+   * Validation / refus d'un RDV en attente par un médecin.
+   *  - RDV nominatif (`medecinId` défini) : seul le médecin ciblé peut répondre.
+   *  - RDV « structure » (`medecinId` null) : un médecin de la même structure peut le
+   *    prendre en charge → il s'y affecte à la validation.
+   */
+  async respondToRendezVous(
+    rvId: string,
+    actorId: string,
+    actorRole: string,
+    actorStructureId: string | undefined,
+    decision: 'valider' | 'refuser',
+  ) {
+    const rv = await this.prisma.rendezVous.findUnique({
+      where: { id: rvId },
+      select: { id: true, medecinId: true, structureId: true, status: true },
+    });
+    if (!rv) throw new NotFoundException('Rendez-vous introuvable.');
+    if (rv.status !== 'EN_ATTENTE') {
+      throw new BadRequestException("Ce rendez-vous n'est pas en attente de validation.");
+    }
+
+    if (rv.medecinId) {
+      if (rv.medecinId !== actorId) {
+        throw new ForbiddenException("Ce rendez-vous est adressé à un autre médecin.");
+      }
+    } else if (actorRole !== 'MEDECIN' || !actorStructureId || rv.structureId !== actorStructureId) {
+      throw new ForbiddenException(
+        'Seul un médecin de la structure peut prendre en charge ce rendez-vous.',
+      );
+    }
+
+    const updated = await this.prisma.rendezVous.update({
+      where: { id: rvId },
+      data:
+        decision === 'valider'
+          ? { status: 'CONFIRME', ...(rv.medecinId ? {} : { medecinId: actorId }) }
+          : { status: 'REFUSE' },
+      include: {
+        patient: { select: { id: true, nom: true, prenom: true } },
+        medecin: { select: { id: true, nom: true, prenom: true, specialite: true } },
+        structure: { select: { id: true, nom: true } },
+      },
+    });
+    return {
+      data: updated,
+      message: decision === 'valider' ? 'Rendez-vous confirmé' : 'Rendez-vous refusé',
+      success: true,
+    };
   }
 
   async updateRendezVousStatus(rvId: string, status: string) {

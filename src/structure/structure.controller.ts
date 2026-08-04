@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   UseGuards,
@@ -29,6 +30,7 @@ import {
   CreateMembreDto,
   UpdateStructureDto,
 } from './dto/structure.dto';
+import { LinkFileDto } from 'src/storage/dto/link-file.dto';
 
 @ApiTags('Structures')
 @Controller('structures')
@@ -103,6 +105,24 @@ export class StructureController {
       req.user.userId,
       dto,
     );
+  }
+
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.STRUCTURE_WRITE)
+  @Patch('my/logo')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Définir le logo de ma structure depuis un fichier R2 confirmé' })
+  setMyLogo(@Req() req: any, @Body() dto: LinkFileDto) {
+    return this.structureService.setLogo(req.user.structureId, req.user.userId, dto.fileId);
+  }
+
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.STRUCTURE_WRITE)
+  @Delete('my/logo')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Supprimer le logo de ma structure' })
+  removeMyLogo(@Req() req: any) {
+    return this.structureService.removeLogo(req.user.structureId, req.user.userId);
   }
 
   @UseGuards(AuthGuard, PermissionsGuard)

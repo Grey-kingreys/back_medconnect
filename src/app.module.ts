@@ -12,8 +12,12 @@ import { GeoModule } from './geo/geo.module';
 import { ChatModule } from './chat/chat.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SecurityModule } from './common/security.module';
-import { StorageModule } from './common/storage.module';
+// ⚠️ Ancien module de stockage (S3/MinIO générique, sans persistance). Conservé le temps
+// de la migration vers le StorageModule R2 (src/storage) puis à retirer — cf. src/storage.
+import { StorageModule as LegacyStorageModule } from './common/storage.module';
+import { StorageModule } from './storage/storage.module';
 import { QueueModule } from './queue/queue.module';
+import { ConsentModule } from './consent/consent.module';
 import { RedisModule } from './common/redis/redis.module';
 import { RbacModule } from './common/rbac/rbac.module';
 import { RolesModule } from './roles/roles.module';
@@ -30,7 +34,12 @@ import type { IncomingMessage } from 'http';
 @Module({
   imports: [
     // Validation centralisée des variables d'env : fail-fast au boot avec message clair.
-    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
+    // `envFilePath` suit NODE_ENV, avec `.env` en repli. process.env prime sur les fichiers.
+    ConfigModule.forRoot({
+      isGlobal: true,
+      validate: validateEnv,
+      envFilePath: [`.env.${process.env.NODE_ENV || 'development'}`, '.env'],
+    }),
     // Logs structurés (JSON en prod, lisibles en dev). Remplace LoggerMiddleware :
     // pino-http journalise déjà chaque requête (méthode, route, statut, durée).
     // ⚠️ `redact` masque les données sensibles — toute nouvelle donnée de santé
@@ -90,8 +99,10 @@ import type { IncomingMessage } from 'http';
     ChatModule,
     NotificationsModule,
     SecurityModule,
+    LegacyStorageModule,
     StorageModule,
     QueueModule,
+    ConsentModule,
   ],
   controllers: [AppController],
   providers: [

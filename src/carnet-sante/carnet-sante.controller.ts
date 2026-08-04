@@ -189,15 +189,50 @@ export class CarnetSanteController {
   @Get('rendez-vous')
   @ApiOperation({ summary: 'Mes rendez-vous' })
   getRendezVous(@Req() req: any) {
-    return this.carnetSanteService.getRendezVous(req.user.userId, req.user.role);
+    return this.carnetSanteService.getRendezVous(
+      req.user.userId,
+      req.user.role,
+      req.user.structureId,
+    );
   }
 
   @Post('rendez-vous')
   @RequirePermissions(PERMISSIONS.RENDEZVOUS_WRITE)
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Programmer un rendez-vous (Médecin)' })
+  @ApiOperation({ summary: 'Programmer un rendez-vous (médecin ou accueil)' })
   createRendezVous(@Req() req: any, @Body() dto: CreateRendezVousDto) {
-    return this.carnetSanteService.createRendezVous(req.user.userId, dto, req.user.structureId);
+    return this.carnetSanteService.createRendezVous(
+      req.user.userId,
+      req.user.role,
+      dto,
+      req.user.structureId,
+    );
+  }
+
+  @Post('rendez-vous/:id/valider')
+  @RequirePermissions(PERMISSIONS.RENDEZVOUS_WRITE)
+  @ApiOperation({ summary: 'Valider un rendez-vous en attente (médecin)' })
+  validerRendezVous(@Param('id') id: string, @Req() req: any) {
+    return this.carnetSanteService.respondToRendezVous(
+      id,
+      req.user.userId,
+      req.user.role,
+      req.user.structureId,
+      'valider',
+    );
+  }
+
+  @Post('rendez-vous/:id/refuser')
+  @RequirePermissions(PERMISSIONS.RENDEZVOUS_WRITE)
+  @ApiOperation({ summary: 'Refuser un rendez-vous en attente (médecin)' })
+  refuserRendezVous(@Param('id') id: string, @Req() req: any) {
+    return this.carnetSanteService.respondToRendezVous(
+      id,
+      req.user.userId,
+      req.user.role,
+      req.user.structureId,
+      'refuser',
+    );
   }
 
   @Post('rendez-vous/:id/status')

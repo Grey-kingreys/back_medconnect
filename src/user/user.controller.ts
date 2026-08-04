@@ -27,6 +27,7 @@ import {
   ChangeUserPasswordDto,
   UserResponseDto,
 } from './dto/user.dto';
+import { LinkFileDto } from 'src/storage/dto/link-file.dto';
 import { plainToInstance } from 'class-transformer';
 
 @ApiTags('Utilisateurs (Admin)')
@@ -35,6 +36,20 @@ import { plainToInstance } from 'class-transformer';
 @ApiBearerAuth()
 export class UserController {
   constructor(private readonly userService: UserService) { }
+
+  // ─── Avatar (self-service : aucune permission requise, juste être authentifié) ──
+
+  @Patch('me/avatar')
+  @ApiOperation({ summary: 'Définir ma photo de profil depuis un fichier R2 confirmé' })
+  setMyAvatar(@Req() req: any, @Body() dto: LinkFileDto) {
+    return this.userService.setAvatar(req.user.userId, dto.fileId);
+  }
+
+  @Delete('me/avatar')
+  @ApiOperation({ summary: 'Supprimer ma photo de profil' })
+  removeMyAvatar(@Req() req: any) {
+    return this.userService.removeAvatar(req.user.userId);
+  }
 
   // ─── Routes statiques (DOIVENT être AVANT :userId) ──────────
 

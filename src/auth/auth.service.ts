@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   UnauthorizedException,
   ConflictException,
   BadRequestException,
@@ -31,6 +32,8 @@ export type UserPayload = {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
@@ -93,7 +96,7 @@ export class AuthService {
       if (blockedNow) {
         this.emailService
           .sendSuspiciousLoginEmail(user.email, user.nom, user.prenom, ip)
-          .catch((e) => console.error('Email alerte connexion échoué:', e));
+          .catch((e) => this.logger.error("Email d'alerte de connexion échoué", e));
       }
       throw new UnauthorizedException('Email ou mot de passe incorrect');
     }
@@ -203,7 +206,7 @@ export class AuthService {
     // Email de bienvenue (non bloquant)
     this.emailService
       .sendWelcomeEmail(user.email, user.nom, user.prenom)
-      .catch(console.error);
+      .catch((e) => this.logger.error('Email de bienvenue échoué', e));
 
     // Refresh token uniquement dans le cookie httpOnly (cf. login).
     return {
@@ -239,6 +242,7 @@ export class AuthService {
         role: true,
         isActive: true,
         structureId: true,
+        avatarFile: { select: { key: true } },
         structure: {
           select: { id: true, nom: true, type: true },
         },
@@ -254,8 +258,15 @@ export class AuthService {
     // Résoudre les permissions effectives de l'utilisateur
     const permissions = await this.permissionsService.getUserPermissions(userId);
 
+    // URL publique de l'avatar (bucket public R2 servi via R2_PUBLIC_URL), null si aucun.
+    // Résolu inline (pas d'injection de StorageService : StorageModule importe déjà
+    // AuthModule → éviterait un cycle de dépendances).
+    const { avatarFile, ...rest } = user;
+    const base = (process.env.R2_PUBLIC_URL || '').replace(/\/+$/, '');
+    const avatarUrl = avatarFile ? `${base}/${avatarFile.key}` : null;
+
     return {
-      data: { ...user, permissions },
+      data: { ...rest, avatarUrl, permissions },
       message: 'Profil récupéré',
       success: true,
     };

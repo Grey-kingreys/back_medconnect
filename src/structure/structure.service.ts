@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
   ConflictException,
@@ -13,6 +14,7 @@ import { PrismaService } from 'src/common/services/prisma.service';
 import { EmailService } from 'src/common/services/email.service';
 import { AuthService } from 'src/auth/auth.service';
 import { RolesService } from 'src/common/rbac/roles.service';
+import { StorageService } from 'src/storage/storage.service';
 import {
   SetupStructureDto,
   CreateMembreDto,
@@ -32,11 +34,14 @@ function generateTempPassword(): string {
 
 @Injectable()
 export class StructureService {
+  private readonly logger = new Logger(StructureService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
     private readonly authService: AuthService,
     private readonly rolesService: RolesService,
+    private readonly storage: StorageService,
   ) { }
 
   // ─── Vérifier un token d'invitation ──────────────────────────
@@ -94,6 +99,7 @@ export class StructureService {
         horaires: true,
         telephone: true,
         estOuvertManuel: true,
+        logoFile: { select: { key: true } },
         membres: {
           where: { role: { in: ['MEDECIN', 'STRUCTURE_ADMIN'] }, isActive: true },
           select: { specialite: true },
@@ -101,7 +107,11 @@ export class StructureService {
       },
     });
 
-    return { data: structures, message: 'Structures récupérées', success: true };
+    const data = structures.map(({ logoFile, ...s }) => ({
+      ...s,
+      logoUrl: logoFile ? this.storage.getPublicUrl(logoFile.key) : null,
+    }));
+    return { data, message: 'Structures récupérées', success: true };
   }
 
   // ─── Détails publics d'une structure (pour patients) ───────────────
@@ -123,6 +133,7 @@ export class StructureService {
         estOuvertManuel: true,
         latitude: true,
         longitude: true,
+        logoFile: { select: { key: true } },
         membres: {
           where: {
             isActive: true,
@@ -145,7 +156,9 @@ export class StructureService {
       throw new UnauthorizedException('Structure introuvable ou inactive');
     }
 
-    return { data: structure, message: 'Détails récupérés', success: true };
+    const { logoFile, ...rest } = structure;
+    const logoUrl = logoFile ? this.storage.getPublicUrl(logoFile.key) : null;
+    return { data: { ...rest, logoUrl }, message: 'Détails récupérés', success: true };
   }
 
   // ─── Setup structure (admin clique sur le lien) ───────────────
@@ -240,7 +253,7 @@ export class StructureService {
         await this.prisma.user.update({ where: { id: result.admin.id }, data: { appRoleId } });
       }
     } catch (e) {
-      console.error('Assignation appRole admin structure échouée:', e);
+      this.logger.error('Assignation appRole admin structure échouée', e);
     }
 
     // Générer le JWT
@@ -306,6 +319,13 @@ export class StructureService {
         'Une pharmacie ne peut pas avoir de médecins. Utilisez le rôle PHARMACIEN.',
       );
     }
+    // Le rôle « Accueil » n'existe que pour les hôpitaux/cliniques (pas de rôle par
+    // défaut correspondant dans une pharmacie → aucun AppRole à résoudre).
+    if (structure.type === 'PHARMACIE' && dto.role === 'ACCUEIL') {
+      throw new BadRequestException(
+        "Une pharmacie n'a pas de rôle « Accueil ».",
+      );
+    }
 
     // Vérifier unicité email
     const existing = await this.prisma.user.findUnique({
@@ -331,7 +351,7 @@ export class StructureService {
       }
     } catch (e) {
       if (dto.appRoleId) throw e; // un rôle explicitement invalide doit être rejeté
-      console.error('Résolution appRole membre échouée:', e);
+      this.logger.error('Résolution appRole membre échouée', e);
     }
 
     // Générer un mot de passe temporaire
@@ -374,7 +394,7 @@ export class StructureService {
         structure.nom,
         tempPassword,
       )
-      .catch(console.error);
+      .catch((e) => this.logger.error("Email d'invitation membre échoué", e));
 
     return {
       data: membre,
@@ -393,7 +413,7 @@ export class StructureService {
     }
 
     const membres = await this.prisma.user.findMany({
-      where: { structureId, role: { in: ['MEDECIN', 'PHARMACIEN'] } },
+      where: { structureId, role: { in: ['MEDECIN', 'PHARMACIEN', 'ACCUEIL'] } },
       select: {
         id: true,
         nom: true,
@@ -424,7 +444,7 @@ export class StructureService {
           select: { id: true, nom: true, prenom: true, email: true, telephone: true },
         },
         membres: {
-          where: { role: { in: ['MEDECIN', 'PHARMACIEN'] } },
+          where: { role: { in: ['MEDECIN', 'PHARMACIEN', 'ACCUEIL'] } },
           select: {
             id: true,
             nom: true,
@@ -441,7 +461,8 @@ export class StructureService {
       throw new NotFoundException('Structure non trouvée');
     }
 
-    return { data: structure, message: 'Structure récupérée', success: true };
+    const logoUrl = await this.storage.getPublicUrlById(structure.logoFileId);
+    return { data: { ...structure, logoUrl }, message: 'Structure récupérée', success: true };
   }
 
   // ─── Mettre à jour la structure ───────────────────────────────
@@ -491,6 +512,42 @@ export class StructureService {
       message: 'Structure mise à jour avec succès',
       success: true,
     };
+  }
+
+  // ─── Logo de la structure (bucket public R2) ──────────────────
+
+  /** Définit le logo (fichier R2 public confirmé) de la structure de l'admin connecté. */
+  async setLogo(structureId: string, requestingUserId: string, fileId: string) {
+    await this.checkStructureAccess(structureId, requestingUserId);
+    await this.storage.assertLinkable(fileId, requestingUserId, 'public');
+    const current = await this.prisma.structure.findUnique({
+      where: { id: structureId },
+      select: { logoFileId: true },
+    });
+    await this.prisma.structure.update({ where: { id: structureId }, data: { logoFileId: fileId } });
+    if (current?.logoFileId && current.logoFileId !== fileId) {
+      await this.storage
+        .deleteStoredFile({ id: current.logoFileId, requester: { userId: requestingUserId } })
+        .catch(() => undefined);
+    }
+    const logoUrl = await this.storage.getPublicUrlById(fileId);
+    return { data: { logoUrl }, message: 'Logo mis à jour', success: true };
+  }
+
+  /** Retire le logo de la structure et supprime le fichier R2. */
+  async removeLogo(structureId: string, requestingUserId: string) {
+    await this.checkStructureAccess(structureId, requestingUserId);
+    const current = await this.prisma.structure.findUnique({
+      where: { id: structureId },
+      select: { logoFileId: true },
+    });
+    if (current?.logoFileId) {
+      await this.prisma.structure.update({ where: { id: structureId }, data: { logoFileId: null } });
+      await this.storage
+        .deleteStoredFile({ id: current.logoFileId, requester: { userId: requestingUserId } })
+        .catch(() => undefined);
+    }
+    return { data: { logoUrl: null }, message: 'Logo supprimé', success: true };
   }
 
   // ─── Activer/Désactiver un membre ─────────────────────────────

@@ -88,6 +88,22 @@ const RULES: Rule[] = [
       return null;
     },
   },
+  // ─── Stockage objets Cloudflare R2 (cf. src/storage/) ─────────
+  // Les 6 variables sont obligatoires : le module de stockage (documents médicaux,
+  // avatars…) doit refuser de démarrer plutôt que d'échouer au 1er upload.
+  { key: 'R2_ACCOUNT_ID', required: true },
+  { key: 'R2_ACCESS_KEY_ID', required: true },
+  { key: 'R2_SECRET_ACCESS_KEY', required: true },
+  { key: 'R2_BUCKET_PUBLIC', required: true },
+  { key: 'R2_BUCKET_PRIVATE', required: true },
+  {
+    key: 'R2_PUBLIC_URL',
+    required: true,
+    validate: (v) =>
+      v.startsWith('https://') || v.startsWith('http://')
+        ? null
+        : "doit être une URL (ex. https://cdn.medconnecte.com) — base des liens publics",
+  },
 ];
 
 export function validateEnv(config: Record<string, unknown>): Record<string, unknown> {
