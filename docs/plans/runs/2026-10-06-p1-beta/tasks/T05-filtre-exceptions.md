@@ -44,4 +44,8 @@ Liste des fichiers créés ou modifiés + preuves (commandes lancées, résultat
 
 ## Historique
 
+2026-10-06 | dur | succès | libellé 400 « Saisie invalide » (« requête » est un terme interdit) ; 413 Express non vérifié par appel réel
+
 ## Validation
+
+tsc --noEmit ; eslint filtre + main.ts ; npm test | 0 erreur ; 0 erreur (1 avertissement préexistant) ; 4 suites, 45 tests verts | voir commit de la tâche
