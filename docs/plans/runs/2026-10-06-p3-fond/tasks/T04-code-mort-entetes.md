@@ -43,4 +43,10 @@ Fichiers modifiés + preuves (commande lancée, résultat en une ligne). Ou un b
 
 ## Historique
 
+2026-10-06 | mécanique | partiel | en-têtes posés et prettier appliqué ; erreurs no-unsafe-* préexistantes bloquant le pre-commit neutralisées par l'orchestrateur (D06)
+
 ## Validation
+
+grep des usages | aucun import réel des trois fichiers | voir commit
+eslint des trois fichiers | 0 erreur, 1 avertissement | voir commit
+tsc --noEmit | OK | voir commit
