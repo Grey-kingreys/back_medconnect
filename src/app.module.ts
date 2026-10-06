@@ -12,9 +12,11 @@ import { GeoModule } from './geo/geo.module';
 import { ChatModule } from './chat/chat.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SecurityModule } from './common/security.module';
-// ⚠️ Ancien module de stockage (S3/MinIO générique, sans persistance). Conservé le temps
-// de la migration vers le StorageModule R2 (src/storage) puis à retirer — cf. src/storage.
-import { StorageModule as LegacyStorageModule } from './common/storage.module';
+// Module débranché (backlog P0 point 2) : GET /storage/download-url signe n'importe quelle clé
+// pour tout utilisateur connecté sans contrôle d'accès. Code conservé dans src/common/storage.*.
+// Le stockage actif est src/storage/ (R2, contrôle d'accès par FileAccessService).
+// Ne pas rebrancher sans contrôle de propriété.
+// import { StorageModule as LegacyStorageModule } from './common/storage.module';
 import { StorageModule } from './storage/storage.module';
 import { QueueModule } from './queue/queue.module';
 import { ConsentModule } from './consent/consent.module';
@@ -73,7 +75,9 @@ import type { IncomingMessage } from 'http';
           censor: '[masqué]',
         },
         // Rattache l'auteur de la requête à chaque ligne de log (traçabilité).
-        customProps: (req: IncomingMessage & { user?: { userId?: string } }) => ({
+        customProps: (
+          req: IncomingMessage & { user?: { userId?: string } },
+        ) => ({
           userId: req.user?.userId,
         }),
         // Le health check (GET /) est appelé en boucle par Docker : ne pas le journaliser.
@@ -102,7 +106,11 @@ import type { IncomingMessage } from 'http';
     ChatModule,
     NotificationsModule,
     SecurityModule,
-    LegacyStorageModule,
+    // Module débranché (backlog P0 point 2) : GET /storage/download-url signe n'importe quelle clé
+    // pour tout utilisateur connecté sans contrôle d'accès. Code conservé dans src/common/storage.*.
+    // Le stockage actif est src/storage/ (R2, contrôle d'accès par FileAccessService).
+    // Ne pas rebrancher sans contrôle de propriété.
+    // LegacyStorageModule,
     StorageModule,
     QueueModule,
     ConsentModule,
