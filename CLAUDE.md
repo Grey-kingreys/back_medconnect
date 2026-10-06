@@ -45,6 +45,22 @@ File asynchrone dans `src/queue/` (**BullMQ**).
   champ d'entrée doit être déclaré dans un DTO `class-validator`.
 - **Langue** : messages/logs/commentaires en français.
 
+## Hooks git (configuration locale à rejouer après chaque clone)
+
+`core.hooksPath` n'est pas versionné. Depuis la racine du monorepo : `./setup-dev.sh`
+(voir le `CLAUDE.md` racine). Si ce dépôt est cloné seul :
+
+```bash
+git config core.hooksPath "$(git rev-parse --show-toplevel)/.githooks"
+npm ci && npx prisma generate
+```
+
+Les gates (`.githooks/gate-lib.sh`) tournent dans le conteneur `backend` via
+`docker compose exec` s'il est démarré, sinon en local : pre-commit = `tsc --noEmit` sur
+tout le projet + `eslint` sur les **seuls fichiers indexés** (la dette existante ne bloque
+pas, mais tout fichier touché doit être propre) ; pre-push = `npm test`. **Consigne pour Claude** : si `git config core.hooksPath`
+est vide, le signaler et proposer la commande ci-dessus avant tout commit.
+
 ## Variables d'environnement (lecture mixte `process.env` ET `ConfigService`)
 
 Obligatoires : `DATABASE_URL`, `JWT_SECRET`, **`ENCRYPTION_KEY`** (hex 64 car. — lue via
@@ -89,3 +105,21 @@ le JSON, **absence d'audit trail et de soft-delete** sur les données médicales
 crashe sans `ENCRYPTION_KEY`/`RESEND_API_KEY`, rate-limit auth trop permissif, logs non
 structurés sur données sensibles, **aucun test** (`.spec.ts`). IDOR à confirmer sur la
 création de consultation.
+
+<!-- orchestrator:start v2 -->
+## Règles du projet et orchestrateur
+
+Audience: mixte par surface ; API REST, WebSocket et Swagger = dev (consommés par front_medconnect) ; messages d'erreur renvoyés au front et affichés, emails, SMS et notifications = non-dev (patients, médecins, pharmaciens, agents d'accueil, administrateurs de structure)
+Maturité: avancé (anti-slop préventif + passe curative disponible)
+Langues: interface, messages d'erreur, emails, SMS et logs en français ; commentaires de code en français, identifiants existants conservés tels quels (pas de renommage) ; docs, plans et commits en français
+Gate: tsc --noEmit (projet) ; eslint (fichiers indexés) (pre-commit) ; npm test (pre-push) ; via docker compose exec backend si démarré, sinon local (.githooks/gate-lib.sh)
+
+Règles contraignantes, détail dans docs/ORCHESTRATOR.md :
+- **Audience** (prioritaire) : avant toute UI, tout texte visible ou message d'erreur, appliquer le régime de l'audience ci-dessus (section 1). Non-dev : vocabulaire utilisateur, erreurs humaines et actionnables, empty states qui guident, preuves exigées.
+- **Code** : réutiliser l'existant > ranger au bon endroit > n'abstraire qu'à la règle de trois. Jamais de refactor non demandé.
+- **Visuel** : tokens, échelles restreintes, pas de « boîte dans une boîte », WCAG AA, tous les thèmes.
+- **Typographie** : jamais de tiret cadratin ni demi-cadratin (hook actif).
+- **Langues** : commentaires de code en français ; identifiants existants conservés tels quels (pas de renommage).
+- **Multi-tâches** : lire docs/plans/ACTIVE.md d'abord, puis seulement le fichier de la prochaine tâche. Tâche unique ou petite : travailler directement.
+- **Commits** : pendant un run, un commit par tâche validée sur `orch/<nom>` ; hors run, jamais sans demande.
+<!-- orchestrator:end -->

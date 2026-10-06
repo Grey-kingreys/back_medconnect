@@ -11,7 +11,7 @@ import { CarnetSanteService } from './carnet-sante.service';
  * n'existe plus en Prisma 7). Ces tests verrouillent donc la règle méthode par
  * méthode : un retour à `delete()` les fait échouer.
  *
- * Seul `prisma` est exercé ; les sept autres dépendances du service sont inertes
+ * Seul `prisma` est exercé ; les huit autres dépendances du service sont inertes
  * (les méthodes testées ne les appellent pas).
  */
 describe('CarnetSanteService — soft-delete des données de santé', () => {
@@ -45,6 +45,7 @@ describe('CarnetSanteService — soft-delete des données de santé', () => {
       {} as never, // encryptionService
       {} as never, // smsService
       {} as never, // queueService
+      {} as never, // storage
     );
   });
 
@@ -78,7 +79,9 @@ describe('CarnetSanteService — soft-delete des données de santé', () => {
       await appel(service);
 
       expect(prisma[modele].update).toHaveBeenCalledTimes(1);
-      const arg = prisma[modele].update.mock.calls[0][0];
+      const [[arg]] = prisma[modele].update.mock.calls as [
+        { data: { deletedAt?: unknown } },
+      ][];
       expect(arg.data.deletedAt).toBeInstanceOf(Date);
       expect(prisma[modele].delete).not.toHaveBeenCalled();
     });
@@ -88,7 +91,9 @@ describe('CarnetSanteService — soft-delete des données de santé', () => {
 
       await appel(service);
 
-      const where = prisma[modele].findFirst.mock.calls[0][0].where;
+      const [[{ where }]] = prisma[modele].findFirst.mock.calls as [
+        { where: { deletedAt?: unknown } },
+      ][];
       expect(where.deletedAt).toBeNull();
     });
 
