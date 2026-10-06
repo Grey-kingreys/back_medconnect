@@ -1,3 +1,5 @@
+// Dette de typage préexistante, backlog points 21 et 22
+/* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access */
 import {
   Controller,
   Get,
@@ -18,6 +20,7 @@ import {
 } from '@nestjs/swagger';
 import { UserService } from './user.service';
 import { AuthGuard } from 'src/common/guards/auth.guard';
+import { PermissionsService } from 'src/common/rbac/permissions.service';
 import { PermissionsGuard } from 'src/common/rbac/permissions.guard';
 import { RequirePermissions } from 'src/common/rbac/require-permissions.decorator';
 import { PERMISSIONS } from 'src/common/rbac/permissions.constants';
@@ -35,12 +38,17 @@ import { plainToInstance } from 'class-transformer';
 @UseGuards(AuthGuard, PermissionsGuard)
 @ApiBearerAuth()
 export class UserController {
-  constructor(private readonly userService: UserService) { }
+  constructor(
+    private readonly userService: UserService,
+    private readonly permissionsService: PermissionsService,
+  ) {}
 
   // ─── Avatar (self-service : aucune permission requise, juste être authentifié) ──
 
   @Patch('me/avatar')
-  @ApiOperation({ summary: 'Définir ma photo de profil depuis un fichier R2 confirmé' })
+  @ApiOperation({
+    summary: 'Définir ma photo de profil depuis un fichier R2 confirmé',
+  })
   setMyAvatar(@Req() req: any, @Body() dto: LinkFileDto) {
     return this.userService.setAvatar(req.user.userId, dto.fileId);
   }
@@ -62,9 +70,20 @@ export class UserController {
 
   @Get('patients/my')
   @RequirePermissions(PERMISSIONS.PATIENT_READ)
-  @ApiOperation({ summary: 'Liste de mes patients', description: 'Retourne les patients ayant eu une consultation dans la structure du médecin' })
-  getMyPatients(@Req() req: any) {
-    return this.userService.getPatientsForDoctor(req.user.structureId);
+  @ApiOperation({
+    summary: 'Liste de mes patients',
+    description:
+      'Retourne les patients ayant eu une consultation dans la structure du médecin',
+  })
+  async getMyPatients(@Req() req: any) {
+    const peutVoirCarnet = await this.permissionsService.hasPermissions(
+      req.user.userId,
+      [PERMISSIONS.CARNET_READ],
+    );
+    return this.userService.getPatientsForDoctor(
+      req.user.structureId,
+      peutVoirCarnet,
+    );
   }
 
   @Get('patient/autorisations')
@@ -77,14 +96,20 @@ export class UserController {
   @Post('patient/autoriser-structure/:structureId')
   // @RequirePermissions not needed for patient self-service operations
   @ApiOperation({ summary: 'Autoriser une structure à voir le dossier' })
-  autoriserStructure(@Param('structureId') structureId: string, @Req() req: any) {
+  autoriserStructure(
+    @Param('structureId') structureId: string,
+    @Req() req: any,
+  ) {
     return this.userService.autoriserStructure(req.user.userId, structureId);
   }
 
   @Delete('patient/revoquer-structure/:structureId')
   // @RequirePermissions not needed for patient self-service operations
-  @ApiOperation({ summary: 'Révoquer l\'autorisation d\'une structure' })
-  revoquerStructure(@Param('structureId') structureId: string, @Req() req: any) {
+  @ApiOperation({ summary: "Révoquer l'autorisation d'une structure" })
+  revoquerStructure(
+    @Param('structureId') structureId: string,
+    @Req() req: any,
+  ) {
     return this.userService.revoquerStructure(req.user.userId, structureId);
   }
 
@@ -106,7 +131,9 @@ export class UserController {
     const res = await this.userService.createByAdmin(dto);
     return {
       ...res,
-      data: plainToInstance(UserResponseDto, res.data, { excludeExtraneousValues: true }),
+      data: plainToInstance(UserResponseDto, res.data, {
+        excludeExtraneousValues: true,
+      }),
     };
   }
 
@@ -117,7 +144,9 @@ export class UserController {
     const res = await this.userService.getUsers();
     return {
       ...res,
-      data: plainToInstance(UserResponseDto, res.data, { excludeExtraneousValues: true }),
+      data: plainToInstance(UserResponseDto, res.data, {
+        excludeExtraneousValues: true,
+      }),
     };
   }
 
@@ -129,7 +158,9 @@ export class UserController {
     const res = await this.userService.getUser(userId);
     return {
       ...res,
-      data: plainToInstance(UserResponseDto, res.data, { excludeExtraneousValues: true }),
+      data: plainToInstance(UserResponseDto, res.data, {
+        excludeExtraneousValues: true,
+      }),
     };
   }
 
