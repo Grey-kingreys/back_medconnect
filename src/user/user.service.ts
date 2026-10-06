@@ -1,3 +1,5 @@
+// Dette de typage préexistante, backlog points 21 et 22
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-enum-comparison, @typescript-eslint/no-unsafe-member-access */
 import {
   Injectable,
   Logger,
@@ -28,7 +30,7 @@ export class UserService {
     private readonly encryptionService: EncryptionService,
     private readonly rolesService: RolesService,
     private readonly storage: StorageService,
-  ) { }
+  ) {}
 
   // ─── Photo de profil (avatar, bucket public R2) ───────────────
 
@@ -39,7 +41,10 @@ export class UserService {
       where: { id: userId },
       select: { avatarFileId: true },
     });
-    await this.prisma.user.update({ where: { id: userId }, data: { avatarFileId: fileId } });
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { avatarFileId: fileId },
+    });
     // L'ancien avatar devient orphelin → suppression (bucket public, pas de conservation).
     if (current?.avatarFileId && current.avatarFileId !== fileId) {
       await this.storage
@@ -47,7 +52,11 @@ export class UserService {
         .catch(() => undefined);
     }
     const avatarUrl = await this.storage.getPublicUrlById(fileId);
-    return { data: { avatarUrl }, message: 'Photo de profil mise à jour', success: true };
+    return {
+      data: { avatarUrl },
+      message: 'Photo de profil mise à jour',
+      success: true,
+    };
   }
 
   /** Retire l'avatar de l'utilisateur courant et supprime le fichier R2. */
@@ -57,12 +66,19 @@ export class UserService {
       select: { avatarFileId: true },
     });
     if (current?.avatarFileId) {
-      await this.prisma.user.update({ where: { id: userId }, data: { avatarFileId: null } });
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { avatarFileId: null },
+      });
       await this.storage
         .deleteStoredFile({ id: current.avatarFileId, requester: { userId } })
         .catch(() => undefined);
     }
-    return { data: { avatarUrl: null }, message: 'Photo de profil supprimée', success: true };
+    return {
+      data: { avatarUrl: null },
+      message: 'Photo de profil supprimée',
+      success: true,
+    };
   }
 
   // ─── Créer un utilisateur (par ADMIN/SUPER_ADMIN) ─────────────
@@ -72,7 +88,9 @@ export class UserService {
 
     // SUPER_ADMIN ne peut pas être créé via cette route
     if ((role as string) === 'SUPER_ADMIN') {
-      throw new ForbiddenException('Impossible de créer un compte SUPER_ADMIN via cette route');
+      throw new ForbiddenException(
+        'Impossible de créer un compte SUPER_ADMIN via cette route',
+      );
     }
 
     const existing = await this.prisma.user.findUnique({
@@ -88,7 +106,10 @@ export class UserService {
     // structure sans structure rattachée ici, reste null → le backfill rattrape. Non bloquant.
     let appRoleId: string | undefined;
     try {
-      appRoleId = (await this.rolesService.resolveAssignableRoleId({ legacyRole: role as string })) ?? undefined;
+      appRoleId =
+        (await this.rolesService.resolveAssignableRoleId({
+          legacyRole: role as string,
+        })) ?? undefined;
     } catch (e) {
       this.logger.error('Résolution appRole (createByAdmin) échouée', e);
     }
@@ -103,7 +124,7 @@ export class UserService {
         role: role as any,
         appRoleId,
         isActive: true,
-        specialite: (role === 'MEDECIN') ? (dto as any).specialite : undefined,
+        specialite: role === 'MEDECIN' ? (dto as any).specialite : undefined,
       },
       select: {
         id: true,
@@ -171,7 +192,9 @@ export class UserService {
     });
 
     if (!user) {
-      throw new NotFoundException(`Utilisateur avec l'ID "${userId}" non trouvé`);
+      throw new NotFoundException(
+        `Utilisateur avec l'ID "${userId}" non trouvé`,
+      );
     }
 
     return { data: user, message: 'Utilisateur trouvé', success: true };
@@ -200,7 +223,8 @@ export class UserService {
     if (dto.prenom !== undefined) updateData.prenom = dto.prenom.trim();
     if (dto.email !== undefined) updateData.email = dto.email.toLowerCase();
     if (dto.role !== undefined) updateData.role = dto.role;
-    if (dto.telephone !== undefined) updateData.telephone = dto.telephone.trim();
+    if (dto.telephone !== undefined)
+      updateData.telephone = dto.telephone.trim();
 
     const updated = await this.prisma.user.update({
       where: { id: userId },
@@ -217,7 +241,11 @@ export class UserService {
       },
     });
 
-    return { data: updated, message: 'Utilisateur modifié avec succès', success: true };
+    return {
+      data: updated,
+      message: 'Utilisateur modifié avec succès',
+      success: true,
+    };
   }
 
   // ─── Activer/Désactiver ───────────────────────────────────────
@@ -245,10 +273,14 @@ export class UserService {
 
   async remove(targetId: string, requester: { userId: string; role: string }) {
     if (targetId === requester.userId) {
-      throw new BadRequestException("Vous ne pouvez pas supprimer votre propre compte.");
+      throw new BadRequestException(
+        'Vous ne pouvez pas supprimer votre propre compte.',
+      );
     }
 
-    const target = await this.prisma.user.findUnique({ where: { id: targetId } });
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetId },
+    });
     if (!target) {
       throw new NotFoundException(`Utilisateur "${targetId}" non trouvé`);
     }
@@ -256,13 +288,17 @@ export class UserService {
     // Un ADMIN ne peut pas supprimer un SUPER_ADMIN
     if (target.role === 'SUPER_ADMIN' && requester.role !== 'SUPER_ADMIN') {
       throw new ForbiddenException(
-        "Seul un Super Administrateur peut supprimer un compte Super Admin.",
+        'Seul un Super Administrateur peut supprimer un compte Super Admin.',
       );
     }
 
     await this.prisma.user.delete({ where: { id: targetId } });
 
-    return { data: { id: targetId }, message: 'Utilisateur supprimé', success: true };
+    return {
+      data: { id: targetId },
+      message: 'Utilisateur supprimé',
+      success: true,
+    };
   }
 
   // ─── Changer le mot de passe (par admin) ─────────────────────
@@ -309,8 +345,40 @@ export class UserService {
 
   // ─── Patients pour médecins ───────────────────────────────────
 
-  async getPatientsForDoctor(structureId: string) {
-    if (!structureId) return { data: [], message: 'Aucune structure', success: true };
+  async getPatientsForDoctor(structureId: string, peutVoirCarnet = false) {
+    if (!structureId)
+      return { data: [], message: 'Aucune structure', success: true };
+
+    // Sans CARNET_READ (accueil, administrateur de structure), aucune donnée médicale n'est lue.
+    const profilMedical = peutVoirCarnet
+      ? { select: { groupeSanguin: true, allergies: true } }
+      : undefined;
+    // Allergies stockées chiffrées : déchiffrées uniquement pour qui a CARNET_READ.
+    const avecProfilDechiffre = <
+      T extends { profilMedical?: { allergies: string | null } | null },
+    >(
+      patient: T,
+    ) => {
+      if (!peutVoirCarnet) {
+        // Défense en profondeur : aucun profil médical sans CARNET_READ.
+        const sansProfil: Partial<T> = { ...patient };
+        delete sansProfil.profilMedical;
+        return sansProfil;
+      }
+      return patient.profilMedical
+        ? {
+            ...patient,
+            profilMedical: {
+              ...patient.profilMedical,
+              allergies: patient.profilMedical.allergies
+                ? this.encryptionService.decrypt(
+                    patient.profilMedical.allergies,
+                  )
+                : patient.profilMedical.allergies,
+            },
+          }
+        : patient;
+    };
 
     const consultations = await this.prisma.consultation.findMany({
       where: { structureId, deletedAt: null },
@@ -326,55 +394,48 @@ export class UserService {
             taille: true,
             poids: true,
             medecinTraitantId: true,
-            profilMedical: {
-              select: {
-                groupeSanguin: true,
-                allergies: true,
-              },
-            },
+            ...(profilMedical && { profilMedical }),
           },
         },
       },
       orderBy: { dateConsultation: 'desc' },
     });
 
-  const autorisations = await this.prisma.autorisationStructure.findMany({
-    where: { structureId },
-    include: {
-      patient: {
-        select: {
-          id: true,
-          nom: true,
-          prenom: true,
-          email: true,
-          telephone: true,
-          dateNaissance: true,
-          taille: true,
-          poids: true,
-          medecinTraitantId: true,
-          profilMedical: {
-            select: { groupeSanguin: true, allergies: true }
-          }
-        }
-      }
-      }
+    const autorisations = await this.prisma.autorisationStructure.findMany({
+      where: { structureId },
+      include: {
+        patient: {
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            email: true,
+            telephone: true,
+            dateNaissance: true,
+            taille: true,
+            poids: true,
+            medecinTraitantId: true,
+            ...(profilMedical && { profilMedical }),
+          },
+        },
+      },
     });
 
     const patientMap = new Map();
     consultations.forEach((c) => {
       if (!patientMap.has(c.patientId)) {
         patientMap.set(c.patientId, {
-          ...c.patient,
+          ...avecProfilDechiffre(c.patient),
           derniereConsultation: c.dateConsultation,
           dernierMotif: this.encryptionService.decrypt(c.motif),
         });
       }
     });
 
-    autorisations.forEach(a => {
+    autorisations.forEach((a) => {
       if (!patientMap.has(a.patientId)) {
         patientMap.set(a.patientId, {
-          ...a.patient,
+          ...avecProfilDechiffre(a.patient),
           autorisationNiveau1: true,
         });
       } else {
@@ -393,11 +454,11 @@ export class UserService {
 
   async autoriserStructure(patientId: string, structureId: string) {
     const exist = await this.prisma.autorisationStructure.findFirst({
-      where: { patientId, structureId }
+      where: { patientId, structureId },
     });
     if (!exist) {
       await this.prisma.autorisationStructure.create({
-        data: { patientId, structureId }
+        data: { patientId, structureId },
       });
     }
     return { success: true, message: 'Structure autorisée' };
@@ -405,11 +466,11 @@ export class UserService {
 
   async revoquerStructure(patientId: string, structureId: string) {
     const exist = await this.prisma.autorisationStructure.findFirst({
-      where: { patientId, structureId }
+      where: { patientId, structureId },
     });
     if (exist) {
       await this.prisma.autorisationStructure.delete({
-        where: { id: exist.id }
+        where: { id: exist.id },
       });
     }
     return { success: true, message: 'Autorisation révoquée' };
@@ -418,7 +479,7 @@ export class UserService {
   async designerMedecin(patientId: string, medecinId: string) {
     await this.prisma.user.update({
       where: { id: patientId },
-      data: { medecinTraitantId: medecinId }
+      data: { medecinTraitantId: medecinId },
     });
     return { success: true, message: 'Médecin désigné avec succès' };
   }
@@ -426,18 +487,20 @@ export class UserService {
   async getAutorisations(patientId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: patientId },
-      select: { 
+      select: {
         medecinTraitantId: true,
-        medecinTraitant: { select: { id: true, nom: true, prenom: true, specialite: true } },
+        medecinTraitant: {
+          select: { id: true, nom: true, prenom: true, specialite: true },
+        },
         autorisationsStructures: {
           select: {
             id: true,
             structureId: true,
             createdAt: true,
-            structure: { select: { id: true, nom: true, type: true } }
-          }
-        }
-      }
+            structure: { select: { id: true, nom: true, type: true } },
+          },
+        },
+      },
     });
     return { success: true, data: user };
   }

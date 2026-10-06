@@ -36,8 +36,9 @@ Liste des fichiers modifiés + preuve (commandes lancées, résultat en une lign
 
 ## Historique
 
-<!-- une ligne par tentative : AAAA-MM-JJ | tier | résultat | raison si échec -->
+2026-10-06 | spécifié | échec | test « sans carnet » rouge (le mock renvoyait profilMedical malgré le select)
+2026-10-06 | spécifié | succès | profilMedical retiré aussi en sortie (défense en profondeur), mock respectant select
 
 ## Validation
 
-<!-- commande relancée par l'orchestrateur | résultat en une ligne | hash du commit -->
+tsc --noEmit ; eslint des 3 fichiers ; npm test | 0 erreur ; 0 erreur ; 4 suites, 36 tests verts | voir commit de la tâche
