@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { CarnetSanteService } from './carnet-sante.service';
 
 /**
@@ -103,5 +103,134 @@ describe('CarnetSanteService — soft-delete des données de santé', () => {
       await expect(appel(service)).rejects.toBeInstanceOf(NotFoundException);
       expect(prisma[modele].update).not.toHaveBeenCalled();
     });
+  });
+});
+
+/**
+ * Contrôle d'accès (backlog point 10).
+ *
+ * Un soignant n'enregistre une consultation que pour son établissement réel en
+ * base, et une structure autorisée ne voit, dans le carnet, que les analyses et
+ * vaccinations produites par ses membres.
+ */
+describe('CarnetSanteService : contrôle d’accès au carnet', () => {
+  const MEDECIN = 'm1';
+  const PATIENT = 'p1';
+  const STRUCTURE_A = 'A';
+  const STRUCTURE_B = 'B';
+
+  let prisma: {
+    user: { findUnique: jest.Mock };
+    autorisationStructure: { findUnique: jest.Mock };
+    structure: { findUnique: jest.Mock };
+    profilMedical: { findUnique: jest.Mock };
+    consultation: { create: jest.Mock; findMany: jest.Mock; count: jest.Mock };
+    ordonnance: { findMany: jest.Mock; count: jest.Mock };
+    resultatAnalyse: { findMany: jest.Mock; count: jest.Mock };
+    vaccination: { findMany: jest.Mock; count: jest.Mock };
+  };
+  let service: CarnetSanteService;
+
+  beforeEach(() => {
+    prisma = {
+      user: {
+        // Patient sans lien de médecin traitant avec m1 : accès via la
+        // structure autorisée A, dont m1 est réellement membre en base.
+        findUnique: jest.fn(({ where }: { where: { id: string } }) =>
+          Promise.resolve(
+            where.id === PATIENT
+              ? {
+                  id: PATIENT,
+                  nom: 'Diallo',
+                  prenom: 'Awa',
+                  medecinTraitantId: 'autre',
+                }
+              : {
+                  id: MEDECIN,
+                  nom: 'Camara',
+                  prenom: 'Ibrahima',
+                  structureId: STRUCTURE_A,
+                },
+          ),
+        ),
+      },
+      autorisationStructure: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'auth1' }),
+      },
+      structure: {
+        findUnique: jest.fn().mockResolvedValue({ id: STRUCTURE_B }),
+      },
+      profilMedical: { findUnique: jest.fn().mockResolvedValue(null) },
+      consultation: {
+        create: jest
+          .fn()
+          .mockResolvedValue({ id: 'c1', medecinNom: 'Dr. Ibrahima Camara' }),
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+      },
+      ordonnance: {
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+      },
+      resultatAnalyse: {
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+      },
+      vaccination: {
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+      },
+    };
+    service = new CarnetSanteService(
+      prisma as never,
+      {} as never, // aiService
+      {} as never, // emailService
+      {} as never, // chatGateway
+      { createNotification: jest.fn().mockResolvedValue({}) } as never,
+      { encrypt: (v: string) => v } as never,
+      {} as never, // smsService
+      {} as never, // queueService
+      {} as never, // storage
+    );
+  });
+
+  it('refuse une consultation rattachée à un autre établissement que celui du médecin', async () => {
+    await expect(
+      service.createConsultation(
+        MEDECIN,
+        { patientId: PATIENT, motif: 'Fièvre', structureId: STRUCTURE_B },
+        STRUCTURE_A,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.consultation.create).not.toHaveBeenCalled();
+  });
+
+  it('enregistre la consultation avec l’établissement réel du médecin', async () => {
+    await service.createConsultation(
+      MEDECIN,
+      { patientId: PATIENT, motif: 'Fièvre' },
+      STRUCTURE_A,
+    );
+
+    const [[{ data }]] = prisma.consultation.create.mock.calls as [
+      { data: { structureId?: string | null } },
+    ][];
+    expect(data.structureId).toBe(STRUCTURE_A);
+  });
+
+  it('filtre analyses et vaccinations par établissement de l’auteur pour une structure autorisée', async () => {
+    await service.getPatientCarnetForDoctor(MEDECIN, PATIENT, STRUCTURE_A);
+
+    const filtre = { medecin: { structureId: STRUCTURE_A } };
+    for (const modele of [prisma.resultatAnalyse, prisma.vaccination]) {
+      const [[{ where }]] = modele.findMany.mock.calls as [
+        { where: Record<string, unknown> },
+      ][];
+      expect(where).toMatchObject(filtre);
+      const [[{ where: whereCount }]] = modele.count.mock.calls as [
+        { where: Record<string, unknown> },
+      ][];
+      expect(whereCount).toMatchObject(filtre);
+    }
   });
 });

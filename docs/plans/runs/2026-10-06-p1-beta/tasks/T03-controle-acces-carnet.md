@@ -43,4 +43,8 @@ Liste des fichiers modifiés + preuve (commandes lancées, résultat en une lign
 
 ## Historique
 
+2026-10-06 | dur | succès | -
+
 ## Validation
+
+tsc --noEmit ; eslint service + spec ; npm test | 0 erreur ; 0 erreur (dette désactivée en tête selon D07) ; 3 suites, 37 tests verts | voir commit de la tâche
