@@ -9,6 +9,22 @@ import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { PrismaService } from '../services/prisma.service';
 
+/** Champs de la requête HTTP lus par l'audit. */
+interface RequeteAuditee {
+  method: string;
+  ip?: string;
+  user?: { userId?: string };
+  route?: { path?: string };
+  url?: string;
+  originalUrl?: string;
+}
+
+/** Réponse métier : plate (`id`) ou enveloppée (`data.id`). */
+interface ReponseAuditee {
+  id?: string;
+  data?: { id?: string };
+}
+
 /** Segment de route → type d'entité auditée. */
 const ENTITES: Record<string, string> = {
   consultations: 'Consultation',
@@ -39,18 +55,18 @@ export class AuditInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     if (context.getType() !== 'http') return next.handle();
 
-    const request = context.switchToHttp().getRequest();
+    const request = context.switchToHttp().getRequest<RequeteAuditee>();
     const { method } = request;
     // `trust proxy` est configuré dans main.ts : `req.ip` résout déjà
     // X-Forwarded-For pour les proxies de confiance, sans être falsifiable
     // par le client (contrairement à une lecture brute de l'en-tête).
     const ip = request.ip ?? null;
     const userId = request.user?.userId ?? null;
-    const path: string = request.route?.path ?? request.url ?? '';
+    const path = request.route?.path ?? request.url ?? '';
 
     return next.handle().pipe(
       tap({
-        next: (response) => {
+        next: (response: unknown) => {
           const cible = this.resoudreCible(request, response);
           if (!cible) return;
           void this.enregistrer({
@@ -62,10 +78,10 @@ export class AuditInterceptor implements NestInterceptor {
             method,
           });
         },
-        error: (error) => {
+        error: (error: unknown) => {
           // Un accès refusé à des données médicales est précisément ce qu'un
           // audit doit retenir.
-          if (error?.status !== 403) return;
+          if ((error as { status?: number } | null)?.status !== 403) return;
           const cible = this.resoudreCible(request, null);
           if (!cible) return;
           void this.enregistrer({
@@ -86,10 +102,10 @@ export class AuditInterceptor implements NestInterceptor {
    * (cas d'une création où l'ID n'existe pas encore dans l'URL).
    */
   private resoudreCible(
-    request: any,
-    response: any,
+    request: RequeteAuditee,
+    response: unknown,
   ): { entityType: string; entityId: string } | null {
-    const url: string = request.originalUrl ?? request.url ?? '';
+    const url = request.originalUrl ?? request.url ?? '';
     const chemin = url.split('?')[0];
 
     // Consultation du carnet d'un patient par un tiers (médecin).
@@ -105,7 +121,9 @@ export class AuditInterceptor implements NestInterceptor {
     if (!entityType) return null;
 
     // ID dans l'URL (lecture unitaire, suppression) sinon ID de l'entité créée.
-    const entityId = segments[2] ?? response?.id;
+    // Les services renvoient l'enveloppe { data, message, success } : l'ID créé est dans data.id.
+    const corps = response as ReponseAuditee | null | undefined;
+    const entityId = segments[2] ?? corps?.data?.id ?? corps?.id;
     if (!entityId) return null;
 
     return { entityType, entityId };
