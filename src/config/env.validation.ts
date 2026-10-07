@@ -115,6 +115,16 @@ const RULES: Rule[] = [
         ? null
         : 'doit être une URL (ex. https://cdn.medconnecte.com), base des liens publics',
   },
+  // Secret partagé avec les services IA (en-tête X-MedConnecte-Secret).
+  // Optionnel, sans défaut : absent, le contrôle est désactivé des deux côtés.
+  {
+    key: 'AI_SHARED_SECRET',
+    required: false,
+    validate: (v) =>
+      v.length < 32
+        ? `doit faire au moins 32 caractères (actuellement ${v.length})`
+        : null,
+  },
   // Ouverture volontaire de Swagger en production (préproduction par exemple).
   // Optionnelle, sans défaut : absente, Swagger reste fermé en production.
   {

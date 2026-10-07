@@ -10,6 +10,8 @@ export class AiService {
   private readonly logger = new Logger(AiService.name);
   private readonly aiUrl: string;
   private readonly urgenceUrl: string;
+  // Options HTTP communes : en-tête du secret partagé si AI_SHARED_SECRET est définie
+  private readonly optionsHttp?: { headers: Record<string, string> };
 
   constructor(
     private readonly httpService: HttpService,
@@ -21,6 +23,11 @@ export class AiService {
       'http://localhost:8002';
     this.urgenceUrl =
       this.configService.get<string>('AI_URGENCE') || 'http://localhost:8004';
+    // Secret partagé avec les services IA ; jamais journalisé
+    const secret = this.configService.get<string>('AI_SHARED_SECRET');
+    if (secret) {
+      this.optionsHttp = { headers: { 'X-MedConnecte-Secret': secret } };
+    }
   }
 
   async predictMaladie(symptomes: string) {
@@ -31,7 +38,11 @@ export class AiService {
       );
 
       const response = await firstValueFrom(
-        this.httpService.post(`${this.aiUrl}/predire`, { symptomes }),
+        this.httpService.post(
+          `${this.aiUrl}/predire`,
+          { symptomes },
+          this.optionsHttp,
+        ),
       );
 
       return response.data;
@@ -57,7 +68,11 @@ export class AiService {
       );
 
       const response = await firstValueFrom(
-        this.httpService.post(`${this.urgenceUrl}/urgence`, { question }),
+        this.httpService.post(
+          `${this.urgenceUrl}/urgence`,
+          { question },
+          this.optionsHttp,
+        ),
       );
 
       return response.data;

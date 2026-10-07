@@ -69,7 +69,8 @@ Obligatoires : `DATABASE_URL`, `JWT_SECRET`, **`ENCRYPTION_KEY`** (hex 64 car. �
 `R2_BUCKET_PRIVATE`, `R2_PUBLIC_URL`) — toutes validées au boot (`config/env.validation.ts`).
 Autres : `FRONTEND_URL`, `PORT`, `REDIS_URL`, `RESEND_*`, `NIMBA_*`, `AI_SERVICE_URL`,
 `AI_URGENCE`, `SWAGGER_ENABLED` (optionnelle, `true` pour ouvrir Swagger en production,
-fermé par défaut). Les anciennes `S3_*` sont **legacy** (module dormant). Toujours mettre à
+fermé par défaut), `AI_SHARED_SECRET` (optionnelle, 32 caractères min., secret partagé
+avec les services IA, envoyé dans l'en-tête `X-MedConnecte-Secret`). Les anciennes `S3_*` sont **legacy** (module dormant). Toujours mettre à
 jour `.env.example` (racine) **et** l'`environment` du service `backend` dans `compose.yml`
 en ajoutant une variable obligatoire.
 
