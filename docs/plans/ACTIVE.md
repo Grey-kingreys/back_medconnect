@@ -16,9 +16,15 @@ Détails: docs/plans/runs/2026-10-06-p2-fonctionnalites/ (niveau P2 du BACKLOG-P
 - T02 SOS délai d'arrivée, anti-relance, diffusion ciblée (F5 + 12) : validé, 875266d
 - T01 Ordonnance : medicamentId optionnel (F2) : validé, bbffd84
 - T03 Déchiffrement : alerte structurée (19) : validé, 25f886d
-- T04 Import Excel du stock pharmacie (F1) : validé, eb53eb9 (merge dans orch)
+- T04 Import Excel du stock pharmacie (F1) : validé, eb53eb9 (merge 5dfdca6)
+
+Toutes les tâches validées le 2026-10-07 ; `npm test` : 7 suites, 60 tests verts sur orch/p2-fonctionnalites. Migration `20261006120000_urgence_prise_en_charge` créée, non appliquée (aucune base). Archivage du run après relecture du porteur.
 
 ## Questions parquées
+
+- Q1 Appliquer la migration SOS sur une base de dev puis jouer le parcours SOS de bout en bout.
+- Q2 CORS n'expose pas `Content-Disposition` (`main.ts`) : à ajouter si les noms de fichiers téléchargés doivent venir du serveur.
+- Q3 Déchiffrement (D09) : la valeur de repli « [Donnée illisible] » reste affichée telle quelle ; à reformuler si le porteur le souhaite.
 
 ## Dernières décisions (5 max, historique complet dans decisions.md)
 
