@@ -1,0 +1,49 @@
+# Intégration continue du back MedConnecte : compilation et tests unitaires.
+#
+# Pas de lint global ici : la dette existante (environ 2 000 erreurs, backlog
+# point 22) ferait échouer chaque exécution. Le lint des fichiers modifiés reste
+# appliqué localement par le hook pre-commit (.githooks/).
+name: CI
+
+on:
+  push:
+    branches: [master, 'orch/**']
+  pull_request:
+    branches: [master]
+
+# Une nouvelle exécution sur la même branche annule la précédente, devenue obsolète
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verification:
+    runs-on: ubuntu-latest
+    # Valeurs factices, publiques et sans valeur : elles servent seulement à
+    # générer le client Prisma et à lancer les tests unitaires. Aucune base de
+    # données n'est démarrée, aucun vrai secret n'est utilisé.
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+    steps:
+      - uses: actions/checkout@v4
+
+      # Même version majeure de Node que l'image du Dockerfile (node:22-slim)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Installation des dépendances
+        run: npm ci --no-audit --no-fund
+
+      - name: Génération du client Prisma
+        run: npx --no-install prisma generate
+
+      - name: Vérification des types
+        run: npx --no-install tsc --noEmit
+
+      - name: Tests unitaires
+        run: npm test
