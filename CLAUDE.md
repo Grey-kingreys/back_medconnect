@@ -105,7 +105,8 @@ Voir la liste complète dans le `CLAUDE.md` racine. En résumé, à traiter en p
 fallback `JWT_SECRET || 'secret'` (`chat.gateway.ts:42`), refresh token en clair dans
 le JSON, **absence d'audit trail et de soft-delete** sur les données médicales, boot qui
 crashe sans `ENCRYPTION_KEY`/`RESEND_API_KEY`, rate-limit auth trop permissif, logs non
-structurés sur données sensibles, **aucun test** (`.spec.ts`). IDOR à confirmer sur la
+structurés sur données sensibles, tests encore partiels (`.spec.ts` : `AuthService`,
+contrôle d'accès au carnet, stockage ; le reste n'est pas couvert). IDOR à confirmer sur la
 création de consultation.
 
 <!-- orchestrator:start v2 -->
