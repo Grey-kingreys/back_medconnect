@@ -8,6 +8,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from 'src/common/services/prisma.service';
+import { UrgenceStatus } from 'generated/prisma/enums';
 import {
   UpsertProfilMedicalDto,
   CreateConsultationDto,
@@ -1334,7 +1335,7 @@ export class CarnetSanteService {
     };
   }
 
-  async updateUrgenceStatus(id: string, status: any) {
+  async updateUrgenceStatus(id: string, status: UrgenceStatus) {
     const urgence = await this.prisma.urgence.update({
       where: { id },
       data: { status },
