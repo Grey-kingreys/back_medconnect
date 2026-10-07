@@ -5,6 +5,7 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  ConflictException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from 'src/common/services/prisma.service';
@@ -17,6 +18,7 @@ import {
   CreateAutoDiagnosticDto,
   CreateRendezVousDto,
   CreateUrgenceDto,
+  TakeChargeUrgenceDto,
   UrgenceStatusEnum,
   AiEmergencyRequestDto,
 } from './dto/carnet-sante.dto';
@@ -43,6 +45,9 @@ import type {
   ResultatAnalyse,
   Vaccination,
 } from 'generated/prisma/client';
+
+// Délai minimal entre deux alertes SOS tant que la précédente n'est pas prise en charge.
+export const SOS_ANTI_DOUBLON_MINUTES = 5;
 
 @Injectable()
 export class CarnetSanteService {
@@ -524,6 +529,26 @@ export class CarnetSanteService {
     dto: CreateOrdonnanceDto,
     structureId?: string,
   ) {
+    // Lignes liées au catalogue : les médicaments doivent toujours exister (une requête).
+    const medicamentIds = [
+      ...new Set(
+        dto.medicaments
+          .map((m) => m.medicamentId)
+          .filter((id): id is string => !!id),
+      ),
+    ];
+    if (medicamentIds.length > 0) {
+      const trouves = await this.prisma.medicament.findMany({
+        where: { id: { in: medicamentIds } },
+        select: { id: true },
+      });
+      if (trouves.length !== medicamentIds.length) {
+        throw new BadRequestException(
+          "Un médicament de l'ordonnance n'est plus dans le catalogue. Retirez-le puis choisissez-le à nouveau, ou saisissez son nom librement.",
+        );
+      }
+    }
+
     const patientId = dto.patientId || actorId;
     await this.checkAccess(actorId, patientId, structureId);
 
@@ -1181,7 +1206,140 @@ export class CarnetSanteService {
     };
   }
 
+  // Les 5 structures actives les plus proches d'une position (distance euclidienne simple).
+  private async structuresLesPlusProches(latitude: number, longitude: number) {
+    const structures = await this.prisma.structure.findMany({
+      where: { isActive: true },
+      select: {
+        id: true,
+        nom: true,
+        latitude: true,
+        longitude: true,
+        type: true,
+      },
+    });
+
+    // Calcul de distance simple (euclidienne pour l'exemple)
+    return structures
+      .filter((s) => s.latitude !== null && s.longitude !== null)
+      .map((s) => {
+        const lat = s.latitude!;
+        const lng = s.longitude!;
+        const dist = Math.sqrt(
+          Math.pow(lat - latitude, 2) + Math.pow(lng - longitude, 2),
+        );
+        return { ...s, dist };
+      })
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, 5);
+  }
+
+  // Dernière alerte encore active du patient (lancée ou prise en charge).
+  private derniereUrgenceActive(patientId: string) {
+    return this.prisma.urgence.findFirst({
+      where: {
+        patientId,
+        status: {
+          in: [UrgenceStatusEnum.LANCE, UrgenceStatusEnum.PRIS_EN_CHARGE],
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      include: { structurePriseEnCharge: { select: { id: true, nom: true } } },
+    });
+  }
+
+  // Fin du délai d'arrivée annoncé et heure à partir de laquelle le patient peut relancer
+  // une alerte (null si la relance est déjà possible).
+  private etatRelanceUrgence(
+    urgence: {
+      status: string;
+      createdAt: Date;
+      priseEnChargeAt: Date | null;
+      delaiArriveeMinutes: number | null;
+    },
+    maintenant: Date,
+  ) {
+    let finDelaiAt: Date | null = null;
+    let peutRelancerA: Date | null = null;
+
+    if (
+      urgence.status === 'PRIS_EN_CHARGE' &&
+      urgence.priseEnChargeAt &&
+      urgence.delaiArriveeMinutes
+    ) {
+      finDelaiAt = new Date(
+        urgence.priseEnChargeAt.getTime() +
+          urgence.delaiArriveeMinutes * 60_000,
+      );
+      if (finDelaiAt > maintenant) peutRelancerA = finDelaiAt;
+    } else if (urgence.status === 'LANCE') {
+      const finAntiDoublon = new Date(
+        urgence.createdAt.getTime() + SOS_ANTI_DOUBLON_MINUTES * 60_000,
+      );
+      if (finAntiDoublon > maintenant) peutRelancerA = finAntiDoublon;
+    }
+
+    return { finDelaiAt, peutRelancerA };
+  }
+
+  async getUrgenceEnCours(userId: string) {
+    const urgence = await this.derniereUrgenceActive(userId);
+    if (!urgence) {
+      return {
+        success: true,
+        data: null,
+        message: "Vous n'avez aucune alerte SOS en cours.",
+      };
+    }
+
+    const { finDelaiAt, peutRelancerA } = this.etatRelanceUrgence(
+      urgence,
+      new Date(),
+    );
+    return {
+      success: true,
+      data: {
+        ...urgence,
+        structurePriseEnCharge: urgence.structurePriseEnCharge ?? null,
+        finDelaiAt: finDelaiAt ? finDelaiAt.toISOString() : null,
+        peutRelancerA: peutRelancerA ? peutRelancerA.toISOString() : null,
+      },
+      message: 'Alerte SOS en cours',
+    };
+  }
+
   async createUrgence(userId: string, dto: CreateUrgenceDto) {
+    // Anti-relance : pas de nouvelle alerte tant que les secours sont attendus ou que
+    // la précédente vient juste d'être envoyée. L'ancienne alerte n'est jamais modifiée.
+    const derniere = await this.derniereUrgenceActive(userId);
+    if (derniere) {
+      const maintenant = new Date();
+      const { peutRelancerA } = this.etatRelanceUrgence(derniere, maintenant);
+      if (peutRelancerA) {
+        const minutes = Math.max(
+          1,
+          Math.ceil((peutRelancerA.getTime() - maintenant.getTime()) / 60_000),
+        );
+        const duree = `${minutes} minute${minutes > 1 ? 's' : ''}`;
+        const message =
+          derniere.status === 'PRIS_EN_CHARGE'
+            ? `Votre alerte a été prise en charge par ${derniere.structurePriseEnCharge?.nom ?? 'un établissement de santé'}. ` +
+              `Les secours sont attendus dans environ ${duree}. ` +
+              "Si personne n'est arrivé d'ici là, vous pourrez relancer une alerte."
+            : 'Votre alerte a déjà été envoyée aux établissements proches. ' +
+              `Vous pourrez en relancer une dans environ ${duree}.`;
+        this.logger.log(
+          `sos.relance_refusee urgenceId=${derniere.id} statut=${derniere.status}`,
+        );
+        throw new ConflictException({
+          statusCode: 409,
+          error: 'Conflict',
+          message,
+          peutRelancerA: peutRelancerA.toISOString(),
+        });
+      }
+    }
+
     const urgence = await this.prisma.urgence.create({
       data: {
         patientId: userId,
@@ -1239,31 +1397,10 @@ export class CarnetSanteService {
 
     // 3. Notifier les 5 structures les plus proches
     if (hasLocation) {
-      const structures = await this.prisma.structure.findMany({
-        where: { isActive: true },
-        select: {
-          id: true,
-          nom: true,
-          latitude: true,
-          longitude: true,
-          type: true,
-        },
-      });
-
-      // Calcul de distance simple (euclidienne pour l'exemple)
-      const sortedStructures = structures
-        .filter((s) => s.latitude !== null && s.longitude !== null)
-        .map((s) => {
-          const lat = s.latitude!;
-          const lng = s.longitude!;
-          const dist = Math.sqrt(
-            Math.pow(lat - dto.latitude!, 2) +
-              Math.pow(lng - dto.longitude!, 2),
-          );
-          return { ...s, dist };
-        })
-        .sort((a, b) => a.dist - b.dist)
-        .slice(0, 5);
+      const sortedStructures = await this.structuresLesPlusProches(
+        dto.latitude!,
+        dto.longitude!,
+      );
 
       // Ni les coordonnées GPS du patient ni son identité ne sont journalisées :
       // seuls l'ID de l'urgence et les structures notifiées le sont (audit #8).
@@ -1331,10 +1468,14 @@ export class CarnetSanteService {
     };
   }
 
-  async takeCharge(urgenceId: string, userId: string) {
+  async takeCharge(
+    urgenceId: string,
+    userId: string,
+    dto: TakeChargeUrgenceDto,
+  ) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: { structure: true },
+      include: { structure: true, administeredStructure: true },
     });
 
     if (!user) throw new NotFoundException('Utilisateur non trouvé');
@@ -1350,10 +1491,25 @@ export class CarnetSanteService {
       );
     }
 
+    // Structure qui intervient : celle du soignant, ou celle qu'il administre.
+    const structure = user.structure ?? user.administeredStructure ?? null;
+    const handledAt = new Date();
+    const delaiArriveeMinutes = dto.delaiArriveeMinutes;
+    const finDelaiAt = new Date(
+      handledAt.getTime() + delaiArriveeMinutes * 60_000,
+    );
+
     const updatedUrgence = await this.prisma.urgence.update({
       where: { id: urgenceId },
-      data: { status: UrgenceStatusEnum.PRIS_EN_CHARGE },
-      include: { patient: true },
+      data: {
+        status: UrgenceStatusEnum.PRIS_EN_CHARGE,
+        structurePriseEnChargeId: structure?.id ?? null,
+        priseEnChargeParId: userId,
+        priseEnChargeAt: handledAt,
+        delaiArriveeMinutes,
+      },
+      // Seuls les champs utiles : ne jamais renvoyer l'objet utilisateur complet du patient.
+      include: { patient: { select: { id: true, nom: true, prenom: true } } },
     });
 
     // Notification Patient
@@ -1361,15 +1517,48 @@ export class CarnetSanteService {
       userId: updatedUrgence.patientId,
       type: 'SOS_PRIS_EN_CHARGE',
       titre: 'SOS Pris en charge',
-      message: `${user.structure?.nom || 'Une structure'} a pris en charge votre alerte SOS.`,
+      message:
+        `${structure?.nom || 'Un établissement de santé'} a pris en charge votre alerte. ` +
+        `Les secours arrivent dans environ ${delaiArriveeMinutes} minute${delaiArriveeMinutes > 1 ? 's' : ''}.`,
     });
 
-    // Broadcast à TOUS les médecins/structures pour informer que c'est pris
-    this.chatGateway.server.emit('emergencyHandled', {
+    // Diffusion ciblée : le patient, les structures notifiées à l'origine (recalculées
+    // depuis la position de l'alerte), la structure qui intervient et le soignant.
+    const structureIds = new Set<string>();
+    if (structure) structureIds.add(structure.id);
+    if (urgence.latitude !== null && urgence.longitude !== null) {
+      const proches = await this.structuresLesPlusProches(
+        urgence.latitude,
+        urgence.longitude,
+      );
+      proches.forEach((s) => structureIds.add(s.id));
+    }
+    const destinataires = new Set<string>([updatedUrgence.patientId, userId]);
+    if (structureIds.size > 0) {
+      const ids = [...structureIds];
+      const membres = await this.prisma.user.findMany({
+        where: {
+          OR: [
+            { structureId: { in: ids } },
+            { administeredStructure: { id: { in: ids } } },
+          ],
+          isActive: true,
+        },
+        select: { id: true },
+      });
+      membres.forEach((m) => destinataires.add(m.id));
+    }
+
+    this.chatGateway.sendEmergencyHandled([...destinataires], {
       urgenceId: urgenceId,
-      structureName: user.structure?.nom || `${user.prenom} ${user.nom}`,
-      handledAt: new Date(),
+      structureName: structure?.nom || `${user.prenom} ${user.nom}`,
+      handledAt,
+      delaiArriveeMinutes,
+      finDelaiAt,
     });
+    this.logger.log(
+      `sos.pris_en_charge urgenceId=${urgenceId} structureId=${structure?.id ?? 'aucune'} destinataires=${destinataires.size}`,
+    );
 
     return {
       success: true,

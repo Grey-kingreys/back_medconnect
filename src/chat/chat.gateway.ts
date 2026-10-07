@@ -175,4 +175,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
     });
   }
+
+  // Prise en charge d'une alerte SOS : émise aux seuls utilisateurs concernés.
+  sendEmergencyHandled(userIds: string[], data: any) {
+    userIds.forEach((userId) => {
+      if (this.userSockets.has(userId)) {
+        for (const socketId of this.userSockets.get(userId)!) {
+          this.server.to(socketId).emit('emergencyHandled', data);
+        }
+      }
+    });
+  }
 }

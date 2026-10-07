@@ -37,6 +37,7 @@ import {
   CreateRendezVousDto,
   CreateUrgenceDto,
   UpdateUrgenceStatusDto,
+  TakeChargeUrgenceDto,
   AiEmergencyRequestDto,
   UpdateRendezVousStatusDto,
 } from './dto/carnet-sante.dto';
@@ -350,10 +351,27 @@ export class CarnetSanteController {
     return this.carnetSanteService.createUrgence(req.user.userId, dto);
   }
 
+  @Get('sos/en-cours')
+  @ApiOperation({
+    summary: 'Alerte SOS en cours du patient connecté',
+    description:
+      "Dernière alerte LANCE ou PRIS_EN_CHARGE du patient, avec la structure qui intervient, la fin du délai d'arrivée (finDelaiAt) et l'heure à partir de laquelle une nouvelle alerte est possible (peutRelancerA). data = null si aucune.",
+  })
+  getUrgenceEnCours(@Req() req: { user: { userId: string } }) {
+    return this.carnetSanteService.getUrgenceEnCours(req.user.userId);
+  }
+
   @Post('sos/:id/take-charge')
   @RequirePermissions(PERMISSIONS.SOS_RESPOND)
-  takeCharge(@Param('id') id: string, @Req() req: RequestWithUser) {
-    return this.carnetSanteService.takeCharge(id, req.user.userId);
+  @ApiOperation({
+    summary: "Prendre en charge une alerte SOS en annonçant le délai d'arrivée",
+  })
+  takeCharge(
+    @Param('id') id: string,
+    @Req() req: RequestWithUser,
+    @Body() dto: TakeChargeUrgenceDto,
+  ) {
+    return this.carnetSanteService.takeCharge(id, req.user.userId, dto);
   }
 
   @Get('sos/actives')
