@@ -68,7 +68,8 @@ Obligatoires : `DATABASE_URL`, `JWT_SECRET`, **`ENCRYPTION_KEY`** (hex 64 car. �
 (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_PUBLIC`,
 `R2_BUCKET_PRIVATE`, `R2_PUBLIC_URL`) — toutes validées au boot (`config/env.validation.ts`).
 Autres : `FRONTEND_URL`, `PORT`, `REDIS_URL`, `RESEND_*`, `NIMBA_*`, `AI_SERVICE_URL`,
-`AI_URGENCE`. Les anciennes `S3_*` sont **legacy** (module dormant). Toujours mettre à
+`AI_URGENCE`, `SWAGGER_ENABLED` (optionnelle, `true` pour ouvrir Swagger en production,
+fermé par défaut). Les anciennes `S3_*` sont **legacy** (module dormant). Toujours mettre à
 jour `.env.example` (racine) **et** l'`environment` du service `backend` dans `compose.yml`
 en ajoutant une variable obligatoire.
 
