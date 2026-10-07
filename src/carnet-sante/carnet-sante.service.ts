@@ -1,3 +1,5 @@
+// Dette de typage préexistante, backlog points 21 et 22
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-floating-promises */
 import {
   Injectable,
   NotFoundException,
@@ -69,13 +71,15 @@ export class CarnetSanteService {
    *
    * @returns `isMedecinTraitant` — le médecin traitant voit tout le carnet,
    *   une structure autorisée ne voit que ce qu'elle y a elle-même produit.
+   * @returns `actorStructureId` : établissement réel de l'acteur en base
+   *   (`null` s'il n'en a pas, absent si l'acteur est le patient lui-même).
    */
   private async checkAccess(
     actorId: string,
     patientId: string,
     structureId?: string,
     mode: 'lecture' | 'ecriture' = 'ecriture',
-  ): Promise<{ isMedecinTraitant: boolean }> {
+  ): Promise<{ isMedecinTraitant: boolean; actorStructureId?: string | null }> {
     if (actorId === patientId) return { isMedecinTraitant: false }; // Son propre dossier
 
     const [patient, actor] = await Promise.all([
@@ -113,7 +117,7 @@ export class CarnetSanteService {
       );
     }
 
-    return { isMedecinTraitant };
+    return { isMedecinTraitant, actorStructureId: actor?.structureId ?? null };
   }
 
   // ─── Vue Médecin : Carnet complet d'un patient ─────────────────
@@ -180,35 +184,54 @@ export class CarnetSanteService {
       take: 50,
     });
 
-    // Analyses et Vaccinations : Médecin traitant comme structure autorisée
-    // (au-delà de `checkAccess`, l'accès est déjà refusé).
+    // Analyses et Vaccinations : le médecin traitant voit tout ; une structure
+    // autorisée ne voit que celles dont l'auteur est membre de la structure
+    // (ces tables n'ont pas de `structureId`, cf. décision D03).
+    const filtreAuteur = isMedecinTraitant
+      ? {}
+      : { medecin: { structureId: structureId as string } };
     const [analyses, vaccinations] = await Promise.all([
       this.prisma.resultatAnalyse.findMany({
-        where: { patientId, deletedAt: null },
+        where: { patientId, deletedAt: null, ...filtreAuteur },
         include: { medecin: { select: { nom: true, prenom: true } } },
         orderBy: { dateAnalyse: 'desc' },
         take: 20,
       }),
       this.prisma.vaccination.findMany({
-        where: { patientId, deletedAt: null },
+        where: { patientId, deletedAt: null, ...filtreAuteur },
         include: { medecin: { select: { nom: true, prenom: true } } },
         orderBy: { dateVaccin: 'desc' },
       }),
     ]);
 
-    // Récupérer les STATISTIQUES GLOBALES
+    // Statistiques : mêmes filtres que les listes, pour ne pas révéler le
+    // volume du carnet hors du périmètre de la structure.
     const [
       totalConsultations,
       totalOrdonnances,
       totalAnalyses,
       totalVaccinations,
     ] = await Promise.all([
-      this.prisma.consultation.count({ where: { patientId, deletedAt: null } }),
-      this.prisma.ordonnance.count({ where: { patientId, deletedAt: null } }),
-      this.prisma.resultatAnalyse.count({
-        where: { patientId, deletedAt: null },
+      this.prisma.consultation.count({
+        where: isMedecinTraitant
+          ? { patientId, deletedAt: null }
+          : { patientId, deletedAt: null, structureId: structureId as string },
       }),
-      this.prisma.vaccination.count({ where: { patientId, deletedAt: null } }),
+      this.prisma.ordonnance.count({
+        where: isMedecinTraitant
+          ? { patientId, deletedAt: null }
+          : {
+              patientId,
+              deletedAt: null,
+              consultation: { structureId: structureId as string },
+            },
+      }),
+      this.prisma.resultatAnalyse.count({
+        where: { patientId, deletedAt: null, ...filtreAuteur },
+      }),
+      this.prisma.vaccination.count({
+        where: { patientId, deletedAt: null, ...filtreAuteur },
+      }),
     ]);
 
     const stats = {
@@ -377,7 +400,28 @@ export class CarnetSanteService {
     structureId?: string,
   ) {
     const patientId = dto.patientId || actorId;
-    await this.checkAccess(actorId, patientId, structureId);
+    const { actorStructureId } = await this.checkAccess(
+      actorId,
+      patientId,
+      structureId,
+    );
+
+    // Établissement enregistré : pour un soignant, c'est son établissement réel
+    // en base (pas celui du corps de requête ni seulement celui du JWT). Le
+    // patient qui saisit sa propre consultation garde le comportement existant
+    // (décision D04).
+    let structureEnregistree: string | null | undefined;
+    if (actorId === patientId) {
+      structureEnregistree = dto.structureId || structureId;
+    } else {
+      const etablissementReel = actorStructureId ?? null;
+      if (dto.structureId && dto.structureId !== etablissementReel) {
+        throw new ForbiddenException(
+          'Vous ne pouvez enregistrer une consultation que pour votre propre établissement de santé.',
+        );
+      }
+      structureEnregistree = etablissementReel;
+    }
 
     // Vérifier que la structure existe si fournie
     if (dto.structureId) {
@@ -406,7 +450,7 @@ export class CarnetSanteService {
           dto.diagnostic?.trim() || '',
         ),
         notes: this.encryptionService.encrypt(dto.notes?.trim() || ''),
-        structureId: dto.structureId || structureId,
+        structureId: structureEnregistree,
         dateConsultation: dto.dateConsultation
           ? new Date(dto.dateConsultation)
           : new Date(),
@@ -1124,12 +1168,9 @@ export class CarnetSanteService {
   // ─── AI Emergency (First Aid) ─────────────────────────────────
 
   async getAiEmergencyInstructions(dto: AiEmergencyRequestDto) {
-    this.logger.log(`Demande d'instructions de secours IA: "${dto.question}"`);
-    const result = (await this.aiService.getEmergencyFirstAid(
-      dto.question,
-    )) as {
-      certain?: boolean;
-    };
+    // Jamais le contenu de la question dans les logs (donnée de santé)
+    this.logger.log("Demande d'instructions de secours IA reçue");
+    const result = await this.aiService.getEmergencyFirstAid(dto.question);
 
     return {
       success: true,
@@ -1368,10 +1409,10 @@ export class CarnetSanteService {
     };
   }
 
-  async updateUrgenceStatus(id: string, status: string) {
+  async updateUrgenceStatus(id: string, status: UrgenceStatus) {
     const urgence = await this.prisma.urgence.update({
       where: { id },
-      data: { status: status as UrgenceStatus },
+      data: { status: status },
     });
     return {
       data: urgence,

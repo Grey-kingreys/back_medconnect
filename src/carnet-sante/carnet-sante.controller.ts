@@ -1,3 +1,5 @@
+// Dette de typage préexistante, backlog points 21 et 22
+
 import {
   Controller,
   Get,
@@ -34,6 +36,7 @@ import {
   AutoDiagnosticResponseDto,
   CreateRendezVousDto,
   CreateUrgenceDto,
+  UpdateUrgenceStatusDto,
   AiEmergencyRequestDto,
   UpdateRendezVousStatusDto,
 } from './dto/carnet-sante.dto';
@@ -363,8 +366,11 @@ export class CarnetSanteController {
   @Post('sos/:id/status')
   @RequirePermissions(PERMISSIONS.SOS_RESPOND)
   @ApiOperation({ summary: "Mettre à jour le statut d'une urgence" })
-  updateUrgenceStatus(@Param('id') id: string, @Body('status') status: string) {
-    return this.carnetSanteService.updateUrgenceStatus(id, status);
+  updateUrgenceStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateUrgenceStatusDto,
+  ) {
+    return this.carnetSanteService.updateUrgenceStatus(id, dto.status);
   }
 
   @Post('sos/ai-instructions')

@@ -1,3 +1,5 @@
+// Dette de typage préexistante, backlog points 21 et 22
+
 import {
   IsOptional,
   IsString,
@@ -13,6 +15,7 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Expose, Exclude, Type, Transform } from 'class-transformer';
 import { AppointmentStatus } from 'generated/prisma/client';
+import { UrgenceStatus } from 'generated/prisma/enums';
 
 // ─── Profil Médical ───────────────────────────────────────────────────────────
 
@@ -400,6 +403,12 @@ export class CreateUrgenceDto {
   @IsOptional()
   @IsString()
   message?: string;
+}
+
+export class UpdateUrgenceStatusDto {
+  @ApiProperty({ enum: UrgenceStatus, example: UrgenceStatus.PRIS_EN_CHARGE })
+  @IsEnum(UrgenceStatus, { message: "Le statut de l'alerte est invalide." })
+  status: UrgenceStatus;
 }
 
 // ─── AI Emergency (First Aid) ────────────────────────────────────────────────
