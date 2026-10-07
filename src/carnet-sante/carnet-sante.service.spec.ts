@@ -1,5 +1,8 @@
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import { CarnetSanteService } from './carnet-sante.service';
+import { UpdateRendezVousStatusDto } from './dto/carnet-sante.dto';
 
 /**
  * Régression soft-delete (PLAN §2.1).
@@ -46,6 +49,7 @@ describe('CarnetSanteService — soft-delete des données de santé', () => {
       {} as never, // smsService
       {} as never, // queueService
       {} as never, // storage
+      {} as never, // permissionsService
     );
   });
 
@@ -103,5 +107,132 @@ describe('CarnetSanteService — soft-delete des données de santé', () => {
       await expect(appel(service)).rejects.toBeInstanceOf(NotFoundException);
       expect(prisma[modele].update).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('CarnetSanteService : updateRendezVousStatus', () => {
+  const rv = {
+    id: 'rv1',
+    patientId: 'patient1',
+    medecinId: 'medecin1',
+    structureId: 'struct1',
+    status: 'PROGRAMME',
+  };
+
+  let prisma: {
+    rendezVous: { findUnique: jest.Mock; update: jest.Mock };
+  };
+  let permissions: { hasPermissions: jest.Mock };
+  let service: CarnetSanteService;
+
+  beforeEach(() => {
+    prisma = {
+      rendezVous: {
+        findUnique: jest.fn().mockResolvedValue(rv),
+        update: jest.fn().mockResolvedValue({ ...rv }),
+      },
+    };
+    permissions = { hasPermissions: jest.fn().mockResolvedValue(true) };
+    service = new CarnetSanteService(
+      prisma as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      permissions as never,
+    );
+  });
+
+  it('autorise le patient à annuler son rendez-vous', async () => {
+    const res = await service.updateRendezVousStatus(
+      'rv1',
+      'ANNULE',
+      'patient1',
+    );
+    expect(res.success).toBe(true);
+    expect(prisma.rendezVous.update).toHaveBeenCalledWith({
+      where: { id: 'rv1' },
+      data: { status: 'ANNULE' },
+    });
+  });
+
+  it('refuse au patient un autre statut que ANNULE', async () => {
+    await expect(
+      service.updateRendezVousStatus('rv1', 'TERMINE', 'patient1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.rendezVous.update).not.toHaveBeenCalled();
+  });
+
+  it('refuse un tiers sans lien avec le rendez-vous', async () => {
+    permissions.hasPermissions.mockResolvedValue(false);
+    await expect(
+      service.updateRendezVousStatus('rv1', 'CONFIRME', 'intrus', null),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.rendezVous.update).not.toHaveBeenCalled();
+  });
+
+  it('refuse un soignant d’une autre structure, même avec la permission', async () => {
+    await expect(
+      service.updateRendezVousStatus(
+        'rv1',
+        'CONFIRME',
+        'soignant2',
+        'autre-struct',
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.rendezVous.update).not.toHaveBeenCalled();
+  });
+
+  it('autorise le médecin du rendez-vous', async () => {
+    await service.updateRendezVousStatus('rv1', 'TERMINE', 'medecin1', null);
+    expect(prisma.rendezVous.update).toHaveBeenCalledWith({
+      where: { id: 'rv1' },
+      data: { status: 'TERMINE' },
+    });
+  });
+
+  it('autorise un membre de la structure du rendez-vous avec la permission', async () => {
+    await service.updateRendezVousStatus(
+      'rv1',
+      'CONFIRME',
+      'agent1',
+      'struct1',
+    );
+    expect(prisma.rendezVous.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuse un membre de la structure sans la permission', async () => {
+    permissions.hasPermissions.mockResolvedValue(false);
+    await expect(
+      service.updateRendezVousStatus('rv1', 'CONFIRME', 'agent1', 'struct1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.rendezVous.update).not.toHaveBeenCalled();
+  });
+
+  it('remonte NotFound si le rendez-vous est introuvable', async () => {
+    prisma.rendezVous.findUnique.mockResolvedValue(null);
+    await expect(
+      service.updateRendezVousStatus('rv1', 'ANNULE', 'patient1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('UpdateRendezVousStatusDto', () => {
+  it('rejette un statut inconnu', async () => {
+    const errors = await validate(
+      plainToInstance(UpdateRendezVousStatusDto, { status: 'PIRATE' }),
+    );
+    expect(errors).toHaveLength(1);
+  });
+
+  it('accepte un statut connu', async () => {
+    const errors = await validate(
+      plainToInstance(UpdateRendezVousStatusDto, { status: 'ANNULE' }),
+    );
+    expect(errors).toHaveLength(0);
   });
 });
