@@ -23,6 +23,24 @@ describe('validateEnv', () => {
     expect(() => validateEnv(configMinimale())).not.toThrow();
   });
 
+  describe('AI_SHARED_SECRET', () => {
+    it('accepte la variable absente', () => {
+      expect(() => validateEnv(configMinimale())).not.toThrow();
+    });
+
+    it('rejette un secret de moins de 32 caractères', () => {
+      expect(() =>
+        validateEnv({ ...configMinimale(), AI_SHARED_SECRET: 'trop-court' }),
+      ).toThrow(/AI_SHARED_SECRET/);
+    });
+
+    it('accepte un secret de 32 caractères ou plus', () => {
+      expect(() =>
+        validateEnv({ ...configMinimale(), AI_SHARED_SECRET: 'a'.repeat(32) }),
+      ).not.toThrow();
+    });
+  });
+
   describe('SWAGGER_ENABLED', () => {
     it('accepte la variable absente', () => {
       expect(() => validateEnv(configMinimale())).not.toThrow();
