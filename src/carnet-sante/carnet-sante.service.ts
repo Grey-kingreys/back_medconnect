@@ -472,6 +472,26 @@ export class CarnetSanteService {
     dto: CreateOrdonnanceDto,
     structureId?: string,
   ) {
+    // Lignes liées au catalogue : les médicaments doivent toujours exister (une requête).
+    const medicamentIds = [
+      ...new Set(
+        dto.medicaments
+          .map((m) => m.medicamentId)
+          .filter((id): id is string => !!id),
+      ),
+    ];
+    if (medicamentIds.length > 0) {
+      const trouves = await this.prisma.medicament.findMany({
+        where: { id: { in: medicamentIds } },
+        select: { id: true },
+      });
+      if (trouves.length !== medicamentIds.length) {
+        throw new BadRequestException(
+          "Un médicament de l'ordonnance n'est plus dans le catalogue. Retirez-le puis choisissez-le à nouveau, ou saisissez son nom librement.",
+        );
+      }
+    }
+
     const patientId = dto.patientId || actorId;
     await this.checkAccess(actorId, patientId, structureId);
 

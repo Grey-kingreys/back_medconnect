@@ -28,4 +28,10 @@ Fichiers modifiés et créés + preuves (commande lancée, résultat en une lign
 
 ## Historique
 
+- 2026-10-07 : exécutée directement par l'orchestrateur de reprise (sous-agents désactivés pour ce run).
+
 ## Validation
+
+- `npx --no-install tsc --noEmit` : 0 erreur.
+- `npx --no-install eslint` (3 fichiers touchés) : 0 problème.
+- `npm test` : 5 suites, 48 tests verts (dont `dto/carnet-sante.dto.spec.ts`, 5 cas).

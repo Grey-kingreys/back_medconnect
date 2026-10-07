@@ -13,6 +13,8 @@ import {
   Min,
   Max,
   Length,
+  ArrayMinSize,
+  ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Expose, Exclude, Type, Transform } from 'class-transformer';
@@ -137,17 +139,17 @@ export class CreateConsultationDto {
 
 export class MedicamentOrdonnanceDto {
   @ApiProperty({ example: 'Coartem 20/120mg' })
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'Indiquez le nom du médicament.' })
   @IsString()
   nom: string;
 
   @ApiProperty({ example: '2 comprimés matin et soir' })
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'Indiquez la posologie.' })
   @IsString()
   dosage: string;
 
   @ApiProperty({ example: '3 jours' })
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'Indiquez la durée du traitement.' })
   @IsString()
   duree: string;
 
@@ -155,6 +157,17 @@ export class MedicamentOrdonnanceDto {
   @IsOptional()
   @IsString()
   instructions?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Identifiant du médicament dans le catalogue, absent pour une saisie libre',
+  })
+  @IsOptional()
+  @IsUUID('4', {
+    message:
+      "Ce médicament n'a pas été reconnu dans le catalogue. Choisissez-le à nouveau dans la liste ou saisissez son nom librement.",
+  })
+  medicamentId?: string;
 }
 
 export class CreateOrdonnanceDto {
@@ -170,6 +183,10 @@ export class CreateOrdonnanceDto {
 
   @ApiProperty({ type: [MedicamentOrdonnanceDto] })
   @IsArray()
+  @ArrayMinSize(1, {
+    message: "Ajoutez au moins un médicament à l'ordonnance.",
+  })
+  @ValidateNested({ each: true })
   @Type(() => MedicamentOrdonnanceDto)
   medicaments: MedicamentOrdonnanceDto[];
 
