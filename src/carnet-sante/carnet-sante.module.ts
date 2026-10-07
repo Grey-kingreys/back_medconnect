@@ -26,4 +26,4 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
   providers: [CarnetSanteService, PrismaService, AiService, EmailService],
   exports: [CarnetSanteService],
 })
-export class CarnetSanteModule { }
+export class CarnetSanteModule {}
