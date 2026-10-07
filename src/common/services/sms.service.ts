@@ -1,3 +1,5 @@
+// Dette de typage préexistante, backlog points 21 et 22
+/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 
@@ -16,14 +18,16 @@ export class SmsService {
    */
   async sendSms(to: string, message: string): Promise<boolean> {
     if (!this.sid || !this.token) {
-      this.logger.error('Identifiants Nimba SMS manquants dans le fichier .env');
+      this.logger.error(
+        'Identifiants Nimba SMS manquants dans le fichier .env',
+      );
       return false;
     }
 
     try {
       // Nettoyer le numéro : garder uniquement les chiffres
       let cleanNumber = to.replace(/\D/g, ''); // \D enlève tout ce qui n'est pas un chiffre
-      
+
       // Si c'est un numéro guinéen local (9 chiffres), ajouter le préfixe 224
       if (cleanNumber.length === 9) {
         cleanNumber = `224${cleanNumber}`;
@@ -50,20 +54,35 @@ export class SmsService {
         },
       );
 
-      this.logger.log(`SMS envoyé à ${cleanNumber} avec succès (ID: ${response.data.id || 'N/A'})`);
+      this.logger.log(
+        `SMS envoyé au ${this.masquerNumero(cleanNumber)} avec succès (ID: ${response.data.id || 'N/A'})`,
+      );
       return true;
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || error.message;
-      const errorDetail = error.response?.data ? JSON.stringify(error.response.data) : 'Aucun détail';
-      this.logger.error(`Échec de l'envoi du SMS à ${to}: ${errorMessage} - Détails: ${errorDetail}`);
+      // Pas le corps brut de la réponse du fournisseur : il peut contenir le numéro
+      this.logger.error(
+        `Échec de l'envoi du SMS au ${this.masquerNumero(to)} (statut HTTP : ${error.response?.status ?? 'aucun'}) : ${errorMessage}`,
+      );
       return false;
     }
   }
 
   /**
+   * Masque un numéro de téléphone pour les logs : seuls les 2 derniers chiffres restent visibles
+   */
+  private masquerNumero(numero: string): string {
+    return `***${numero.replace(/\D/g, '').slice(-2)}`;
+  }
+
+  /**
    * Envoie un SMS d'urgence (SOS)
    */
-  async sendEmergencySms(to: string, patientName: string, location?: string): Promise<boolean> {
+  async sendEmergencySms(
+    to: string,
+    patientName: string,
+    location?: string,
+  ): Promise<boolean> {
     const locText = location ? ` à ${location}` : '';
     const message = `[URGENCE MedConnecte] SOS déclenché par ${patientName}${locText}. Veuillez vérifier son état immédiatement.`;
     return this.sendSms(to, message);

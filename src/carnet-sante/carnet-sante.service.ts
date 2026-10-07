@@ -1095,7 +1095,8 @@ export class CarnetSanteService {
   // ─── AI Emergency (First Aid) ─────────────────────────────────
 
   async getAiEmergencyInstructions(dto: AiEmergencyRequestDto) {
-    this.logger.log(`Demande d'instructions de secours IA: "${dto.question}"`);
+    // Jamais le contenu de la question dans les logs (donnée de santé)
+    this.logger.log("Demande d'instructions de secours IA reçue");
     const result = await this.aiService.getEmergencyFirstAid(dto.question);
 
     return {
