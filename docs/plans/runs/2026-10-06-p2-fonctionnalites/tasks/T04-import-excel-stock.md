@@ -39,4 +39,12 @@ Fichiers modifiés et créés + preuves (commande lancée, résultat en une lign
 
 ## Historique
 
+- Tentative 1 (implementeur-dur, worktree `back-p2-T04`) : travail laissé non commité. Repris le 2026-10-07 : formatage prettier (`eslint --fix`), deux imports inutilisés préexistants retirés (`IsEnum`, `ApiResponse`), en-têtes de dette (D10).
+
 ## Validation
+
+- `npx --no-install tsc --noEmit` : 0 erreur ; eslint des 4 fichiers : 0 erreur, 7 avertissements.
+- `npm test` (worktree de tâche) : 4 suites, 42 tests ; après merge dans `orch/p2-fonctionnalites` : 7 suites, 60 tests verts (dont `pharmacie.import.spec.ts`, 8 cas).
+- Contrat des 3 routes conforme (modèle, aperçu, import ; champ multipart `fichier`).
+- Limite : CORS n'expose pas `Content-Disposition` (`main.ts`), le front nomme donc le modèle lui-même.
+- Commit eb53eb9 sur `task/T04-import-excel-stock`, mergé dans `orch/p2-fonctionnalites`.

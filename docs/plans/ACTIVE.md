@@ -10,13 +10,13 @@ Détails: docs/plans/runs/2026-10-06-p2-fonctionnalites/ (niveau P2 du BACKLOG-P
 
 | ID | Tâche | Tier | Statut | Tent. |
 |----|-------|------|--------|-------|
-| T04 | Import Excel du stock pharmacie (F1) | dur | dispatché | 1 |
 
 ## Faites (preuve = commit)
 
 - T02 SOS délai d'arrivée, anti-relance, diffusion ciblée (F5 + 12) : validé, 875266d
 - T01 Ordonnance : medicamentId optionnel (F2) : validé, bbffd84
-- T03 Déchiffrement : alerte structurée (19) : validé, commit T03
+- T03 Déchiffrement : alerte structurée (19) : validé, 25f886d
+- T04 Import Excel du stock pharmacie (F1) : validé, eb53eb9 (merge dans orch)
 
 ## Questions parquées
 
