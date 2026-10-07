@@ -28,4 +28,11 @@ Fichiers modifiés et créés + preuves (commande lancée, résultat en une lign
 
 ## Historique
 
+- 2026-10-07 : exécutée directement par l'orchestrateur de reprise (sous-agents désactivés pour ce run). Journalisation par objet structuré `{ evenement, longueur }` (et `raison` en cas d'échec), comme attendu par le logger Nest.
+
 ## Validation
+
+- `npx --no-install tsc --noEmit` : 0 erreur.
+- `npx --no-install eslint` (2 fichiers) : 0 problème.
+- `npm test` : 6 suites, 52 tests verts (dont `encryption.service.spec.ts`, 4 cas).
+- Tirets : 0 dans les lignes ajoutées (l'ancien log avec tiret cadratin est remplacé).
