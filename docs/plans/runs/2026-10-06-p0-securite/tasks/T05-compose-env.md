@@ -37,7 +37,13 @@ Fichiers modifiés + preuve (commande lancée, résultat en une ligne) par done-
 ## Historique
 
 <!-- une ligne par tentative : AAAA-MM-JJ | tier | résultat | raison si échec -->
+2026-10-06 | mécanique | fait et commité dans le dépôt parent | -
+2026-10-07 | orchestrateur (reprise) | validé | compose.prod.yml et compose.override.yml redéfinissent environment du backend mais Compose fusionne les maps : rien n'est masqué
 
 ## Validation
 
 <!-- commande relancée par l'orchestrateur | résultat en une ligne | hash du commit -->
+grep -cE '^\s+(R2_[A-Z_]+|SUPER_ADMIN_[A-Z_]+): \$\{' compose.yml | 8 | parent 28189e0
+grep -cE "^(R2_|SUPER_ADMIN_)[A-Z_]+=" .env.example | 8 | parent 28189e0
+docker compose --env-file .env.example -f compose.yml config --quiet | rc 0 (idem avec compose.prod.yml) | parent 28189e0
+docker compose --env-file .env.example -f compose.yml -f compose.override.yml config, variables R2_/SUPER_ADMIN_ résolues | 8 | parent 28189e0

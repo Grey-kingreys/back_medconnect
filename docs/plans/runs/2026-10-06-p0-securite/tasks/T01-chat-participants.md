@@ -38,10 +38,33 @@ Faire uniquement ce qui est demandé : pas de refactors, helpers ou abstractions
 
 Liste des fichiers modifiés ou créés + preuve (commande lancée, résultat en une ligne) pour chaque done-condition. Ou un bloc BLOCKED. Pas de prose.
 
+## Tentative 2 : propreté eslint des fichiers touchés (décision D05)
+
+La logique est validée et ne doit pas changer. Le pre-commit lance eslint sur chaque fichier indexé et refuse le commit à la moindre erreur ; `--no-verify` est interdit. Convention du projet : tout fichier touché doit être propre, dette préexistante comprise.
+
+Fichiers à rendre propres : `src/chat/chat.gateway.ts` (18 erreurs : `no-unsafe-*` sur `client.handshake`, `client.data`, `decoded` du `jwtService.verify`, `require-await` x2, `no-unused-vars` x1) et `src/chat/chat.service.ts` (1 `no-unsafe-return`, `let conv` non typé dans `getOrCreateConversation`). `chat.controller.ts` n'est pas touché : ne pas le modifier.
+
+Règles :
+1. Aucun changement de comportement. Les specs `src/chat/*.spec.ts` restent vertes sans modification de leurs assertions.
+2. Corriger par typage minimal et local : `jwtService.verify<{ userId: string }>(...)`, une interface locale pour `client.data` (ex. `(client.data as { userId?: string })`), lecture typée du handshake, type explicite pour `conv` (type Prisma `Conversation` importé de `generated/prisma/client` ou inférence via `Awaited<ReturnType<...>>`). Pour `require-await` : si la méthode n'attend rien, retirer `async` seulement si la signature publique et les appels restent compatibles (sinon disable ligne). Variable inutilisée : la retirer si c'est une variable locale (pas un paramètre d'API), sinon préfixer selon la config.
+3. En dernier recours seulement, `// eslint-disable-next-line <règle> -- <raison en français>` sur une ligne précise. Jamais de désactivation à l'échelle du fichier.
+4. Ne jamais utiliser `git stash` (pile partagée entre worktrees, décision D06). Ne jamais committer.
+
+Done when (tentative 2) :
+- `npx --no-install eslint src/chat/chat.gateway.ts src/chat/chat.service.ts src/chat/chat.gateway.spec.ts src/chat/chat.service.spec.ts` : 0 erreur.
+- `npx --no-install tsc --noEmit` : 0 erreur ; `npm test` : tout vert.
+
 ## Historique
 
 <!-- une ligne par tentative : AAAA-MM-JJ | tier | résultat | raison si échec -->
+2026-10-06 | spécifié | logique ok, tests ok (12 tests chat) | eslint : 19 erreurs préexistantes dans les fichiers touchés bloquent le pre-commit ; incident git stash partagé avec T04, résolu
+2026-10-07 | orchestrateur (reprise, exécution directe D07) | validé | tentative 2 trouvée faite sur disque ; ajout de `void` devant `client.join` (warning no-floating-promises)
 
 ## Validation
 
 <!-- commande relancée par l'orchestrateur | résultat en une ligne | hash du commit -->
+npx --no-install eslint src/chat/chat.gateway.ts src/chat/chat.service.ts src/chat/*.spec.ts | 0 erreur, 0 warning | 3c5d164
+npx --no-install tsc --noEmit | 0 erreur | 3c5d164
+npm test (worktree de tâche) | 5 suites, 46 tests verts (12 chat) | 3c5d164
+grep -n "origin: '\*'" src/chat/chat.gateway.ts | aucun résultat | 3c5d164
+merge --no-ff dans orch/p0-securite | sans conflit | 16d2c49
