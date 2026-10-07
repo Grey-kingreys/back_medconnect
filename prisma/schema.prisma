@@ -194,6 +194,9 @@ model Structure {
   // Rendez-vous dans cette structure
   rendezVous RendezVous[]
 
+  // Alertes SOS prises en charge par cette structure
+  urgencesPrisesEnCharge Urgence[] @relation("UrgencesPrisesEnCharge")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -507,11 +510,22 @@ model Urgence {
   message   String?
   status    UrgenceStatus @default(LANCE)
 
-  // Structures notifiées (via une relation ou juste log)
-  // On pourrait ajouter structureId si une structure spécifique prend en charge
+  // Prise en charge : structure qui intervient (SetNull si elle est supprimée,
+  // l'historique de l'alerte est conservé).
+  structurePriseEnChargeId String?
+  structurePriseEnCharge   Structure? @relation("UrgencesPrisesEnCharge", fields: [structurePriseEnChargeId], references: [id], onDelete: SetNull)
+  // Identifiant du soignant qui a pris en charge (sans relation, le modèle User reste intact)
+  priseEnChargeParId       String?
+  // Heure de la prise en charge
+  priseEnChargeAt          DateTime?
+  // Délai d'arrivée annoncé au patient, en minutes (1 à 240)
+  delaiArriveeMinutes      Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Lecture de la dernière alerte d'un patient (anti-relance)
+  @@index([patientId, createdAt])
 }
 
 // ====== STOCKAGE OBJETS (Cloudflare R2) ======

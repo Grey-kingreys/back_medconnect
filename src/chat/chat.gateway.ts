@@ -1,11 +1,13 @@
-import { 
-  WebSocketGateway, 
-  SubscribeMessage, 
-  MessageBody, 
+// Dette de typage préexistante, backlog points 21 et 22
+/* eslint-disable @typescript-eslint/require-await, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+import {
+  WebSocketGateway,
+  SubscribeMessage,
+  MessageBody,
   ConnectedSocket,
   WebSocketServer,
   OnGatewayConnection,
-  OnGatewayDisconnect
+  OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { ChatService } from './chat.service';
@@ -26,21 +28,26 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     private readonly chatService: ChatService,
     private readonly jwtService: JwtService,
-    private readonly notificationsService: NotificationsService
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async handleConnection(client: Socket) {
     try {
-      const authHeader = client.handshake.auth.token || client.handshake.headers.authorization;
-      const token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : authHeader;
-      
+      const authHeader =
+        client.handshake.auth.token || client.handshake.headers.authorization;
+      const token = authHeader?.startsWith('Bearer ')
+        ? authHeader.split(' ')[1]
+        : authHeader;
+
       if (!token) {
         client.disconnect();
         return;
       }
-      
+
       // Secret centralisé (validé au boot, cf. config/env.validation.ts) — plus de fallback en dur.
-      const decoded = this.jwtService.verify(token, { secret: process.env.JWT_SECRET });
+      const decoded = this.jwtService.verify(token, {
+        secret: process.env.JWT_SECRET,
+      });
       const userId = decoded.userId;
       client.data.userId = userId;
 
@@ -48,8 +55,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         this.userSockets.set(userId, new Set());
       }
       this.userSockets.get(userId)!.add(client.id);
-
-    } catch (error) {
+    } catch {
       client.disconnect();
     }
   }
@@ -67,7 +73,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('joinConversation')
   handleJoinConversation(
     @MessageBody() conversationId: string,
-    @ConnectedSocket() client: Socket
+    @ConnectedSocket() client: Socket,
   ) {
     client.join(`conv_${conversationId}`);
     return { event: 'joined', data: conversationId };
@@ -75,8 +81,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('sendMessage')
   async handleMessage(
-    @MessageBody() payload: { conversationId: string, content: string, isLocation?: boolean, lat?: number, lng?: number, receiverId?: string },
-    @ConnectedSocket() client: Socket
+    @MessageBody()
+    payload: {
+      conversationId: string;
+      content: string;
+      isLocation?: boolean;
+      lat?: number;
+      lng?: number;
+      receiverId?: string;
+    },
+    @ConnectedSocket() client: Socket,
   ) {
     const userId = client.data.userId;
     if (!userId) return;
@@ -87,11 +101,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       payload.content,
       payload.isLocation || false,
       payload.lat,
-      payload.lng
+      payload.lng,
     );
 
-    this.server.to(`conv_${payload.conversationId}`).emit('newMessage', message);
-    
+    this.server
+      .to(`conv_${payload.conversationId}`)
+      .emit('newMessage', message);
+
     // Notification persistante (DB)
     if (payload.receiverId) {
       await this.notificationsService.createNotification({
@@ -99,7 +115,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         type: 'MESSAGE',
         titre: `Nouveau message de ${message.sender.prenom} ${message.sender.nom}`,
         message: payload.isLocation ? '📍 Position partagée' : payload.content,
-        lien: `/dashboard/chat?conv=${payload.conversationId}`
+        lien: `/dashboard/chat?conv=${payload.conversationId}`,
       });
     }
 
@@ -110,7 +126,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           type: 'NEW_MESSAGE',
           conversationId: payload.conversationId,
           senderName: `${message.sender.prenom} ${message.sender.nom}`,
-          content: payload.isLocation ? '📍 Position partagée' : payload.content
+          content: payload.isLocation
+            ? '📍 Position partagée'
+            : payload.content,
         });
       }
     }
@@ -119,12 +137,23 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   // --- SOS / EMERGENCY ALERTS ---
-  
+
   async sendEmergencyAlert(userIds: string[], data: any) {
-    userIds.forEach(userId => {
+    userIds.forEach((userId) => {
       if (this.userSockets.has(userId)) {
         for (const socketId of this.userSockets.get(userId)!) {
           this.server.to(socketId).emit('emergencyAlert', data);
+        }
+      }
+    });
+  }
+
+  // Prise en charge d'une alerte SOS : émise aux seuls utilisateurs concernés.
+  sendEmergencyHandled(userIds: string[], data: any) {
+    userIds.forEach((userId) => {
+      if (this.userSockets.has(userId)) {
+        for (const socketId of this.userSockets.get(userId)!) {
+          this.server.to(socketId).emit('emergencyHandled', data);
         }
       }
     });

@@ -47,4 +47,12 @@ Fichiers modifiés et créés + preuves (commande lancée, résultat en une lign
 
 ## Historique
 
+- Tentative 1 (implementeur-dur) : travail laissé non commité, orchestrateur figé. Repris et validé par l'orchestrateur de reprise le 2026-10-07 (diff relu contre la spec, exemple Swagger avec tiret cadratin reformaté par prettier corrigé en virgule).
+
 ## Validation
+
+- `npx --no-install prisma validate` : schéma valide ; `prisma generate` : OK ; migration `20261006120000_urgence_prise_en_charge` présente, non appliquée (aucune base).
+- `npx --no-install tsc --noEmit` : 0 erreur.
+- `npx --no-install eslint` (6 fichiers touchés) : 0 erreur (avertissements de dette préexistante, en-têtes D10).
+- `npm test` : 4 suites, 43 tests verts (dont `carnet-sante.urgence.spec.ts`, 7 cas).
+- `grep -rn "server.emit('emergencyHandled'" src` : 0 résultat.
