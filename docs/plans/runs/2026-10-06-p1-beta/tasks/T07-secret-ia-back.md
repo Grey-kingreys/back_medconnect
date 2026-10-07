@@ -30,4 +30,8 @@ Liste des fichiers modifiés + preuves (commandes lancées, résultat en une lig
 
 ## Historique
 
+2026-10-07 | orchestrateur (reprise, D08) | succès | `.env.example` et `compose.yml` du parent non modifiés (D09)
+
 ## Validation
+
+tsc --noEmit ; eslint ai.service(.spec).ts, env.validation(.spec).ts ; npm test ; grep X-MedConnecte-Secret | 0 erreur ; 0 erreur ; 9 suites, 65 tests verts (en-tête présent ou absent, secret court rejeté) ; présent | 2f9ed06, merge 081dc29

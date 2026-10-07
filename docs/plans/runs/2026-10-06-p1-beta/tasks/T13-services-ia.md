@@ -36,4 +36,8 @@ Fichiers modifiés par dépôt + preuves (commandes lancées, résultat en une l
 
 ## Historique
 
+2026-10-07 | orchestrateur (reprise, D08) | succès | dépendance testée en l'extrayant telle quelle de chaque app.py (ast), sans charger les modèles ; rien poussé
+
 ## Validation
+
+py_compile des deux app.py ; TestClient sur la dépendance réelle ; grep | OK ; secret absent 200, en-tête faux 401 « Accès refusé. », en-tête absent 401, bon en-tête 200 (les deux services) ; plus de 0.3 dans medconnect-ai/app.py, compare_digest présent dans les deux ; SEUIL_SIMILARITE=abc retombe sur 0.3 | medconnect-ai d1ff2ba, medconnect-urgence 7982a2d

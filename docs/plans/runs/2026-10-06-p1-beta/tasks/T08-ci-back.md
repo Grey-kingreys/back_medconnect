@@ -36,4 +36,8 @@ Fichier créé + preuves (commandes lancées, résultat en une ligne chacune). O
 
 ## Historique
 
+2026-10-07 | orchestrateur (reprise, D08) | succès | Node 22 (image node:22-slim) ; seule `DATABASE_URL` factice nécessaire
+
 ## Validation
+
+js-yaml load ; `env -i ... DATABASE_URL=factice` prisma generate puis npm test | YAML OK, job verification, 6 étapes ; client généré, 9 suites, 65 tests verts | edebc60, merge d77ae60

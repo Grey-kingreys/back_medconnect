@@ -35,4 +35,8 @@ Liste des fichiers créés ou modifiés + preuves (commandes lancées, résultat
 
 ## Historique
 
+2026-10-07 | orchestrateur (reprise, D08) | succès | identifiants uuid confirmés dans le schéma ; enums Prisma (D12) ; front : `startConversation` envoie `{ targetId, type }` compatible, aucune page n'appelle `sos/:id/status`
+
 ## Validation
+
+tsc --noEmit ; eslint des 7 fichiers ; npm test ; grep `@Body('status')` du contrôleur carnet | 0 erreur ; 0 erreur (42 avertissements) ; 7 suites, 56 tests verts ; 1 résultat (rendez-vous, hors périmètre) | df801c3, merge 7655a36

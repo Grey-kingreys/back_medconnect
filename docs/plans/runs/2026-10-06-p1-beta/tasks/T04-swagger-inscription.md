@@ -34,4 +34,8 @@ Liste des fichiers modifiés + preuves (commandes lancées, résultat en une lig
 
 ## Historique
 
+2026-10-07 | orchestrateur (reprise, D08) | succès | `bootstrap()` laissé tel quel (avertissement eslint, pas une erreur) ; tiret d'un message reformaté remplacé (D10)
+
 ## Validation
+
+tsc --noEmit ; eslint main.ts, env.validation(.spec).ts, auth.controller.ts ; npm test ; grep | 0 erreur ; 0 erreur (7 avertissements) ; 8 suites, 60 tests verts (oui rejeté, true et absent acceptés) ; SwaggerModule.setup dans `if (swaggerActif)`, `@Throttle(AUTH_THROTTLE)` juste avant `register(` | 8392d17, merge 4033dbf

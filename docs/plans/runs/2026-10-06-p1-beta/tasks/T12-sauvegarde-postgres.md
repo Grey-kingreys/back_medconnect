@@ -40,4 +40,8 @@ Fichiers créés ou modifiés + preuves (commandes lancées, résultat en une li
 
 ## Historique
 
+2026-10-07 | orchestrateur (reprise, D08) | succès | shellcheck absent du poste (non lancé) ; marqué exécutable par `git update-index --chmod=+x` ; LF dans git (D13)
+
 ## Validation
+
+bash -n ; essai à blanc (faux docker en tête de PATH, vieux dump daté de 30 jours) ; cas dump vide ; cas rclone absent ; grep secrets | OK ; nouveau dump de 24 octets créé, ancien supprimé, code 0 ; refus, code 1 ; avertissement clair, code 1 ; aucun | parent 4c345a2 (orch/p1-beta)

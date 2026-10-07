@@ -34,4 +34,8 @@ Liste des fichiers modifiés + preuve (commandes lancées, résultat en une lign
 
 ## Historique
 
+2026-10-07 | orchestrateur (reprise, D08) | succès | balayage de src/ : aucun autre log de donnée de santé ou de numéro (seul l'email du super-admin au seed, hors périmètre santé)
+
 ## Validation
+
+grep du Done when ; tsc --noEmit ; eslint ai.service, sms.service, carnet-sante.service ; npm test | 0 résultat ; 0 erreur ; 0 erreur (dette désactivée selon D07) ; 7 suites, 56 tests verts | 59f9c79, merge 12dc401
