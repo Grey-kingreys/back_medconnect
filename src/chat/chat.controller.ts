@@ -1,6 +1,17 @@
-import { Controller, Get, Post, Body, Param, UseGuards, Request } from '@nestjs/common';
+// Dette de typage préexistante, backlog points 21 et 22
+/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  UseGuards,
+  Request,
+} from '@nestjs/common';
 import { ChatService } from './chat.service';
 import { AuthGuard } from '../common/guards/auth.guard';
+import { StartConversationDto } from './dto/start-conversation.dto';
 
 @Controller('chat')
 @UseGuards(AuthGuard)
@@ -20,8 +31,12 @@ export class ChatController {
   }
 
   @Post('conversations/start')
-  async startConversation(@Request() req, @Body() body: { targetId: string, type: 'PRIVE' | 'STRUCTURE' }) {
-    const data = await this.chatService.getOrCreateConversation(req.user.userId, body.type, body.targetId);
+  async startConversation(@Request() req, @Body() body: StartConversationDto) {
+    const data = await this.chatService.getOrCreateConversation(
+      req.user.userId,
+      body.type,
+      body.targetId,
+    );
     return { success: true, data, message: 'Conversation créée' };
   }
 }
