@@ -101,13 +101,19 @@ en ajoutant une variable obligatoire.
 
 ## ⚠️ Dette/risques spécifiques backend
 
-Voir la liste complète dans le `CLAUDE.md` racine. En résumé, à traiter en priorité :
-fallback `JWT_SECRET || 'secret'` (`chat.gateway.ts:42`), refresh token en clair dans
-le JSON, **absence d'audit trail et de soft-delete** sur les données médicales, boot qui
-crashe sans `ENCRYPTION_KEY`/`RESEND_API_KEY`, rate-limit auth trop permissif, logs non
-structurés sur données sensibles, tests encore partiels (`.spec.ts` : `AuthService`,
-contrôle d'accès au carnet, stockage ; le reste n'est pas couvert). IDOR à confirmer sur la
-création de consultation.
+Référence à jour : `BACKLOG-PRIORISE.md` à la racine du monorepo. Les points P0 à P3 ont
+été intégrés le 2026-10-07 (branche `integration/2026-10`, runs archivés dans
+`docs/plans/archive/`). Déjà corrigé : secrets JWT sans repli, refresh token en cookie
+seul, audit trail et soft-delete, contrôle d'accès au carnet et au chat, statut de RDV
+validé, logs sans données de santé, Swagger fermé en production. Reste notamment :
+- **Typage** : `tsconfig` non strict (`noImplicitAny: false`), parqué jusqu'à la fin de
+  l'intégration (passage progressif recommandé, voir décision D03 du run p3-fond).
+- **Lint** : environ 2 000 erreurs historiques (surtout formatage), et plusieurs fichiers
+  avec un `eslint-disable` global marqué « Dette préexistante, backlog points 21 et 22 ».
+- **Tests** : 148 tests sur les domaines sensibles (auth, carnet, chat, audit, SOS,
+  pharmacie, stockage, chiffrement) ; pas de tests e2e.
+- **Mobile** : le refresh ne lit que le cookie et un seul refresh token par utilisateur
+  (voir `mobile_medconnect/docs/FONCTIONNALITES-MOBILE.md`, adaptations B01 et B02).
 
 <!-- orchestrator:start v2 -->
 ## Règles du projet et orchestrateur

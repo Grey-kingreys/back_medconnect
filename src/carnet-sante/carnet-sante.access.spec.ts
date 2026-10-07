@@ -62,6 +62,7 @@ describe('CarnetSanteService : contrôle d’accès au carnet (checkAccess)', ()
       {} as never, // smsService
       {} as never, // queueService
       {} as never, // storage
+      {} as never, // permissionsService
     );
   });
 
@@ -84,6 +85,7 @@ describe('CarnetSanteService : contrôle d’accès au carnet (checkAccess)', ()
     mockUsers({ medecinTraitantId: 'med1' }, { structureId: null });
     await expect(checkAccess('med1', 'patient1')).resolves.toEqual({
       isMedecinTraitant: true,
+      actorStructureId: null,
     });
   });
 
@@ -92,7 +94,7 @@ describe('CarnetSanteService : contrôle d’accès au carnet (checkAccess)', ()
     prisma.autorisationStructure.findUnique.mockResolvedValue({ id: 'aut1' });
 
     await expect(checkAccess('agent1', 'patient1', 'struct1')).resolves.toEqual(
-      { isMedecinTraitant: false },
+      { isMedecinTraitant: false, actorStructureId: 'struct1' },
     );
     expect(prisma.autorisationStructure.findUnique).toHaveBeenCalledWith({
       where: {
