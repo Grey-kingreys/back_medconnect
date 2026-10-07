@@ -31,4 +31,12 @@ Fichier modifié + preuves (commande lancée, résultat en une ligne). Ou un blo
 
 ## Historique
 
+2026-10-06 | mécanique | réussi | commité dans le parent (23a8077), validation interrompue (orchestrateur figé)
+2026-10-07 | orchestrateur | validé | relu sans sous-agent
+
 ## Validation
+
+bash -n deploy.sh | SYNTAX_OK | 23a8077
+grep -n "main" deploy.sh | aucune occurrence | 23a8077
+git config -f .gitmodules submodule.back_medconnect.branch | master (front : master) | 23a8077
+git show --stat HEAD | seul deploy.sh modifié, aucun tiret cadratin ajouté | 23a8077

@@ -10,10 +10,13 @@ Détails: docs/plans/runs/2026-10-06-p3-fond/ (niveau P3 du BACKLOG-PRIORISE rac
 
 | ID | Tâche | Tier | Statut | Tent. |
 |----|-------|------|--------|-------|
-| T09 | deploy.sh du parent : annoncer master (branche suivie) | mécanique | dispatché | 1 |
 | T10 | Mode strict du back (point 21) | - | parqué | 0 |
 
+Run terminé côté back (reprise 2026-10-07 par l'orchestrateur, sans sous-agent) ; seule T10 reste parquée.
+
 ## Faites (preuve = commit)
+
+- T09 deploy.sh annonce la branche lue dans .gitmodules (dépôt parent, 23a8077)
 
 - T01 spécification F4 (606b093)
 - T02 tests AuthService, 19 tests (cf2b977, merge 9b52cbd)
