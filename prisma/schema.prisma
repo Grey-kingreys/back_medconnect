@@ -86,6 +86,11 @@ model User {
   refreshToken        String?   @unique
   refreshTokenExpires DateTime?
 
+  // Sessions par appareil (TB3). Les champs refreshToken et refreshTokenExpires
+  // ci-dessus ne servent plus qu'au retour arrière SESSIONS_MULTI_APPAREILS=false,
+  // conservés une version.
+  sessions Session[]
+
   // Lien vers une structure (pour MEDECIN, PHARMACIEN, STRUCTURE_ADMIN)
   structureId String?
   structure   Structure? @relation("StructureMembers", fields: [structureId], references: [id])
@@ -594,4 +599,36 @@ model Notification {
   lien      String?          // URL optionnelle vers laquelle naviguer
 
   createdAt DateTime         @default(now())
+}
+
+// ====== SESSIONS PAR APPAREIL (TB3) ======
+
+enum SessionClientType {
+  WEB
+  MOBILE
+}
+
+// Une session = une connexion sur un appareil = une famille de refresh tokens.
+// Le refresh présenté par le client vaut `<id>.<secret>` ; seul le sha256 du secret est stocké.
+model Session {
+  id                  String            @id @default(uuid())
+  userId              String
+  user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientType          SessionClientType
+  platform            String? // android ou ios (mobile seulement)
+  deviceId            String? // identifiant d'appareil envoyé par le mobile
+  deviceName          String?
+  appVersion          String?
+  refreshHash         String // sha256 hex du secret courant
+  previousRefreshHash String? // sha256 hex du secret précédent
+  graceUntil          DateTime? // fin de la fenêtre de grâce du secret précédent
+  graceSecretEnc      String? // secret courant chiffré (EncryptionService), renvoyé pendant la grâce
+  createdAt           DateTime          @default(now())
+  lastUsedAt          DateTime          @default(now())
+  expiresAt           DateTime
+  revokedAt           DateTime?
+  revokedReason       String? // DECONNEXION, REUTILISATION, NOUVELLE_CONNEXION
+
+  @@index([userId])
+  @@index([userId, deviceId])
 }
