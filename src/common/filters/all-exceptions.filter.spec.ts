@@ -106,6 +106,35 @@ describe('AllExceptionsFilter', () => {
     expect(corpsRenvoye().message).toBe(MESSAGES.connexion);
   });
 
+  it('ajoute le code machine du catalogue au corps', () => {
+    filtre.catch(
+      new UnauthorizedException({
+        message: 'Message projet',
+        code: 'REFRESH_REUTILISE',
+      }),
+      host,
+    );
+    expect(corpsRenvoye()).toEqual({
+      statusCode: 401,
+      message: 'Message projet',
+      error: 'Connexion expirée',
+      code: 'REFRESH_REUTILISE',
+    });
+  });
+
+  it("n'ajoute pas un code hors catalogue", () => {
+    filtre.catch(
+      new UnauthorizedException({ message: 'Message projet', code: 'INCONNU' }),
+      host,
+    );
+    expect(corpsRenvoye()).not.toHaveProperty('code');
+  });
+
+  it("n'ajoute pas de code pour un message texte simple", () => {
+    filtre.catch(new UnauthorizedException('Message projet'), host);
+    expect(corpsRenvoye()).not.toHaveProperty('code');
+  });
+
   it('traduit le 413', () => {
     filtre.catch(new PayloadTooLargeException(), host);
     expect(status).toHaveBeenCalledWith(413);

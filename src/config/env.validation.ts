@@ -155,6 +155,17 @@ const RULES: Rule[] = [
         ? null
         : "doit valoir 'true' ou 'false'",
   },
+  // Sessions par appareil (TB3). Actives par défaut ; `false` revient à l'ancien
+  // refresh unique par utilisateur (retour arrière, sans redéploiement).
+  {
+    key: 'SESSIONS_MULTI_APPAREILS',
+    required: false,
+    default: 'true',
+    validate: (v) =>
+      ['true', 'false'].includes(v.toLowerCase())
+        ? null
+        : "doit valoir 'true' ou 'false'",
+  },
 ];
 
 export function validateEnv(

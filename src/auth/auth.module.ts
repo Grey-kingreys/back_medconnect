@@ -6,6 +6,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { EmailService } from 'src/common/services/email.service';
 import { LoginThrottleService } from './login-throttle.service';
+import { SessionsService } from './sessions.service';
 
 @Module({
   imports: [
@@ -21,7 +22,13 @@ import { LoginThrottleService } from './login-throttle.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, PrismaService, EmailService, LoginThrottleService],
-  exports: [AuthService, JwtModule],
+  providers: [
+    AuthService,
+    SessionsService,
+    PrismaService,
+    EmailService,
+    LoginThrottleService,
+  ],
+  exports: [AuthService, SessionsService, JwtModule],
 })
 export class AuthModule {}

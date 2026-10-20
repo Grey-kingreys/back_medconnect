@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { Prisma } from 'generated/prisma/client';
+import { type CodeErreur, estCodeErreur } from './codes-erreur';
 
 // Messages affichés tels quels par le front (audience non-dev).
 export const MESSAGES = {
@@ -69,6 +70,7 @@ interface CorpsErreur {
   message: string;
   error: string;
   details?: unknown;
+  code?: CodeErreur;
 }
 
 /**
@@ -112,40 +114,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
       const statut = exception.getStatus();
       if (statut >= 500) return this.erreurInterne(exception, request);
 
-      const reponse = exception.getResponse();
-      const message =
-        typeof reponse === 'string'
-          ? reponse
-          : (reponse as { message?: unknown }).message;
-      const libelle =
-        typeof reponse === 'object'
-          ? (reponse as { error?: unknown }).error
+      // Code machine facultatif porté par l'exception (catalogue codes-erreur.ts).
+      const resultat = this.corpsHttp(exception, statut);
+      const reponseBrute = exception.getResponse();
+      const code =
+        typeof reponseBrute === 'object'
+          ? (reponseBrute as { code?: unknown }).code
           : undefined;
-
-      // Erreurs de validation du ValidationPipe (message en tableau).
-      if (statut === 400 && Array.isArray(message)) {
-        const resultat = corps(statut, MESSAGES.validation);
-        if (process.env.NODE_ENV !== 'production') resultat.details = message;
-        return resultat;
-      }
-      if (statut === 429) return corps(statut, MESSAGES.tropDeTentatives);
-      // Route inconnue : « Cannot GET /x » produit par Nest.
-      if (
-        statut === 404 &&
-        typeof message === 'string' &&
-        message.startsWith('Cannot ')
-      ) {
-        return corps(statut, MESSAGES.introuvableRoute);
-      }
-      // Message rédigé par le projet : conservé tel quel.
-      if (
-        typeof message === 'string' &&
-        message !== libelle &&
-        !MESSAGES_PAR_DEFAUT.has(message.toLowerCase())
-      ) {
-        return corps(statut, message);
-      }
-      return corps(statut, messageParStatut(statut));
+      if (estCodeErreur(code)) resultat.code = code;
+      return resultat;
     }
 
     // Corps trop gros rejeté par body-parser (erreur Express, pas HttpException).
@@ -154,6 +131,43 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     return this.erreurInterne(exception, request);
+  }
+
+  private corpsHttp(exception: HttpException, statut: number): CorpsErreur {
+    const reponse = exception.getResponse();
+    const message =
+      typeof reponse === 'string'
+        ? reponse
+        : (reponse as { message?: unknown }).message;
+    const libelle =
+      typeof reponse === 'object'
+        ? (reponse as { error?: unknown }).error
+        : undefined;
+
+    // Erreurs de validation du ValidationPipe (message en tableau).
+    if (statut === 400 && Array.isArray(message)) {
+      const resultat = corps(statut, MESSAGES.validation);
+      if (process.env.NODE_ENV !== 'production') resultat.details = message;
+      return resultat;
+    }
+    if (statut === 429) return corps(statut, MESSAGES.tropDeTentatives);
+    // Route inconnue : « Cannot GET /x » produit par Nest.
+    if (
+      statut === 404 &&
+      typeof message === 'string' &&
+      message.startsWith('Cannot ')
+    ) {
+      return corps(statut, MESSAGES.introuvableRoute);
+    }
+    // Message rédigé par le projet : conservé tel quel.
+    if (
+      typeof message === 'string' &&
+      message !== libelle &&
+      !MESSAGES_PAR_DEFAUT.has(message.toLowerCase())
+    ) {
+      return corps(statut, message);
+    }
+    return corps(statut, messageParStatut(statut));
   }
 
   private erreurInterne(exception: unknown, request: Request): CorpsErreur {

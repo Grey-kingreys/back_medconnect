@@ -120,4 +120,33 @@ describe('validateEnv', () => {
       },
     );
   });
+
+  describe('SESSIONS_MULTI_APPAREILS', () => {
+    const valeurInitiale = process.env.SESSIONS_MULTI_APPAREILS;
+    afterEach(() => {
+      if (valeurInitiale === undefined)
+        delete process.env.SESSIONS_MULTI_APPAREILS;
+      else process.env.SESSIONS_MULTI_APPAREILS = valeurInitiale;
+    });
+
+    it('variable absente : défaut true', () => {
+      const config = validateEnv(configMinimale());
+      expect(config.SESSIONS_MULTI_APPAREILS).toBe('true');
+    });
+
+    it('refuse au démarrage la valeur « peut-etre »', () => {
+      expect(() =>
+        validateEnv({
+          ...configMinimale(),
+          SESSIONS_MULTI_APPAREILS: 'peut-etre',
+        }),
+      ).toThrow(/SESSIONS_MULTI_APPAREILS/);
+    });
+
+    it('accepte « FALSE »', () => {
+      expect(() =>
+        validateEnv({ ...configMinimale(), SESSIONS_MULTI_APPAREILS: 'FALSE' }),
+      ).not.toThrow();
+    });
+  });
 });
