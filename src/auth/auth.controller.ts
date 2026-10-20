@@ -29,9 +29,7 @@ import { SessionClientType } from 'generated/prisma/enums';
 import { MESSAGES_SESSION, NOM_COOKIE_REFRESH } from './sessions.constants';
 import { SessionsService } from './sessions.service';
 import { JetonRenouvellementDto } from './dto/jeton-renouvellement.dto';
-
-/** Palier strict pour les endpoints sensibles d'auth : 10 req/min/IP. */
-const AUTH_THROTTLE = { default: { limit: 10, ttl: 60_000 } };
+import { suivreParIp } from 'src/common/guards/user-throttler.guard';
 import { AuthGuard } from 'src/common/guards/auth.guard';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -41,6 +39,11 @@ import {
   ChangePasswordDto,
   UpdateProfileDto,
 } from './dto/auth.dto';
+
+/** Palier strict pour les endpoints sensibles d'auth : 10 req/min par IP, même avec un jeton. */
+const AUTH_THROTTLE = {
+  default: { limit: 10, ttl: 60_000, getTracker: suivreParIp },
+};
 
 @ApiTags('Authentification')
 @Controller('auth')

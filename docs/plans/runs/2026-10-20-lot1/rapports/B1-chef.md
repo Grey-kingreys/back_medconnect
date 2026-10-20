@@ -15,7 +15,9 @@ Date : 2026-10-20 | Branche : orch/lot1-back | Verdict : VALIDÉ
 ## Preuves (relancées par le chef)
 
 - `tsc --noEmit` : aucune erreur.
-- `eslint` sur les 21 fichiers de la tâche : 0 erreur, 16 avertissements `no-unsafe-argument` (auth.controller.ts préexistant, client.ts l. 56).
+- `eslint` sur les 21 fichiers de la tâche : 0 erreur, 16 avertissements `no-unsafe-argument` (`req: any` du contrôleur, dont 6 sur les nouvelles routes l. 125 à 145 qui suivent le style existant ; client.ts l. 56).
+
+Commit : 0e58e81 (gate pre-commit passé : tsc, eslint 0 erreur). Non poussé.
 - `jest` : 33 suites, 383 tests, tous verts.
 - `bash D:/tmp/tb4-parcours.sh` : PARCOURS OK, F et G à 23:12:04 (401 SESSION_REVOQUEE immédiat), H refresh refusé, I web conservé, J revoquer-autres 1 appareil, K 404 avec le bon message.
 - Tirets cadratin et demi-cadratin : 0 dans les lignes ajoutées et les 3 nouveaux fichiers.

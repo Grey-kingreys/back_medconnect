@@ -50,6 +50,9 @@ import type {
 // Délai minimal entre deux alertes SOS tant que la précédente n'est pas prise en charge.
 export const SOS_ANTI_DOUBLON_MINUTES = 5;
 
+// Délai maximal d'attente de la file (Redis) pour prévenir le proche d'un SOS.
+export const DELAI_FILE_SOS_MS = 2000;
+
 @Injectable()
 export class CarnetSanteService {
   constructor(
@@ -1347,6 +1350,33 @@ export class CarnetSanteService {
     };
   }
 
+  /** Envoi en file d'un message SOS au proche, borné : une panne de file ne fait pas échouer l'alerte. */
+  private async enfilerSansBloquer(
+    nature: 'email' | 'sms',
+    urgenceId: string,
+    envoi: () => Promise<unknown>,
+  ): Promise<void> {
+    let minuteur: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        envoi(),
+        new Promise((_, rejeter) => {
+          minuteur = setTimeout(
+            () =>
+              rejeter(new Error(`délai de ${DELAI_FILE_SOS_MS} ms dépassé`)),
+            DELAI_FILE_SOS_MS,
+          );
+        }),
+      ]);
+    } catch (e) {
+      this.logger.error(
+        `sos.file_indisponible urgenceId=${urgenceId} envoi=${nature} : ${(e as Error).message}`,
+      );
+    } finally {
+      clearTimeout(minuteur);
+    }
+  }
+
   async createUrgence(userId: string, dto: CreateUrgenceDto) {
     // Anti-relance : pas de nouvelle alerte tant que les secours sont attendus ou que
     // la précédente vient juste d'être envoyée. L'ancienne alerte n'est jamais modifiée.
@@ -1420,16 +1450,18 @@ export class CarnetSanteService {
 
     // 1. Email d'alerte → file asynchrone (réponse immédiate, retries automatiques).
     if (contactEmail && !envoisExternesBloques) {
-      await this.queueService.enqueueEmergencyEmail({
-        to: contactEmail,
-        contactNom,
-        patientNom: urgence.patient.nom,
-        patientPrenom: urgence.patient.prenom,
-        location: hasLocation
-          ? { lat: dto.latitude!, lng: dto.longitude! }
-          : undefined,
-        message: dto.message,
-      });
+      await this.enfilerSansBloquer('email', urgence.id, () =>
+        this.queueService.enqueueEmergencyEmail({
+          to: contactEmail,
+          contactNom,
+          patientNom: urgence.patient.nom,
+          patientPrenom: urgence.patient.prenom,
+          location: hasLocation
+            ? { lat: dto.latitude!, lng: dto.longitude! }
+            : undefined,
+          message: dto.message,
+        }),
+      );
     }
 
     // 2. SMS d'urgence (Nimba) → file asynchrone.
@@ -1437,11 +1469,13 @@ export class CarnetSanteService {
       const locationStr = hasLocation
         ? `Position: https://www.google.com/maps?q=${dto.latitude},${dto.longitude}`
         : undefined;
-      await this.queueService.enqueueSos({
-        recipients: [String(contactTel)],
-        patientName: `${urgence.patient.prenom} ${urgence.patient.nom}`,
-        location: locationStr,
-      });
+      await this.enfilerSansBloquer('sms', urgence.id, () =>
+        this.queueService.enqueueSos({
+          recipients: [String(contactTel)],
+          patientName: `${urgence.patient.prenom} ${urgence.patient.nom}`,
+          location: locationStr,
+        }),
+      );
     }
 
     // 3. Notifier les 5 structures les plus proches, mais seulement les membres qui

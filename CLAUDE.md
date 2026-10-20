@@ -62,6 +62,7 @@ File asynchrone dans `src/queue/` (**BullMQ**).
     `RevocationService` (état en Redis : 30 s si valide, 16 min si révoqué, repli
     PostgreSQL). L'événement socket `sessionRevoquee` `{ code, message }` précède la
     déconnexion. Purge horaire des sessions expirées ou révoquées depuis plus de 30 jours.
+- **Limiteur de débit** : `UserThrottlerGuard` (garde globale) compte par utilisateur en lisant le jeton Bearer (signature vérifiée), sinon par IP ; `/auth/register`, `/auth/login`, `/auth/forgot-password` et `/auth/reset-password` restent comptés par IP. Stockage Redis (`StockageLimiteRedis`, script Lua, juste à plusieurs instances). Redis absent ou plus lent que 250 ms : les routes `@LimitePermissiveSiRedisIndisponible()` (le SOS) passent, les autres sont comptées en mémoire locale. L'email et le SMS au proche d'un SOS sont mis en file avec un délai de 2 s, sans faire échouer l'alerte.
 - **Validation** globale : `ValidationPipe` (whitelist + forbidNonWhitelisted) — tout
   champ d'entrée doit être déclaré dans un DTO `class-validator`.
 - **Langue** : messages/logs/commentaires en français.

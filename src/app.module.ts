@@ -20,7 +20,9 @@ import { SecurityModule } from './common/security.module';
 import { StorageModule } from './storage/storage.module';
 import { QueueModule } from './queue/queue.module';
 import { ConsentModule } from './consent/consent.module';
-import { RedisModule } from './common/redis/redis.module';
+import { REDIS_CLIENT, RedisModule } from './common/redis/redis.module';
+import { StockageLimiteRedis } from './common/redis/stockage-limite-redis';
+import type { Redis } from 'ioredis';
 import { RbacModule } from './common/rbac/rbac.module';
 import { RolesModule } from './roles/roles.module';
 import { PrismaModule } from './common/prisma.module';
@@ -87,11 +89,15 @@ import type { IncomingMessage } from 'http';
     }),
     // Palier par défaut : ~120 req/min/utilisateur (trafic dashboard normal).
     // Les paliers stricts (auth) et lourds (IA, SOS, upload) sont appliqués par route
-    // via @Throttle(...). Tracker par userId via UserThrottlerGuard.
-    // ⚠️ Stockage en mémoire pour l'instant : OK en mono-réplique. En multi-répliques
-    //    (BACKEND_REPLICAS > 1), brancher un ThrottlerStorage Redis (cf. PLAN §1.5).
-    ThrottlerModule.forRoot({
-      throttlers: [{ ttl: 60000, limit: 120 }],
+    // via @Throttle(...). Compté par utilisateur (jeton lu par UserThrottlerGuard), sinon par IP.
+    // Le stockage est Redis (StockageLimiteRedis), donc juste à plusieurs instances ; le SOS
+    // est laissé passer si Redis tombe (D17).
+    ThrottlerModule.forRootAsync({
+      inject: [REDIS_CLIENT],
+      useFactory: (redis: Redis) => ({
+        throttlers: [{ ttl: 60000, limit: 120 }],
+        storage: new StockageLimiteRedis(redis),
+      }),
     }),
     PrismaModule,
     RedisModule,

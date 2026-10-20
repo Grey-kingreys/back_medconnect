@@ -22,6 +22,7 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import type { RequestWithUser } from 'src/auth/jwt.strategy';
 import { CarnetSanteService } from './carnet-sante.service';
+import { LimitePermissiveSiRedisIndisponible } from 'src/common/decorators/limite-permissive.decorator';
 import { AuthGuard } from 'src/common/guards/auth.guard';
 import { PermissionsGuard } from 'src/common/rbac/permissions.guard';
 import { RequirePermissions } from 'src/common/rbac/require-permissions.decorator';
@@ -344,7 +345,9 @@ export class CarnetSanteController {
   // ─── Urgences (SOS) ──────────────────────────────────────────
 
   @Post('sos')
-  @Throttle({ default: { limit: 5, ttl: 3_600_000 } }) // Anti-spam SOS : ~5/h/user.
+  // Anti-spam SOS : 5 par heure et par utilisateur ; laissé passer si Redis est indisponible.
+  @Throttle({ default: { limit: 5, ttl: 3_600_000 } })
+  @LimitePermissiveSiRedisIndisponible()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Lancer une alerte SOS' })
   createUrgence(@Req() req: RequestWithUser, @Body() dto: CreateUrgenceDto) {

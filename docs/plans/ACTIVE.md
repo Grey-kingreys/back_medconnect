@@ -11,6 +11,7 @@ Détails: docs/plans/runs/2026-10-20-lot1/ (lot 1 du plan mobile côté back ; r
 | ID | Tâche | Tier | Statut | Tent. |
 |----|-------|------|--------|-------|
 | B1 | TB4 révocation des sessions, compte désactivé, socket sessionRevoquee, purge | spécifié | validé par le chef d'équipe back (rapports/B1-chef.md) | 1 |
+| B2 | TB1 limiteur par utilisateur, stockage Redis, SOS permissif si Redis tombe | spécifié | à faire | 0 |
 
 ## Faites (preuve = commit)
 
@@ -21,11 +22,12 @@ Détails: docs/plans/runs/2026-10-20-lot1/ (lot 1 du plan mobile côté back ; r
 
 - Porteur (reprise TB3) : retour arrière SESSIONS_MULTI_APPAREILS=false après une période à true réactive les anciens refresh encore valides dans User.refreshToken ; vider la colonne au premier démarrage avec le drapeau actif ?
 - Porteur (reprise TB3) : durées Q11 et invalidation unique des sessions web au déploiement, à annoncer aux utilisateurs.
+- Porteur (B2, D18) : Redis arrêté, l'email et le SMS au proche d'un SOS sont perdus (journalisés seulement) ; ajouter un envoi direct de secours ?
 
 ## Dernières décisions (5 max, historique complet dans decisions.md)
 
-- D01 État d'accès lu dans Redis (30 s si valide, 16 min si révoqué), relu en base si absent ou Redis lent (révisable)
-- D02 Changement de mot de passe : autres appareils déconnectés par défaut, option à false pour garder (révisable)
-- D04 Socket : salles session:<sid> et utilisateur:<userId>, sessionRevoquee puis déconnexion 1 s après (révisable)
-- D06 Purge horaire des sessions expirées ou révoquées depuis plus de 30 jours (révisable)
-- D07 Nom d'une session web déduit du navigateur à la connexion, sans migration (révisable)
+- D14 Limiteur compté par utilisateur (jeton Bearer vérifié dans la garde globale), sinon par IP (révisable)
+- D15 register, login, forgot-password, reset-password restent comptés par IP (révisable)
+- D16 Stockage Redis maison (Lua atomique) pour toutes les routes limitées (révisable)
+- D17 Redis absent ou lent : SOS laissé passer, autres routes comptées en mémoire locale (révisable)
+- D18 File email et SMS du SOS bornée à 2 s, erreur journalisée sans faire échouer le SOS (révisable)
