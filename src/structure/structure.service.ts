@@ -620,6 +620,8 @@ export class StructureService {
       data: { isActive: !membre.isActive },
       select: { id: true, nom: true, prenom: true, role: true, isActive: true },
     });
+    if (updated.isActive) await this.sessions.reactiverCompte(membreId);
+    else await this.sessions.desactiverCompte(membreId);
 
     return {
       data: updated,

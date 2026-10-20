@@ -50,6 +50,7 @@ describe('UserService.getPatientsForDoctor - données médicales', () => {
       encryption as never,
       {} as never, // rolesService
       {} as never, // storage
+      {} as never, // sessions
     );
   });
 
@@ -88,5 +89,43 @@ describe('UserService.getPatientsForDoctor - données médicales', () => {
         allergies: 'pollen',
       });
     }
+  });
+});
+
+describe('UserService.toggleActive : sessions', () => {
+  const construire = (isActive: boolean) => {
+    const prisma = {
+      user: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'u1', isActive }),
+        update: jest.fn().mockResolvedValue({ id: 'u1', isActive: !isActive }),
+      },
+    };
+    const sessions = {
+      desactiverCompte: jest.fn().mockResolvedValue(undefined),
+      reactiverCompte: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new UserService(
+      prisma as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      sessions as never,
+    );
+    return { service, sessions };
+  };
+
+  it('vers inactif : desactiverCompte', async () => {
+    const { service, sessions } = construire(true);
+    await service.toggleActive('u1');
+    expect(sessions.desactiverCompte).toHaveBeenCalledWith('u1');
+    expect(sessions.reactiverCompte).not.toHaveBeenCalled();
+  });
+
+  it('vers actif : reactiverCompte', async () => {
+    const { service, sessions } = construire(false);
+    await service.toggleActive('u1');
+    expect(sessions.reactiverCompte).toHaveBeenCalledWith('u1');
+    expect(sessions.desactiverCompte).not.toHaveBeenCalled();
   });
 });

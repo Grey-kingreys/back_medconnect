@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment -- les calls des doublures jest.Mock sont typés any */
-import { UnauthorizedException } from '@nestjs/common';
+import { NotFoundException, UnauthorizedException } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { SessionClientType } from 'generated/prisma/enums';
 import {
@@ -7,6 +7,7 @@ import {
   DUREE_SESSION_LONGUE_MS,
   GRACE_REFRESH_MS,
   PURGE_GRACE_MS,
+  RETENTION_SESSIONS_MS,
   dureeSession,
   estSessionsMultiAppareilsActif,
 } from './sessions.constants';
@@ -26,11 +27,14 @@ describe('SessionsService', () => {
     session: {
       create: jest.Mock;
       findUnique: jest.Mock;
+      findMany: jest.Mock;
       update: jest.Mock;
       updateMany: jest.Mock;
+      deleteMany: jest.Mock;
     };
     user: { update: jest.Mock; findFirst: jest.Mock };
   };
+  let revocation: { signaler: jest.Mock; effacerCompte: jest.Mock };
   let jwtService: { sign: jest.Mock };
   let encryption: { encrypt: jest.Mock; decrypt: jest.Mock };
   let service: SessionsService;
@@ -46,13 +50,19 @@ describe('SessionsService', () => {
       session: {
         create: jest.fn().mockResolvedValue({ id: ID }),
         findUnique: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([{ id: ID }]),
         update: jest.fn().mockResolvedValue({}),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
       user: {
         update: jest.fn().mockResolvedValue({}),
         findFirst: jest.fn(),
       },
+    };
+    revocation = {
+      signaler: jest.fn().mockResolvedValue(undefined),
+      effacerCompte: jest.fn().mockResolvedValue(undefined),
     };
     jwtService = { sign: jest.fn().mockReturnValue('jwt-de-test') };
     encryption = {
@@ -63,6 +73,7 @@ describe('SessionsService', () => {
       prisma as never,
       jwtService as never,
       encryption as never,
+      revocation as never,
     );
     logWarn = jest
       .spyOn(
@@ -154,14 +165,23 @@ describe('SessionsService', () => {
         deviceName: 'Pixel',
         appVersion: '1.0.0',
       });
-      expect(prisma.session.updateMany).toHaveBeenCalledWith({
+      expect(prisma.session.findMany).toHaveBeenCalledWith({
         where: { userId: 'u1', deviceId: 'appareil-12345', revokedAt: null },
+        select: { id: true },
+      });
+      expect(prisma.session.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: [ID] }, revokedAt: null },
         data: {
           revokedAt: MAINTENANT,
           revokedReason: 'NOUVELLE_CONNEXION',
           graceSecretEnc: null,
           graceUntil: null,
         },
+      });
+      expect(revocation.signaler).toHaveBeenCalledWith({
+        userId: 'u1',
+        sessionIds: [ID],
+        code: 'SESSION_REVOQUEE',
       });
       expect(r.dureeMs).toBe(DUREE_SESSION_LONGUE_MS);
     });
@@ -263,13 +283,18 @@ describe('SessionsService', () => {
         service.renouveler(refresh, SessionClientType.WEB),
         'REFRESH_REUTILISE',
       );
-      expect(prisma.session.update).toHaveBeenCalledWith({
-        where: { id: ID },
+      expect(prisma.session.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: [ID] }, revokedAt: null },
         data: expect.objectContaining({
           revokedReason: 'REUTILISATION',
           graceSecretEnc: null,
           graceUntil: null,
         }),
+      });
+      expect(revocation.signaler).toHaveBeenCalledWith({
+        userId: 'u1',
+        sessionIds: [ID],
+        code: 'SESSION_REVOQUEE',
       });
       expect(logWarn).toHaveBeenCalled();
       expect(JSON.stringify(logWarn.mock.calls)).not.toContain(SECRET);
@@ -283,9 +308,9 @@ describe('SessionsService', () => {
         service.renouveler(refresh, SessionClientType.WEB),
         'REFRESH_REUTILISE',
       );
-      expect(prisma.session.update.mock.calls[0][0].data.revokedReason).toBe(
-        'REUTILISATION',
-      );
+      expect(
+        prisma.session.updateMany.mock.calls[0][0].data.revokedReason,
+      ).toBe('REUTILISATION');
     });
 
     it('format invalide : SESSION_EXPIREE sans lecture en base', async () => {
@@ -387,7 +412,7 @@ describe('SessionsService', () => {
         { type: SessionClientType.MOBILE, deviceId: 'appareil-12345' },
       );
       // La révocation à l'ouverture ne vise que le deviceId de l'appareil.
-      expect(prisma.session.updateMany.mock.calls[0][0].where).toEqual({
+      expect(prisma.session.findMany.mock.calls[0][0].where).toEqual({
         userId: 'u1',
         deviceId: 'appareil-12345',
         revokedAt: null,
@@ -418,13 +443,18 @@ describe('SessionsService', () => {
       prisma.session.findUnique.mockResolvedValue(brute());
       await service.fermer({ refresh });
       expect(prisma.session.updateMany).toHaveBeenCalledWith({
-        where: { id: ID, revokedAt: null },
+        where: { id: { in: [ID] }, revokedAt: null },
         data: {
           revokedAt: MAINTENANT,
           revokedReason: 'DECONNEXION',
           graceSecretEnc: null,
           graceUntil: null,
         },
+      });
+      expect(revocation.signaler).toHaveBeenCalledWith({
+        userId: 'u1',
+        sessionIds: [ID],
+        code: 'SESSION_REVOQUEE',
       });
     });
 
@@ -528,6 +558,172 @@ describe('SessionsService', () => {
         service.renouveler('ancien', SessionClientType.WEB),
         'SESSION_EXPIREE',
       );
+    });
+  });
+
+  describe('lister', () => {
+    const ligne = (surcharge: Record<string, unknown>) => ({
+      id: 'x',
+      clientType: 'WEB',
+      platform: null,
+      deviceName: null,
+      appVersion: null,
+      createdAt: MAINTENANT,
+      lastUsedAt: MAINTENANT,
+      expiresAt: new Date(MAINTENANT.getTime() + 1000),
+      ...surcharge,
+    });
+
+    it('filtre les sessions vivantes de l’utilisateur, trié par activité', async () => {
+      prisma.session.findMany.mockResolvedValue([]);
+      await service.lister('u1', 'sid');
+      expect(prisma.session.findMany).toHaveBeenCalledWith({
+        where: {
+          userId: 'u1',
+          revokedAt: null,
+          expiresAt: { gt: MAINTENANT },
+        },
+        orderBy: { lastUsedAt: 'desc' },
+      });
+    });
+
+    it('repli de nom, appareil courant en tête', async () => {
+      prisma.session.findMany.mockResolvedValue([
+        ligne({ id: 'a', clientType: 'MOBILE', platform: 'ios' }),
+        ligne({ id: 'b', clientType: 'MOBILE', platform: 'android' }),
+        ligne({ id: 'c', clientType: 'MOBILE', platform: 'autre' }),
+        ligne({ id: 'd', deviceName: 'Chrome sur Windows' }),
+        ligne({ id: 'e' }),
+      ]);
+      const r = await service.lister('u1', 'e');
+      expect(r.map((s) => s.id)).toEqual(['e', 'a', 'b', 'c', 'd']);
+      expect(r.map((s) => s.nom)).toEqual([
+        'Navigateur web',
+        'iPhone',
+        'Téléphone Android',
+        'Téléphone',
+        'Chrome sur Windows',
+      ]);
+      expect(r[0]).toMatchObject({
+        type: 'web',
+        plateforme: 'web',
+        appareilCourant: true,
+      });
+      expect(r[1]).toMatchObject({ type: 'mobile', plateforme: 'ios' });
+      expect(r[3].plateforme).toBe('autre');
+    });
+
+    it('drapeau inactif : liste vide', async () => {
+      process.env.SESSIONS_MULTI_APPAREILS = 'false';
+      expect(await service.lister('u1')).toEqual([]);
+      expect(prisma.session.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('révocations', () => {
+    it('revoquerUne : révoque et signale SESSION_REVOQUEE', async () => {
+      await service.revoquerUne('u1', ID);
+      expect(prisma.session.findMany).toHaveBeenCalledWith({
+        where: {
+          id: ID,
+          userId: 'u1',
+          expiresAt: { gt: MAINTENANT },
+          revokedAt: null,
+        },
+        select: { id: true },
+      });
+      expect(prisma.session.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            revokedReason: 'REVOCATION_UTILISATEUR',
+          }),
+        }),
+      );
+      expect(revocation.signaler).toHaveBeenCalledWith({
+        userId: 'u1',
+        sessionIds: [ID],
+        code: 'SESSION_REVOQUEE',
+      });
+    });
+
+    it('revoquerUne : session absente, NotFoundException', async () => {
+      prisma.session.findMany.mockResolvedValue([]);
+      await expect(
+        service.revoquerUne('u1', 'inconnue'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(revocation.signaler).not.toHaveBeenCalled();
+    });
+
+    it('revoquerAutres exclut le sid courant', async () => {
+      const n = await service.revoquerAutres(
+        'u1',
+        'courant',
+        'MOT_DE_PASSE_MODIFIE',
+      );
+      expect(n).toBe(1);
+      expect(prisma.session.findMany).toHaveBeenCalledWith({
+        where: { userId: 'u1', id: { not: 'courant' }, revokedAt: null },
+        select: { id: true },
+      });
+    });
+
+    it('revoquerAutres sans sid : toutes les sessions', async () => {
+      await service.revoquerAutres('u1', undefined, 'REVOCATION_UTILISATEUR');
+      expect(prisma.session.findMany).toHaveBeenCalledWith({
+        where: { userId: 'u1', revokedAt: null },
+        select: { id: true },
+      });
+    });
+
+    it('revoquerToutes : drapeau inactif vide User.refreshToken', async () => {
+      process.env.SESSIONS_MULTI_APPAREILS = 'false';
+      const n = await service.revoquerToutes('u1', 'MOT_DE_PASSE_REINITIALISE');
+      expect(n).toBe(0);
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: { refreshToken: null, refreshTokenExpires: null },
+      });
+      expect(prisma.session.findMany).not.toHaveBeenCalled();
+    });
+
+    it('desactiverCompte : un seul signalement COMPTE_DESACTIVE avec sessions', async () => {
+      await service.desactiverCompte('u1');
+      expect(revocation.signaler).toHaveBeenCalledTimes(1);
+      expect(revocation.signaler).toHaveBeenCalledWith({
+        userId: 'u1',
+        sessionIds: [ID],
+        code: 'COMPTE_DESACTIVE',
+      });
+    });
+
+    it('desactiverCompte sans session : signale quand même', async () => {
+      prisma.session.findMany.mockResolvedValue([]);
+      await service.desactiverCompte('u1');
+      expect(revocation.signaler).toHaveBeenCalledTimes(1);
+      expect(revocation.signaler).toHaveBeenCalledWith({
+        userId: 'u1',
+        sessionIds: [],
+        code: 'COMPTE_DESACTIVE',
+      });
+    });
+
+    it('reactiverCompte efface l’état du compte', async () => {
+      await service.reactiverCompte('u1');
+      expect(revocation.effacerCompte).toHaveBeenCalledWith('u1');
+    });
+  });
+
+  describe('purgerSessionsExpirees', () => {
+    it('supprime les sessions expirées ou révoquées depuis plus de 30 jours', async () => {
+      prisma.session.deleteMany.mockResolvedValue({ count: 2 });
+      const n = await service.purgerSessionsExpirees();
+      const limite = new Date(MAINTENANT.getTime() - RETENTION_SESSIONS_MS);
+      expect(n).toBe(2);
+      expect(prisma.session.deleteMany).toHaveBeenCalledWith({
+        where: {
+          OR: [{ expiresAt: { lt: limite } }, { revokedAt: { lt: limite } }],
+        },
+      });
     });
   });
 

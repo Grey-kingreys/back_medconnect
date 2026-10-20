@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { lireInfosClient, typeClient } from './client';
+import { libelleNavigateur, lireInfosClient, typeClient } from './client';
 
 /** Détection du client (web ou mobile) et lecture des infos d'appareil. */
 describe('client', () => {
@@ -17,6 +17,31 @@ describe('client', () => {
     if (valeurInitiale === undefined)
       delete process.env.SESSIONS_MULTI_APPAREILS;
     else process.env.SESSIONS_MULTI_APPAREILS = valeurInitiale;
+  });
+
+  it('libelleNavigateur : navigateur et système', () => {
+    expect(
+      libelleNavigateur(
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+      ),
+    ).toBe('Chrome sur Windows');
+    expect(
+      libelleNavigateur(
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+      ),
+    ).toBe('Safari sur iOS');
+    expect(libelleNavigateur(undefined)).toBeUndefined();
+    expect(libelleNavigateur('')).toBeUndefined();
+  });
+
+  it('web avec User-Agent : nomAppareil renseigné', () => {
+    const req = requete({
+      'user-agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Firefox/120.0',
+    });
+    expect(lireInfosClient(req)).toEqual({
+      type: 'WEB',
+      nomAppareil: 'Firefox sur Linux',
+    });
   });
 
   it('sans en-tête : client web', () => {

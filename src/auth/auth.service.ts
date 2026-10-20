@@ -429,7 +429,7 @@ export class AuthService {
 
   // ─── Change Password ──────────────────────────────────────────
 
-  async changePassword(userId: string, dto: ChangePasswordDto) {
+  async changePassword(userId: string, dto: ChangePasswordDto, sid?: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || !user.isActive) {
       throw new UnauthorizedException('Utilisateur non trouvé ou inactif');
@@ -453,9 +453,21 @@ export class AuthService {
       data: { password: hashed },
     });
 
+    const appareilsDeconnectes =
+      dto.deconnecterAutresAppareils === false
+        ? 0
+        : await this.sessions.revoquerAutres(
+            userId,
+            sid,
+            'MOT_DE_PASSE_MODIFIE',
+          );
+
     return {
-      data: null,
-      message: 'Mot de passe modifié avec succès',
+      data: { appareilsDeconnectes },
+      message:
+        appareilsDeconnectes > 0
+          ? 'Mot de passe modifié. Vos autres appareils ont été déconnectés.'
+          : 'Mot de passe modifié avec succès',
       success: true,
     };
   }
@@ -535,6 +547,7 @@ export class AuthService {
         resetPasswordExpires: null,
       },
     });
+    await this.sessions.revoquerToutes(user.id, 'MOT_DE_PASSE_REINITIALISE');
 
     return {
       data: null,

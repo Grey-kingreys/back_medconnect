@@ -14,6 +14,7 @@ import { EmailService } from 'src/common/services/email.service';
 import { EncryptionService } from 'src/common/services/encryption.service';
 import { RolesService } from 'src/common/rbac/roles.service';
 import { StorageService } from 'src/storage/storage.service';
+import { SessionsService } from 'src/auth/sessions.service';
 import {
   CreateUserByAdminDto,
   UpdateUserDto,
@@ -30,6 +31,7 @@ export class UserService {
     private readonly encryptionService: EncryptionService,
     private readonly rolesService: RolesService,
     private readonly storage: StorageService,
+    private readonly sessions: SessionsService,
   ) {}
 
   // ─── Photo de profil (avatar, bucket public R2) ───────────────
@@ -261,6 +263,8 @@ export class UserService {
       data: { isActive: !user.isActive },
       select: { id: true, nom: true, prenom: true, role: true, isActive: true },
     });
+    if (updated.isActive) await this.sessions.reactiverCompte(userId);
+    else await this.sessions.desactiverCompte(userId);
 
     return {
       data: updated,
@@ -314,6 +318,7 @@ export class UserService {
       where: { id: userId },
       data: { password: hashed },
     });
+    await this.sessions.revoquerToutes(userId, 'MOT_DE_PASSE_REINITIALISE');
 
     return {
       data: null,

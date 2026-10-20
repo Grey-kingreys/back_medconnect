@@ -55,8 +55,13 @@ File asynchrone dans `src/queue/` (**BullMQ**).
     mobile patient) et 12 h (mobile autres rôles), Q11 révisable.
   - `POST /auth/logout` est public (refresh seul ou jeton d'accès).
   - Codes machine du champ `code` : catalogue `src/common/filters/codes-erreur.ts`.
-  - Hors TB3 (TB4) : liste et révocation des sessions, révocation au changement de mot
-    de passe, contrôle de révocation dans `AuthGuard`.
+  - Révocation (TB4) : routes `GET /auth/sessions`, `DELETE /auth/sessions/:id` et
+    `POST /auth/sessions/revoquer-autres`. Le changement de mot de passe déconnecte les
+    autres appareils (`deconnecterAutresAppareils`, vrai par défaut) ; la réinitialisation
+    et la désactivation du compte révoquent tout. `AuthGuard` contrôle chaque requête par
+    `RevocationService` (état en Redis : 30 s si valide, 16 min si révoqué, repli
+    PostgreSQL). L'événement socket `sessionRevoquee` `{ code, message }` précède la
+    déconnexion. Purge horaire des sessions expirées ou révoquées depuis plus de 30 jours.
 - **Validation** globale : `ValidationPipe` (whitelist + forbidNonWhitelisted) — tout
   champ d'entrée doit être déclaré dans un DTO `class-validator`.
 - **Langue** : messages/logs/commentaires en français.
@@ -159,10 +164,9 @@ validé, logs sans données de santé, Swagger fermé en production. Reste notam
   avec un `eslint-disable` global marqué « Dette préexistante, backlog points 21 et 22 ».
 - **Tests** : 148 tests sur les domaines sensibles (auth, carnet, chat, audit, SOS,
   pharmacie, stockage, chiffrement) ; pas de tests e2e.
-- **Mobile** : sessions par appareil livrées (TB3). Reste TB4 (révocation). La colonne
+- **Mobile** : sessions par appareil livrées (TB3). La colonne
   `User.refreshToken` est conservée une version pour le retour arrière, à supprimer
-  ensuite avec `AuthService.generateTokens` et `generateToken`. Les sessions expirées ou
-  révoquées ne sont pas encore purgées.
+  ensuite avec `AuthService.generateTokens` et `generateToken`.
 
 <!-- orchestrator:start v2 -->
 ## Règles du projet et orchestrateur

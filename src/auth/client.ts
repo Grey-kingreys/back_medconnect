@@ -19,13 +19,44 @@ export function typeClient(req: Request): SessionClientType {
     : SessionClientType.WEB;
 }
 
+/** Nom d'appareil lisible pour une session web, déduit du User-Agent (« Chrome sur Windows »). */
+export function libelleNavigateur(
+  userAgent: string | undefined,
+): string | undefined {
+  if (!userAgent) return undefined;
+  const navigateurs: Array<[RegExp, string]> = [
+    [/Edg\//, 'Edge'],
+    [/OPR\/|Opera/, 'Opera'],
+    [/SamsungBrowser/, 'Samsung Internet'],
+    [/Firefox\//, 'Firefox'],
+    [/Chrome\//, 'Chrome'],
+    [/Safari\//, 'Safari'],
+  ];
+  const systemes: Array<[RegExp, string]> = [
+    [/Windows/, 'Windows'],
+    [/Android/, 'Android'],
+    [/iPhone|iPad|iPod/, 'iOS'],
+    [/Mac OS X|Macintosh/, 'macOS'],
+    [/Linux/, 'Linux'],
+  ];
+  const navigateur =
+    navigateurs.find(([re]) => re.test(userAgent))?.[1] ?? 'Navigateur';
+  const systeme = systemes.find(([re]) => re.test(userAgent))?.[1];
+  const nom = systeme ? `${navigateur} sur ${systeme}` : navigateur;
+  return nom.slice(0, 100);
+}
+
 /** Infos de session à partir de la requête et du DTO ; en mobile, deviceId et plateforme sont obligatoires. */
 export function lireInfosClient(
   req: Request,
   dto?: InfosAppareilDto,
 ): InfosClient {
   if (typeClient(req) === SessionClientType.WEB) {
-    return { type: SessionClientType.WEB };
+    const brut = req.headers['user-agent'];
+    const nom = libelleNavigateur(Array.isArray(brut) ? brut[0] : brut);
+    return nom
+      ? { type: SessionClientType.WEB, nomAppareil: nom }
+      : { type: SessionClientType.WEB };
   }
   if (!dto?.deviceId || !dto?.plateforme) {
     throw new BadRequestException({

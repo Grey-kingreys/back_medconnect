@@ -4,6 +4,11 @@ import { AuthController } from './auth.controller';
 /** Contrat des routes refresh et logout : web par cookie, mobile par le corps. */
 describe('AuthController (refresh et logout)', () => {
   let authService: { refreshAccessToken: jest.Mock; logout: jest.Mock };
+  let sessions: {
+    revoquerUne: jest.Mock;
+    revoquerAutres: jest.Mock;
+    effacerCookie: jest.Mock;
+  };
   let controller: AuthController;
   const res = {} as never;
   const valeurInitiale = process.env.SESSIONS_MULTI_APPAREILS;
@@ -14,7 +19,12 @@ describe('AuthController (refresh et logout)', () => {
       refreshAccessToken: jest.fn().mockResolvedValue({ success: true }),
       logout: jest.fn().mockResolvedValue({ success: true }),
     };
-    controller = new AuthController(authService as never);
+    sessions = {
+      revoquerUne: jest.fn().mockResolvedValue(undefined),
+      revoquerAutres: jest.fn().mockResolvedValue(1),
+      effacerCookie: jest.fn(),
+    };
+    controller = new AuthController(authService as never, sessions as never);
   });
 
   afterEach(() => {
@@ -83,6 +93,55 @@ describe('AuthController (refresh et logout)', () => {
     await controller.logout(req, {}, res);
 
     expect(authService.logout.mock.calls[0][0].jetonAcces).toBeUndefined();
+  });
+
+  it('DELETE de la session courante en web : le cookie est effacé', async () => {
+    const req = { headers: {}, user: { userId: 'u1', sid: 's1' } };
+
+    const out = await controller.revoquerSession('s1', req, res);
+
+    expect(sessions.revoquerUne).toHaveBeenCalledWith('u1', 's1');
+    expect(sessions.effacerCookie).toHaveBeenCalledWith(res);
+    expect(out.data).toEqual({ id: 's1' });
+  });
+
+  it('DELETE de la session courante en mobile : aucun cookie touché', async () => {
+    const req = {
+      headers: { 'x-client': 'mobile' },
+      user: { userId: 'u1', sid: 's1' },
+    };
+
+    await controller.revoquerSession('s1', req, res);
+
+    expect(sessions.effacerCookie).not.toHaveBeenCalled();
+  });
+
+  it('DELETE d’un autre appareil en web : le cookie reste', async () => {
+    const req = { headers: {}, user: { userId: 'u1', sid: 's1' } };
+
+    await controller.revoquerSession('s2', req, res);
+
+    expect(sessions.effacerCookie).not.toHaveBeenCalled();
+  });
+
+  it('revoquer-autres : message selon le nombre', async () => {
+    const req = { headers: {}, user: { userId: 'u1', sid: 's1' } };
+
+    const avec = await controller.revoquerAutres(req);
+    expect(sessions.revoquerAutres).toHaveBeenCalledWith(
+      'u1',
+      's1',
+      'REVOCATION_UTILISATEUR',
+    );
+    expect(avec).toEqual({
+      data: { nombre: 1 },
+      message: 'Vos autres appareils ont été déconnectés.',
+      success: true,
+    });
+
+    sessions.revoquerAutres.mockResolvedValue(0);
+    const sans = await controller.revoquerAutres(req);
+    expect(sans.message).toBe("Aucun autre appareil n'était connecté.");
   });
 
   it('logout est une route publique (aucune garde)', () => {

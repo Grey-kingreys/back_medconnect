@@ -45,6 +45,8 @@ describe('AuthService', () => {
     effacerCookie: jest.Mock;
     renouveler: jest.Mock;
     fermer: jest.Mock;
+    revoquerAutres: jest.Mock;
+    revoquerToutes: jest.Mock;
   };
   const WEB = { type: 'WEB' } as never;
   const MOBILE = {
@@ -116,6 +118,8 @@ describe('AuthService', () => {
       effacerCookie: jest.fn(),
       renouveler: jest.fn(),
       fermer: jest.fn(),
+      revoquerAutres: jest.fn().mockResolvedValue(2),
+      revoquerToutes: jest.fn().mockResolvedValue(2),
     };
     res = { cookie: jest.fn(), clearCookie: jest.fn() };
 
@@ -587,6 +591,52 @@ describe('AuthService', () => {
       expect(await bcrypt.compare('Nouveau-mdp-1', data.password)).toBe(true);
       expect(data.resetPasswordToken).toBeNull();
       expect(data.resetPasswordExpires).toBeNull();
+      expect(sessions.revoquerToutes).toHaveBeenCalledWith(
+        'u1',
+        'MOT_DE_PASSE_REINITIALISE',
+      );
+    });
+  });
+
+  describe('changePassword : révocation des autres appareils', () => {
+    const dto = {
+      currentPassword: MOT_DE_PASSE,
+      newPassword: 'Nouveau-mdp-1',
+    };
+
+    it('révoque les autres appareils par défaut', async () => {
+      prisma.user.findUnique.mockResolvedValue(utilisateur());
+
+      const out = await service.changePassword('u1', dto, 'sid-1');
+
+      expect(sessions.revoquerAutres).toHaveBeenCalledWith(
+        'u1',
+        'sid-1',
+        'MOT_DE_PASSE_MODIFIE',
+      );
+      expect(out).toEqual({
+        data: { appareilsDeconnectes: 2 },
+        message:
+          'Mot de passe modifié. Vos autres appareils ont été déconnectés.',
+        success: true,
+      });
+    });
+
+    it('ne révoque pas avec deconnecterAutresAppareils à false', async () => {
+      prisma.user.findUnique.mockResolvedValue(utilisateur());
+
+      const out = await service.changePassword(
+        'u1',
+        { ...dto, deconnecterAutresAppareils: false },
+        'sid-1',
+      );
+
+      expect(sessions.revoquerAutres).not.toHaveBeenCalled();
+      expect(out).toEqual({
+        data: { appareilsDeconnectes: 0 },
+        message: 'Mot de passe modifié avec succès',
+        success: true,
+      });
     });
   });
 

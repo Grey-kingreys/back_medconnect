@@ -1,6 +1,7 @@
 import {
   Injectable,
   Logger,
+  NotFoundException,
   OnModuleDestroy,
   OnModuleInit,
   UnauthorizedException,
@@ -8,6 +9,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
 import type { Response } from 'express';
+import type { Prisma } from 'generated/prisma/client';
 import { SessionClientType } from 'generated/prisma/enums';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { EncryptionService } from 'src/common/services/encryption.service';
@@ -20,9 +22,14 @@ import {
   MESSAGES_SESSION,
   NOM_COOKIE_REFRESH,
   PURGE_GRACE_MS,
+  PURGE_SESSIONS_MS,
+  RETENTION_SESSIONS_MS,
   dureeSession,
   estSessionsMultiAppareilsActif,
+  type CodeRevocation,
+  type RaisonRevocation,
 } from './sessions.constants';
+import { RevocationService } from './revocation.service';
 
 export interface InfosClient {
   type: SessionClientType;
@@ -94,11 +101,13 @@ interface SessionAvecUtilisateur {
 export class SessionsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(SessionsService.name);
   private minuteurPurge?: NodeJS.Timeout;
+  private minuteurPurgeSessions?: NodeJS.Timeout;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly encryption: EncryptionService,
+    private readonly revocation: RevocationService,
   ) {}
 
   onModuleInit(): void {
@@ -111,10 +120,178 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
       );
     }, PURGE_GRACE_MS);
     this.minuteurPurge.unref();
+    this.minuteurPurgeSessions = setInterval(() => {
+      this.purgerSessionsExpirees().catch((e: unknown) =>
+        this.logger.warn(
+          `Purge des sessions expirées échouée : ${e instanceof Error ? e.message : String(e)}`,
+        ),
+      );
+    }, PURGE_SESSIONS_MS);
+    this.minuteurPurgeSessions.unref();
   }
 
   onModuleDestroy(): void {
     if (this.minuteurPurge) clearInterval(this.minuteurPurge);
+    if (this.minuteurPurgeSessions) clearInterval(this.minuteurPurgeSessions);
+  }
+
+  /** Supprime les sessions expirées ou révoquées depuis plus de 30 jours. */
+  async purgerSessionsExpirees(): Promise<number> {
+    const limite = new Date(Date.now() - RETENTION_SESSIONS_MS);
+    const { count } = await this.prisma.session.deleteMany({
+      where: {
+        OR: [{ expiresAt: { lt: limite } }, { revokedAt: { lt: limite } }],
+      },
+    });
+    if (count > 0) this.logger.log(`Sessions purgées : ${count}`);
+    return count;
+  }
+
+  /** Révocation unique de toutes les sessions visées : base, état Redis puis socket. */
+  private async revoquer(
+    where: Prisma.SessionWhereInput,
+    raison: RaisonRevocation,
+    code: CodeRevocation,
+    userId: string,
+  ): Promise<string[]> {
+    const trouvees = await this.prisma.session.findMany({
+      where: { ...where, revokedAt: null },
+      select: { id: true },
+    });
+    if (trouvees.length === 0) return [];
+    const ids = trouvees.map((s) => s.id);
+    await this.prisma.session.updateMany({
+      where: { id: { in: ids }, revokedAt: null },
+      data: {
+        revokedAt: new Date(),
+        revokedReason: raison,
+        graceSecretEnc: null,
+        graceUntil: null,
+      },
+    });
+    await this.revocation.signaler({ userId, sessionIds: ids, code });
+    return ids;
+  }
+
+  /** Appareils connectés de l'utilisateur, l'appareil courant en tête. */
+  async lister(userId: string, sidCourant?: string) {
+    if (!estSessionsMultiAppareilsActif()) return [];
+    const sessions = await this.prisma.session.findMany({
+      where: { userId, revokedAt: null, expiresAt: { gt: new Date() } },
+      orderBy: { lastUsedAt: 'desc' },
+    });
+    const liste = sessions.map((s) => {
+      const web = s.clientType === SessionClientType.WEB;
+      let repli = 'Téléphone';
+      if (web) repli = 'Navigateur web';
+      else if (s.platform === 'ios') repli = 'iPhone';
+      else if (s.platform === 'android') repli = 'Téléphone Android';
+      return {
+        id: s.id,
+        type: web ? ('web' as const) : ('mobile' as const),
+        nom: s.deviceName ?? repli,
+        plateforme: web ? 'web' : (s.platform ?? 'inconnue'),
+        versionApp: s.appVersion ?? null,
+        creeLe: s.createdAt,
+        derniereActivite: s.lastUsedAt,
+        expireLe: s.expiresAt,
+        appareilCourant: s.id === sidCourant,
+      };
+    });
+    // Tri stable : l'appareil courant d'abord, le reste garde l'ordre d'activité.
+    return [
+      ...liste.filter((s) => s.appareilCourant),
+      ...liste.filter((s) => !s.appareilCourant),
+    ];
+  }
+
+  /** Déconnecte un appareil de l'utilisateur ; réponse identique pour tout cas introuvable. */
+  async revoquerUne(userId: string, id: string): Promise<void> {
+    if (!estSessionsMultiAppareilsActif()) {
+      throw new NotFoundException({
+        message: MESSAGES_SESSION.appareilIntrouvable,
+      });
+    }
+    const ids = await this.revoquer(
+      { id, userId, expiresAt: { gt: new Date() } },
+      'REVOCATION_UTILISATEUR',
+      'SESSION_REVOQUEE',
+      userId,
+    );
+    if (ids.length === 0) {
+      throw new NotFoundException({
+        message: MESSAGES_SESSION.appareilIntrouvable,
+      });
+    }
+  }
+
+  /** Déconnecte les autres appareils (tous si sidCourant est absent). */
+  async revoquerAutres(
+    userId: string,
+    sidCourant: string | undefined,
+    raison: 'REVOCATION_UTILISATEUR' | 'MOT_DE_PASSE_MODIFIE',
+  ): Promise<number> {
+    if (!estSessionsMultiAppareilsActif()) return 0;
+    const ids = await this.revoquer(
+      sidCourant ? { userId, id: { not: sidCourant } } : { userId },
+      raison,
+      'SESSION_REVOQUEE',
+      userId,
+    );
+    return ids.length;
+  }
+
+  /** Déconnecte tous les appareils (réinitialisation du mot de passe). */
+  async revoquerToutes(
+    userId: string,
+    raison: 'MOT_DE_PASSE_REINITIALISE',
+  ): Promise<number> {
+    if (!estSessionsMultiAppareilsActif()) {
+      await this.viderRefreshAncien(userId);
+      return 0;
+    }
+    const ids = await this.revoquer(
+      { userId },
+      raison,
+      'SESSION_REVOQUEE',
+      userId,
+    );
+    return ids.length;
+  }
+
+  /** Désactivation du compte : toutes les sessions sont coupées, même sans session ouverte. */
+  async desactiverCompte(userId: string): Promise<void> {
+    let ids: string[] = [];
+    if (estSessionsMultiAppareilsActif()) {
+      ids = await this.revoquer(
+        { userId },
+        'COMPTE_DESACTIVE',
+        'COMPTE_DESACTIVE',
+        userId,
+      );
+    } else {
+      await this.viderRefreshAncien(userId);
+    }
+    // Si des sessions ont été révoquées, revoquer() a déjà signalé avec ce code.
+    if (ids.length === 0) {
+      await this.revocation.signaler({
+        userId,
+        sessionIds: [],
+        code: 'COMPTE_DESACTIVE',
+      });
+    }
+  }
+
+  /** Réactivation du compte : l'état « désactivé » en cache est effacé. */
+  async reactiverCompte(userId: string): Promise<void> {
+    await this.revocation.effacerCompte(userId);
+  }
+
+  private async viderRefreshAncien(userId: string): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { refreshToken: null, refreshTokenExpires: null },
+    });
   }
 
   /** Efface les secrets de grâce échus (D20). Idempotent, sans coordination entre instances. */
@@ -157,19 +334,12 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
     const maintenant = new Date();
 
     if (client.type === SessionClientType.MOBILE && client.deviceId) {
-      await this.prisma.session.updateMany({
-        where: {
-          userId: user.id,
-          deviceId: client.deviceId,
-          revokedAt: null,
-        },
-        data: {
-          revokedAt: maintenant,
-          revokedReason: 'NOUVELLE_CONNEXION',
-          graceSecretEnc: null,
-          graceUntil: null,
-        },
-      });
+      await this.revoquer(
+        { userId: user.id, deviceId: client.deviceId },
+        'NOUVELLE_CONNEXION',
+        'SESSION_REVOQUEE',
+        user.id,
+      );
     }
 
     const secret = nouveauSecret();
@@ -181,7 +351,7 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
         clientType: client.type,
         platform: web ? null : (client.plateforme ?? null),
         deviceId: web ? null : (client.deviceId ?? null),
-        deviceName: web ? null : (client.nomAppareil ?? null),
+        deviceName: client.nomAppareil ?? null,
         appVersion: web ? null : (client.versionApp ?? null),
         refreshHash: sha256(secret),
         expiresAt: new Date(maintenant.getTime() + dureeMs),
@@ -268,15 +438,12 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
     }
 
     // Réutilisation d'un secret périmé : la session est révoquée.
-    await this.prisma.session.update({
-      where: { id },
-      data: {
-        revokedAt: maintenant,
-        revokedReason: 'REUTILISATION',
-        graceSecretEnc: null,
-        graceUntil: null,
-      },
-    });
+    await this.revoquer(
+      { id },
+      'REUTILISATION',
+      'SESSION_REVOQUEE',
+      session.userId,
+    );
     this.logger.warn(
       `Réutilisation d'un ancien jeton de renouvellement : session ${id} révoquée (utilisateur ${session.userId})`,
     );
@@ -300,6 +467,7 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
 
     const maintenant = new Date();
     let idSession: string | null = null;
+    let proprietaire: string | null = null;
 
     const analyse = FORMAT_REFRESH.exec(entree.refresh ?? '');
     if (analyse) {
@@ -313,7 +481,10 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
           egal(h, session.previousRefreshHash) &&
           !!session.graceUntil &&
           session.graceUntil.getTime() > maintenant.getTime();
-        if (courant || precedent) idSession = session.id;
+        if (courant || precedent) {
+          idSession = session.id;
+          proprietaire = session.userId;
+        }
       }
     }
 
@@ -321,19 +492,19 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
       const session = await this.prisma.session.findUnique({
         where: { id: entree.sid },
       });
-      if (session && session.userId === entree.userId) idSession = session.id;
+      if (session && session.userId === entree.userId) {
+        idSession = session.id;
+        proprietaire = session.userId;
+      }
     }
 
-    if (idSession) {
-      await this.prisma.session.updateMany({
-        where: { id: idSession, revokedAt: null },
-        data: {
-          revokedAt: maintenant,
-          revokedReason: 'DECONNEXION',
-          graceSecretEnc: null,
-          graceUntil: null,
-        },
-      });
+    if (idSession && proprietaire) {
+      await this.revoquer(
+        { id: idSession },
+        'DECONNEXION',
+        'SESSION_REVOQUEE',
+        proprietaire,
+      );
     }
   }
 

@@ -5,6 +5,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   UseGuards,
@@ -25,7 +26,8 @@ import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { lireInfosClient, typeClient } from './client';
 import { SessionClientType } from 'generated/prisma/enums';
-import { NOM_COOKIE_REFRESH } from './sessions.constants';
+import { MESSAGES_SESSION, NOM_COOKIE_REFRESH } from './sessions.constants';
+import { SessionsService } from './sessions.service';
 import { JetonRenouvellementDto } from './dto/jeton-renouvellement.dto';
 
 /** Palier strict pour les endpoints sensibles d'auth : 10 req/min/IP. */
@@ -43,7 +45,10 @@ import {
 @ApiTags('Authentification')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly sessions: SessionsService,
+  ) {}
 
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
@@ -117,7 +122,63 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Changer mon mot de passe' })
   changePassword(@Req() req: any, @Body() dto: ChangePasswordDto) {
-    return this.authService.changePassword(req.user.userId, dto);
+    return this.authService.changePassword(req.user.userId, dto, req.user.sid);
+  }
+
+  @UseGuards(AuthGuard)
+  @Get('sessions')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Mes appareils connectés' })
+  async listerSessions(@Req() req: any) {
+    const data = await this.sessions.lister(req.user.userId, req.user.sid);
+    return { data, message: 'Appareils connectés récupérés', success: true };
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('sessions/revoquer-autres')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Déconnecter mes autres appareils' })
+  async revoquerAutres(@Req() req: any) {
+    const nombre = await this.sessions.revoquerAutres(
+      req.user.userId,
+      req.user.sid,
+      'REVOCATION_UTILISATEUR',
+    );
+    return {
+      data: { nombre },
+      message:
+        nombre > 0
+          ? MESSAGES_SESSION.autresDeconnectes
+          : MESSAGES_SESSION.aucunAutreAppareil,
+      success: true,
+    };
+  }
+
+  @UseGuards(AuthGuard)
+  @Delete('sessions/:id')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Déconnecter cet appareil' })
+  @ApiResponse({
+    status: 404,
+    description:
+      "Session inconnue, d'un autre utilisateur, déjà révoquée ou expirée",
+  })
+  async revoquerSession(
+    @Param('id') id: string,
+    @Req() req: any,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    await this.sessions.revoquerUne(req.user.userId, id);
+    if (id === req.user.sid && typeClient(req) === SessionClientType.WEB) {
+      this.sessions.effacerCookie(res);
+    }
+    return {
+      data: { id },
+      message: MESSAGES_SESSION.appareilDeconnecte,
+      success: true,
+    };
   }
 
   @Post('forgot-password')

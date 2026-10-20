@@ -7,6 +7,7 @@ import { PrismaService } from 'src/common/services/prisma.service';
 import { EmailService } from 'src/common/services/email.service';
 import { LoginThrottleService } from './login-throttle.service';
 import { SessionsService } from './sessions.service';
+import { RevocationService } from './revocation.service';
 
 @Module({
   imports: [
@@ -26,10 +27,11 @@ import { SessionsService } from './sessions.service';
   providers: [
     AuthService,
     SessionsService,
+    RevocationService,
     PrismaService,
     EmailService,
     LoginThrottleService,
   ],
-  exports: [AuthService, SessionsService, JwtModule],
+  exports: [AuthService, SessionsService, RevocationService, JwtModule],
 })
 export class AuthModule {}
