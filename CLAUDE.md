@@ -41,6 +41,22 @@ File asynchrone dans `src/queue/` (**BullMQ**).
 - **Auth** : `AuthGuard` (`src/common/guards/auth.guard.ts`) attend `JwtService` →
   tout module exposant un contrôleur guardé doit `imports: [AuthModule]`.
   `req.user.userId` / `req.user.role` après garde. RBAC via `@Roles(...)` + `RolesGuard`.
+- **Sessions (TB3)** : une connexion = une ligne `Session` (modèle Prisma) = une famille
+  de refresh. Le refresh a le format `<sessionId>.<secret>` et seul le sha256 du secret
+  est stocké. `SessionsService` (`src/auth/sessions.service.ts`) est le seul endroit qui
+  émet, tourne ou révoque un refresh.
+  - Web : refresh uniquement dans le cookie httpOnly `refresh_token`, jamais dans le JSON.
+    Mobile : en-tête `X-Client: mobile`, `deviceId` et `plateforme` obligatoires à la
+    connexion, refresh envoyé et reçu dans le corps (`refreshToken`, `expiresIn`,
+    `sessionId`), jamais de cookie.
+  - Rotation à chaque refresh, grâce de 30 s (l'ancien refresh renvoie le refresh
+    courant). Réutilisation hors grâce : session révoquée et 401 `REFRESH_REUTILISE`.
+  - Durées : jeton d'accès 15 min portant `sid` ; sessions glissantes de 30 jours (web,
+    mobile patient) et 12 h (mobile autres rôles), Q11 révisable.
+  - `POST /auth/logout` est public (refresh seul ou jeton d'accès).
+  - Codes machine du champ `code` : catalogue `src/common/filters/codes-erreur.ts`.
+  - Hors TB3 (TB4) : liste et révocation des sessions, révocation au changement de mot
+    de passe, contrôle de révocation dans `AuthGuard`.
 - **Validation** globale : `ValidationPipe` (whitelist + forbidNonWhitelisted) — tout
   champ d'entrée doit être déclaré dans un DTO `class-validator`.
 - **Langue** : messages/logs/commentaires en français.
@@ -74,7 +90,10 @@ avec les services IA, envoyé dans l'en-tête `X-MedConnecte-Secret`), `DEMO_MOD
 (optionnelle, `false` par défaut, seule la valeur `true` active le mode démo, toute
 valeur autre que `true` ou `false` est refusée au démarrage), `DEMO_RESET` (optionnelle,
 `false` par défaut, même analyse stricte que `DEMO_MODE` : purge puis recrée les données
-démo au démarrage, sans effet si `DEMO_MODE` est inactif). Les anciennes `S3_*` sont **legacy** (module dormant). Toujours mettre à
+démo au démarrage, sans effet si `DEMO_MODE` est inactif), `SESSIONS_MULTI_APPAREILS` (optionnelle, `true`
+par défaut, seules `true` ou `false` acceptées au démarrage ; `false` revient à l'ancien
+refresh unique par utilisateur, cookie seul, en-tête mobile ignoré ; retour arrière sans
+redéploiement). Les anciennes `S3_*` sont **legacy** (module dormant). Toujours mettre à
 jour `.env.example` (racine) **et** l'`environment` du service `backend` dans `compose.yml`
 en ajoutant une variable obligatoire.
 
@@ -140,8 +159,10 @@ validé, logs sans données de santé, Swagger fermé en production. Reste notam
   avec un `eslint-disable` global marqué « Dette préexistante, backlog points 21 et 22 ».
 - **Tests** : 148 tests sur les domaines sensibles (auth, carnet, chat, audit, SOS,
   pharmacie, stockage, chiffrement) ; pas de tests e2e.
-- **Mobile** : le refresh ne lit que le cookie et un seul refresh token par utilisateur
-  (voir `mobile_medconnect/docs/FONCTIONNALITES-MOBILE.md`, adaptations B01 et B02).
+- **Mobile** : sessions par appareil livrées (TB3). Reste TB4 (révocation). La colonne
+  `User.refreshToken` est conservée une version pour le retour arrière, à supprimer
+  ensuite avec `AuthService.generateTokens` et `generateToken`. Les sessions expirées ou
+  révoquées ne sont pas encore purgées.
 
 <!-- orchestrator:start v2 -->
 ## Règles du projet et orchestrateur
