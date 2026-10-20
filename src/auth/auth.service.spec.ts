@@ -1,5 +1,10 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call -- les calls des doublures jest.Mock sont typés any */
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { AuthService } from './auth.service';
@@ -404,6 +409,151 @@ describe('AuthService', () => {
       const b = service.generateTokens({ userId: 'u1', role: 'PATIENT' });
 
       expect(a.refreshToken).not.toBe(b.refreshToken);
+    });
+  });
+
+  describe('connexionDemo (mode démo)', () => {
+    const ID_DEMO = '3f1c2a7e-8d4b-4c1e-9a55-2b7f0c9e6d10';
+    const compteDemo = (surcharge: Record<string, unknown> = {}) => {
+      // La connexion démo ne lit jamais le mot de passe.
+      const compte: Record<string, unknown> = utilisateur({
+        id: ID_DEMO,
+        email: 'dr.mamadou.diallo@demo.medconnecte.gn',
+        ...surcharge,
+      });
+      delete compte.password;
+      return compte;
+    };
+    const valeurInitiale = process.env.DEMO_MODE;
+
+    beforeEach(() => {
+      process.env.DEMO_MODE = 'true';
+    });
+    afterEach(() => {
+      if (valeurInitiale === undefined) delete process.env.DEMO_MODE;
+      else process.env.DEMO_MODE = valeurInitiale;
+    });
+
+    it.each([undefined, 'false', 'oui'])(
+      'mode inactif (DEMO_MODE=%s) : 404 sans lecture en base',
+      async (valeur) => {
+        if (valeur === undefined) delete process.env.DEMO_MODE;
+        else process.env.DEMO_MODE = valeur;
+
+        await expect(
+          service.connexionDemo(ID_DEMO, res as never),
+        ).rejects.toBeInstanceOf(NotFoundException);
+        expect(prisma.user.findUnique).not.toHaveBeenCalled();
+        expect(res.cookie).not.toHaveBeenCalled();
+      },
+    );
+
+    it('refuse (403) un vrai compte, hors domaine démo', async () => {
+      prisma.user.findUnique.mockResolvedValue(
+        compteDemo({ email: 'awa@example.com' }),
+      );
+
+      await expect(
+        service.connexionDemo(ID_DEMO, res as never),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(res.cookie).not.toHaveBeenCalled();
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('refuse (403) un compte absent', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.connexionDemo(ID_DEMO, res as never),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(res.cookie).not.toHaveBeenCalled();
+    });
+
+    it('refuse (403) un compte démo désactivé', async () => {
+      prisma.user.findUnique.mockResolvedValue(compteDemo({ isActive: false }));
+
+      await expect(
+        service.connexionDemo(ID_DEMO, res as never),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('compte démo : même réponse et mêmes effets que login', async () => {
+      // Référence : connexion classique du même compte
+      prisma.user.findUnique.mockResolvedValue({
+        ...compteDemo(),
+        password: hashValide,
+      });
+      const viaLogin = await service.login(
+        {
+          email: 'dr.mamadou.diallo@demo.medconnecte.gn',
+          password: MOT_DE_PASSE,
+        },
+        res as never,
+        '1.2.3.4',
+      );
+      const [, refreshLogin, optionsLogin] = res.cookie.mock.calls[0];
+
+      res.cookie.mockClear();
+      prisma.user.update.mockClear();
+      prisma.user.findUnique.mockResolvedValue(compteDemo());
+
+      const viaDemo = await service.connexionDemo(ID_DEMO, res as never);
+
+      expect(prisma.user.findUnique).toHaveBeenLastCalledWith(
+        expect.objectContaining({ where: { id: ID_DEMO } }),
+      );
+      expect(viaDemo).toEqual(viaLogin);
+      expect(JSON.stringify(viaDemo)).not.toContain('password');
+
+      const [nom, refreshDemo, optionsDemo] = res.cookie.mock.calls[0];
+      expect(nom).toBe('refresh_token');
+      expect(optionsDemo).toEqual(optionsLogin);
+      expect(refreshDemo).not.toBe(refreshLogin);
+      expect(JSON.stringify(viaDemo)).not.toContain(refreshDemo);
+
+      const maj = prisma.user.update.mock.calls[0][0];
+      expect(maj.where).toEqual({ id: ID_DEMO });
+      expect(maj.data.refreshToken).toBe(sha256(refreshDemo));
+      // Pas de remise à zéro anti-brute-force ici : aucun mot de passe en jeu.
+      expect(loginThrottle.reset).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('comptes démo : identifiants verrouillés', () => {
+    const demo = () =>
+      utilisateur({ id: 'd1', email: 'aminata.diallo@demo.medconnecte.gn' });
+
+    it('refuse le changement de mot de passe', async () => {
+      prisma.user.findUnique.mockResolvedValue(demo());
+
+      await expect(
+        service.changePassword('d1', {
+          currentPassword: MOT_DE_PASSE,
+          newPassword: 'Nouveau-mot-de-passe-1',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it("refuse le changement d'email", async () => {
+      prisma.user.findUnique.mockResolvedValue(demo());
+
+      await expect(
+        service.editProfile('d1', { email: 'moi@exemple.com' }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it("n'envoie aucun lien de réinitialisation", async () => {
+      prisma.user.findUnique.mockResolvedValue(demo());
+
+      const out = await service.forgotPassword({
+        email: 'aminata.diallo@demo.medconnecte.gn',
+      });
+
+      expect(out.success).toBe(true);
+      expect(emailService.sendPasswordResetEmail).not.toHaveBeenCalled();
+      expect(prisma.user.update).not.toHaveBeenCalled();
     });
   });
 });

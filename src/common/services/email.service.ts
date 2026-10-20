@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Resend } from 'resend';
+import { estCompteDemo } from 'src/demo/demo-mode';
 
 @Injectable()
 export class EmailService {
@@ -36,9 +37,25 @@ export class EmailService {
   private async deliver(
     payload: Parameters<Resend['emails']['send']>[0],
   ): Promise<void> {
-    const { error } = await this.resend.emails.send(payload);
+    // Filet de sécurité : jamais d'email réel vers une adresse de démonstration
+    // (@demo.medconnecte.gn), quel que soit l'appelant.
+    const destinataires = (
+      Array.isArray(payload.to) ? payload.to : [payload.to]
+    ).filter((adresse) => !estCompteDemo(adresse));
+    if (destinataires.length === 0) {
+      this.logger.log(
+        `email.demo_ignore sujet="${payload.subject}" (adresse de démonstration)`,
+      );
+      return;
+    }
+    const { error } = await this.resend.emails.send({
+      ...payload,
+      to: destinataires,
+    });
     if (error) {
-      throw new Error(`${error.name ?? 'resend_error'}: ${error.message ?? 'échec inconnu'}`);
+      throw new Error(
+        `${error.name ?? 'resend_error'}: ${error.message ?? 'échec inconnu'}`,
+      );
     }
   }
 
@@ -73,7 +90,10 @@ export class EmailService {
         ),
       });
     } catch (error) {
-      this.logger.error(`email.welcome_failed`, error instanceof Error ? error.stack : String(error));
+      this.logger.error(
+        `email.welcome_failed`,
+        error instanceof Error ? error.stack : String(error),
+      );
     }
   }
 
@@ -107,7 +127,10 @@ export class EmailService {
         ),
       });
     } catch (error) {
-      this.logger.error(`email.reset_failed`, error instanceof Error ? error.stack : String(error));
+      this.logger.error(
+        `email.reset_failed`,
+        error instanceof Error ? error.stack : String(error),
+      );
       throw new Error("Impossible d'envoyer l'email de réinitialisation");
     }
   }
@@ -148,7 +171,10 @@ export class EmailService {
         ),
       });
     } catch (error) {
-      this.logger.error(`email.login_alert_failed`, error instanceof Error ? error.stack : String(error));
+      this.logger.error(
+        `email.login_alert_failed`,
+        error instanceof Error ? error.stack : String(error),
+      );
       // Non bloquant : l'échec d'envoi ne doit pas perturber le flux d'authentification.
     }
   }
@@ -194,7 +220,10 @@ export class EmailService {
       });
       this.logger.log('email.invitation_sent');
     } catch (error) {
-      this.logger.error(`email.invitation_failed`, error instanceof Error ? error.stack : String(error));
+      this.logger.error(
+        `email.invitation_failed`,
+        error instanceof Error ? error.stack : String(error),
+      );
       throw new Error("Impossible d'envoyer l'email d'invitation");
     }
   }
@@ -231,7 +260,10 @@ export class EmailService {
         ),
       });
     } catch (error) {
-      this.logger.error(`email.member_failed`, error instanceof Error ? error.stack : String(error));
+      this.logger.error(
+        `email.member_failed`,
+        error instanceof Error ? error.stack : String(error),
+      );
     }
   }
 
@@ -245,8 +277,8 @@ export class EmailService {
     location?: { lat: number; lng: number },
     message?: string,
   ): Promise<void> {
-    const mapsUrl = location 
-      ? `https://www.google.com/maps/search/?api=1&query=${location.lat},${location.lng}` 
+    const mapsUrl = location
+      ? `https://www.google.com/maps/search/?api=1&query=${location.lat},${location.lng}`
       : null;
 
     try {
@@ -266,15 +298,19 @@ export class EmailService {
           </div>
 
           <div style="margin:20px 0;padding:15px;background:#f8fafb;border-radius:8px">
-            <p style="margin:0 0 10px"><strong>Message d'urgence :</strong><br>${message || "Aucun message spécifié."}</p>
-            ${mapsUrl ? `
+            <p style="margin:0 0 10px"><strong>Message d'urgence :</strong><br>${message || 'Aucun message spécifié.'}</p>
+            ${
+              mapsUrl
+                ? `
               <p style="margin:20px 0;text-align:center">
                 <a href="${mapsUrl}" style="${this.btnStyle('#dc2626')}">📍 Voir la position sur Maps</a>
               </p>
               <p style="font-size:12px;color:#64748b;text-align:center">
                 Coordonnées : ${location!.lat.toFixed(6)}, ${location!.lng.toFixed(6)}
               </p>
-            ` : '<p><em>Position non disponible</em></p>'}
+            `
+                : '<p><em>Position non disponible</em></p>'
+            }
           </div>
 
           <div style="background:#f1f5f9;padding:15px;border-radius:8px;margin-top:20px">
@@ -290,7 +326,10 @@ export class EmailService {
       });
       this.logger.log('email.sos_sent');
     } catch (error) {
-      this.logger.error(`email.sos_failed`, error instanceof Error ? error.stack : String(error));
+      this.logger.error(
+        `email.sos_failed`,
+        error instanceof Error ? error.stack : String(error),
+      );
     }
   }
 
@@ -307,7 +346,11 @@ export class EmailService {
    *   de page et on garde la carte blanche (évite d'inverser les couleurs sémantiques
    *   des encarts d'alerte/urgence).
    */
-  private buildLayout(title: string, content: string, preheader = title): string {
+  private buildLayout(
+    title: string,
+    content: string,
+    preheader = title,
+  ): string {
     const logoUrl = `${process.env.FRONTEND_URL ?? ''}/images/logo.png`;
     const year = new Date().getFullYear();
     return `

@@ -58,4 +58,66 @@ describe('validateEnv', () => {
       ).toThrow(/SWAGGER_ENABLED/);
     });
   });
+
+  describe('DEMO_MODE', () => {
+    const valeurInitiale = process.env.DEMO_MODE;
+    afterEach(() => {
+      if (valeurInitiale === undefined) delete process.env.DEMO_MODE;
+      else process.env.DEMO_MODE = valeurInitiale;
+    });
+
+    it('variable absente : défaut false', () => {
+      const config = validateEnv(configMinimale());
+      expect(config.DEMO_MODE).toBe('false');
+    });
+
+    it.each(['true', 'TRUE', ' true ', 'false', 'False'])(
+      'accepte « %s »',
+      (valeur) => {
+        expect(() =>
+          validateEnv({ ...configMinimale(), DEMO_MODE: valeur }),
+        ).not.toThrow();
+      },
+    );
+
+    it.each(['oui', '1', 'yes', 'actif'])(
+      'refuse au démarrage la valeur « %s »',
+      (valeur) => {
+        expect(() =>
+          validateEnv({ ...configMinimale(), DEMO_MODE: valeur }),
+        ).toThrow(/DEMO_MODE/);
+      },
+    );
+  });
+
+  describe('DEMO_RESET', () => {
+    const valeurInitiale = process.env.DEMO_RESET;
+    afterEach(() => {
+      if (valeurInitiale === undefined) delete process.env.DEMO_RESET;
+      else process.env.DEMO_RESET = valeurInitiale;
+    });
+
+    it('variable absente : défaut false', () => {
+      const config = validateEnv(configMinimale());
+      expect(config.DEMO_RESET).toBe('false');
+    });
+
+    it.each(['true', 'TRUE', ' true ', 'false', 'False'])(
+      'accepte « %s »',
+      (valeur) => {
+        expect(() =>
+          validateEnv({ ...configMinimale(), DEMO_RESET: valeur }),
+        ).not.toThrow();
+      },
+    );
+
+    it.each(['oui', '1', 'yes', 'reset'])(
+      'refuse au démarrage la valeur « %s »',
+      (valeur) => {
+        expect(() =>
+          validateEnv({ ...configMinimale(), DEMO_RESET: valeur }),
+        ).toThrow(/DEMO_RESET/);
+      },
+    );
+  });
 });

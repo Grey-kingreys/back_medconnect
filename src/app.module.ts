@@ -24,6 +24,7 @@ import { RedisModule } from './common/redis/redis.module';
 import { RbacModule } from './common/rbac/rbac.module';
 import { RolesModule } from './roles/roles.module';
 import { PrismaModule } from './common/prisma.module';
+import { DemoModule } from './demo/demo.module';
 import { validateEnv } from './config/env.validation';
 import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
@@ -114,6 +115,8 @@ import type { IncomingMessage } from 'http';
     StorageModule,
     QueueModule,
     ConsentModule,
+    // Mode démo : inerte si DEMO_MODE ne vaut pas `true` (routes en 404, aucune donnée).
+    DemoModule,
   ],
   controllers: [AppController],
   providers: [

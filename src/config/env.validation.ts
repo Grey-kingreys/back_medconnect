@@ -133,6 +133,28 @@ const RULES: Rule[] = [
     validate: (v) =>
       v === 'true' || v === 'false' ? null : "doit valoir 'true' ou 'false'",
   },
+  // Mode démo (cf. src/demo/) : comptes et données fictives, connexion sans mot de
+  // passe. Inactif par défaut ; seule la valeur `true` (casse indifférente) l'active.
+  {
+    key: 'DEMO_MODE',
+    required: false,
+    default: 'false',
+    validate: (v) =>
+      ['true', 'false'].includes(v.toLowerCase())
+        ? null
+        : "doit valoir 'true' ou 'false'",
+  },
+  // Remise à zéro des données démo au démarrage (purge puis recréation), seulement
+  // si DEMO_MODE est actif. Inactive par défaut ; seule `true` (casse indifférente) l'active.
+  {
+    key: 'DEMO_RESET',
+    required: false,
+    default: 'false',
+    validate: (v) =>
+      ['true', 'false'].includes(v.toLowerCase())
+        ? null
+        : "doit valoir 'true' ou 'false'",
+  },
 ];
 
 export function validateEnv(

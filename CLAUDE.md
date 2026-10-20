@@ -70,9 +70,37 @@ Obligatoires : `DATABASE_URL`, `JWT_SECRET`, **`ENCRYPTION_KEY`** (hex 64 car. �
 Autres : `FRONTEND_URL`, `PORT`, `REDIS_URL`, `RESEND_*`, `NIMBA_*`, `AI_SERVICE_URL`,
 `AI_URGENCE`, `SWAGGER_ENABLED` (optionnelle, `true` pour ouvrir Swagger en production,
 fermé par défaut), `AI_SHARED_SECRET` (optionnelle, 32 caractères min., secret partagé
-avec les services IA, envoyé dans l'en-tête `X-MedConnecte-Secret`). Les anciennes `S3_*` sont **legacy** (module dormant). Toujours mettre à
+avec les services IA, envoyé dans l'en-tête `X-MedConnecte-Secret`), `DEMO_MODE`
+(optionnelle, `false` par défaut, seule la valeur `true` active le mode démo, toute
+valeur autre que `true` ou `false` est refusée au démarrage), `DEMO_RESET` (optionnelle,
+`false` par défaut, même analyse stricte que `DEMO_MODE` : purge puis recrée les données
+démo au démarrage, sans effet si `DEMO_MODE` est inactif). Les anciennes `S3_*` sont **legacy** (module dormant). Toujours mettre à
 jour `.env.example` (racine) **et** l'`environment` du service `backend` dans `compose.yml`
 en ajoutant une variable obligatoire.
+
+## Mode démo (`src/demo/`)
+
+Actif seulement si `DEMO_MODE=true` (avertissement au démarrage, renforcé en production).
+`DemoSeeder` crée au boot, une seule fois et dans une transaction, un jeu de données
+guinéen fictif (5 structures, 20 comptes, carnets chiffrés via `EncryptionService`,
+stocks, messagerie, SOS, notifications), puis rattache les rôles RBAC. Le compte vitrine
+patient (Aminata Diallo) porte un dossier riche sur 3 ans (9 consultations dans 3
+structures, ordonnances sans pénicilline car elle y est allergique, analyses, vaccins,
+rendez-vous, messagerie). Comme le seed ne crée rien si des données démo existent déjà,
+`DEMO_RESET=true` (avec `DEMO_MODE=true`) supprime au démarrage toutes les données démo
+(comptes et structures en `@demo.medconnecte.gn`, leurs journaux d'audit, et tout ce qui
+leur est rattaché par cascade) puis recrée le jeu complet, dans une seule transaction ;
+le catalogue de médicaments, partagé, n'est jamais supprimé. Purge physique volontaire
+(pas de soft-delete sur ces données fictives), journalisée « Données de démonstration
+supprimées puis recréées ». À remettre à `false` ensuite, sinon chaque redémarrage
+recrée les données (nouveaux identifiants, sessions démo invalidées). `DEMO_RESET=true`
+sans mode démo : avertissement, rien n'est supprimé. Un compte démo
+se reconnaît à son email en `@demo.medconnecte.gn` ; son mot de passe est aléatoire et
+inconnu, et son mot de passe comme son email ne peuvent pas être modifiés. Aucun email ni SMS réel ne part depuis ou vers un compte démo : `EmailService` ignore toute adresse en `@demo.medconnecte.gn`, le SOS d'un patient démo ne prévient pas son proche (le patient en est informé), et l'OTP de partage d'un patient démo n'envoie pas de SMS mais renvoie le code à l'accueil (`codeDemo`, seulement si le mode démo est actif). Routes
+publiques : `GET /auth/demo/comptes` et `POST /auth/demo/connexion` (`{ userId }`, même
+réponse et même cookie que `POST /auth/login`, 403 pour tout compte non démo). Mode
+inactif : 404 sur ces deux routes et aucune donnée créée. Ne jamais activer sur une
+instance qui contient de vraies données de santé.
 
 ## Capacités Phase 2 (implémentées)
 
