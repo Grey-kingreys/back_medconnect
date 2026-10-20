@@ -133,6 +133,24 @@ describe('CarnetSanteService - alerte SOS (délai, anti-relance, diffusion)', ()
       expect(prisma.urgence.update).not.toHaveBeenCalled();
     });
 
+    it('accepte tout de suite une relance si l’alerte précédente n’avait pas de position (personne n’a été alerté)', async () => {
+      prisma.urgence.findFirst.mockResolvedValue({
+        id: 'u0',
+        status: UrgenceStatusEnum.LANCE,
+        createdAt: new Date(Date.now() - 1 * MINUTE),
+        priseEnChargeAt: null,
+        delaiArriveeMinutes: null,
+        latitude: null,
+        longitude: null,
+        structurePriseEnCharge: null,
+      });
+
+      const res = await service.createUrgence('p1', {});
+
+      expect(res.success).toBe(true);
+      expect(prisma.urgence.create).toHaveBeenCalledTimes(1);
+    });
+
     it(`refuse si une alerte a été lancée il y a moins de ${SOS_ANTI_DOUBLON_MINUTES} minutes`, async () => {
       prisma.urgence.findFirst.mockResolvedValue({
         id: 'u0',
@@ -140,6 +158,9 @@ describe('CarnetSanteService - alerte SOS (délai, anti-relance, diffusion)', ()
         createdAt: new Date(Date.now() - 2 * MINUTE),
         priseEnChargeAt: null,
         delaiArriveeMinutes: null,
+        // Alerte diffusée aux établissements proches : l'anti-doublon s'applique.
+        latitude: 9.53,
+        longitude: -13.68,
         structurePriseEnCharge: null,
       });
 

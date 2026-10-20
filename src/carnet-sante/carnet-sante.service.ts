@@ -33,6 +33,7 @@ import { QueueService } from 'src/queue/queue.service';
 import { StorageService } from 'src/storage/storage.service';
 import { PermissionsService } from 'src/common/rbac/permissions.service';
 import { PERMISSIONS } from 'src/common/rbac/permissions.constants';
+import { estCompteDemo } from 'src/demo/demo-mode';
 import {
   AppointmentStatus,
   UrgenceStatus,
@@ -515,6 +516,10 @@ export class CarnetSanteService {
     return {
       data: ordonnances.map((o) => ({
         ...this.decryptOrdonnance(o),
+        // La consultation liée est chiffrée en base (motif, diagnostic, notes).
+        consultation: o.consultation
+          ? this.decryptConsultation(o.consultation)
+          : null,
         medecinNom:
           o.medecinNom ||
           (o.medecin ? `Dr. ${o.medecin.prenom} ${o.medecin.nom}` : null),
@@ -637,12 +642,17 @@ export class CarnetSanteService {
     });
 
     return {
-      data: analyses.map((a) => ({
-        ...this.decryptAnalyse(a),
-        laboratoire:
-          a.laboratoire ||
-          (a.medecin ? `Dr. ${a.medecin.prenom} ${a.medecin.nom}` : null),
-      })),
+      data: analyses.map((a) => {
+        // Le laboratoire est chiffré en base : on part de la valeur déchiffrée,
+        // jamais de `a.laboratoire` brut (sinon le patient voit le texte chiffré).
+        const analyse = this.decryptAnalyse(a);
+        return {
+          ...analyse,
+          laboratoire:
+            analyse.laboratoire ||
+            (a.medecin ? `Dr. ${a.medecin.prenom} ${a.medecin.nom}` : null),
+        };
+      }),
       message: `${analyses.length} résultat(s)`,
       success: true,
     };
@@ -1020,6 +1030,27 @@ export class CarnetSanteService {
     };
   }
 
+  /**
+   * Fiche d'urgence transmise aux soignants lors d'un SOS : uniquement ce qui sert à
+   * intervenir (groupe sanguin, allergies, pathologies, traitements). Jamais le profil
+   * complet (poids, taille, date de naissance, coordonnées du proche...).
+   */
+  private ficheUrgence(
+    profil: Pick<
+      ProfilMedical,
+      'groupeSanguin' | 'allergies' | 'pathologies' | 'traitements'
+    > | null,
+  ) {
+    if (!profil) return null;
+    const dechiffre = this.decryptProfil(profil);
+    return {
+      groupeSanguin: profil.groupeSanguin,
+      allergies: dechiffre.allergies,
+      pathologies: dechiffre.pathologies,
+      traitements: dechiffre.traitements,
+    };
+  }
+
   private decryptConsultation<
     T extends Pick<Consultation, 'motif' | 'diagnostic' | 'notes'>,
   >(c: T) {
@@ -1256,6 +1287,8 @@ export class CarnetSanteService {
       createdAt: Date;
       priseEnChargeAt: Date | null;
       delaiArriveeMinutes: number | null;
+      latitude?: number | null;
+      longitude?: number | null;
     },
     maintenant: Date,
   ) {
@@ -1272,7 +1305,13 @@ export class CarnetSanteService {
           urgence.delaiArriveeMinutes * 60_000,
       );
       if (finDelaiAt > maintenant) peutRelancerA = finDelaiAt;
-    } else if (urgence.status === 'LANCE') {
+    } else if (
+      urgence.status === 'LANCE' &&
+      // Sans position, l'alerte n'a été diffusée à aucun établissement : le patient
+      // doit pouvoir relancer tout de suite (après avoir activé la localisation).
+      urgence.latitude != null &&
+      urgence.longitude != null
+    ) {
       const finAntiDoublon = new Date(
         urgence.createdAt.getTime() + SOS_ANTI_DOUBLON_MINUTES * 60_000,
       );
@@ -1354,6 +1393,7 @@ export class CarnetSanteService {
             nom: true,
             prenom: true,
             telephone: true,
+            email: true,
             profilMedical: true,
           },
         },
@@ -1369,8 +1409,17 @@ export class CarnetSanteService {
       dto.latitude !== null &&
       dto.longitude !== null;
 
+    // Compte démo : aucun email ni SMS réel vers le proche (coordonnées fictives qui
+    // peuvent appartenir à quelqu'un). La diffusion interne aux soignants reste active.
+    const envoisExternesBloques = estCompteDemo(urgence.patient.email);
+    if (envoisExternesBloques && (contactEmail || contactTel)) {
+      this.logger.log(
+        `sos.demo urgenceId=${urgence.id} email et SMS au proche non envoyés (compte démo)`,
+      );
+    }
+
     // 1. Email d'alerte → file asynchrone (réponse immédiate, retries automatiques).
-    if (contactEmail) {
+    if (contactEmail && !envoisExternesBloques) {
       await this.queueService.enqueueEmergencyEmail({
         to: contactEmail,
         contactNom,
@@ -1384,7 +1433,7 @@ export class CarnetSanteService {
     }
 
     // 2. SMS d'urgence (Nimba) → file asynchrone.
-    if (contactTel) {
+    if (contactTel && !envoisExternesBloques) {
       const locationStr = hasLocation
         ? `Position: https://www.google.com/maps?q=${dto.latitude},${dto.longitude}`
         : undefined;
@@ -1395,18 +1444,18 @@ export class CarnetSanteService {
       });
     }
 
-    // 3. Notifier les 5 structures les plus proches
+    // 3. Notifier les 5 structures les plus proches, mais seulement les membres qui
+    //    ont la permission de traiter les alertes (sos:respond). L'accueil, les
+    //    pharmaciens et les administrateurs sans cette permission ne reçoivent ni
+    //    l'alerte ni la fiche d'urgence du patient.
+    let structuresAlertees = 0;
+    let soignantsAlertes = 0;
     if (hasLocation) {
       const sortedStructures = await this.structuresLesPlusProches(
         dto.latitude!,
         dto.longitude!,
       );
 
-      // Ni les coordonnées GPS du patient ni son identité ne sont journalisées :
-      // seuls l'ID de l'urgence et les structures notifiées le sont (audit #8).
-      this.logger.log(
-        `sos.proximite_notifiee urgenceId=${urgence.id} structures=${sortedStructures.length}`,
-      );
       const alertData = {
         urgenceId: urgence.id,
         patientId: urgence.patientId,
@@ -1415,17 +1464,11 @@ export class CarnetSanteService {
         longitude: dto.longitude,
         message: dto.message,
         createdAt: urgence.createdAt,
-        profilMedical: urgence.patient.profilMedical
-          ? this.decryptProfil(urgence.patient.profilMedical)
-          : null,
+        // Fiche d'urgence réduite, jamais le profil médical complet.
+        profilMedical: this.ficheUrgence(urgence.patient.profilMedical),
       };
 
       for (const s of sortedStructures) {
-        this.logger.debug(
-          `sos.structure_notifiee structureId=${s.id} distanceKm=${(s.dist * 111).toFixed(2)}`,
-        );
-
-        // Trouver tous les membres de la structure (admin + membres)
         const members = await this.prisma.user.findMany({
           where: {
             OR: [
@@ -1437,34 +1480,85 @@ export class CarnetSanteService {
           select: { id: true },
         });
 
-        const memberIds = members.map((m) => m.id);
-        if (memberIds.length > 0) {
-          this.chatGateway.sendEmergencyAlert(memberIds, alertData);
-
-          // Ajouter une notification persistante
-          await this.notificationsService.createManyNotifications(memberIds, {
-            type: 'SOS_ALERTE',
-            titre: 'Alerte SOS à proximité',
-            message: `URGENCE : Un patient (${alertData.patientName}) a besoin d'aide à proximité.`,
-            lien: '/dashboard/urgences',
-          });
+        const soignants: string[] = [];
+        for (const m of members) {
+          if (
+            await this.permissionsService.hasPermissions(m.id, [
+              PERMISSIONS.SOS_RESPOND,
+            ])
+          ) {
+            soignants.push(m.id);
+          }
         }
+
+        this.logger.debug(
+          `sos.structure_notifiee structureId=${s.id} distanceKm=${(s.dist * 111).toFixed(2)} soignants=${soignants.length}`,
+        );
+        if (soignants.length === 0) continue;
+
+        structuresAlertees++;
+        soignantsAlertes += soignants.length;
+        this.chatGateway.sendEmergencyAlert(soignants, alertData);
+        await this.notificationsService.createManyNotifications(soignants, {
+          type: 'SOS_ALERTE',
+          titre: 'Alerte SOS à proximité',
+          message: `URGENCE : Un patient (${alertData.patientName}) a besoin d'aide à proximité.`,
+          lien: '/dashboard',
+        });
       }
     }
 
-    // Notification Patient
+    // Ni les coordonnées GPS du patient ni son identité ne sont journalisées (audit #8).
+    this.logger.log(
+      `sos.diffusion urgenceId=${urgence.id} position=${hasLocation} structures=${structuresAlertees} soignants=${soignantsAlertes}`,
+    );
+
+    // Le patient doit savoir exactement qui a été prévenu : jamais de faux succès.
+    const procheAlerte =
+      !envoisExternesBloques && Boolean(contactEmail || contactTel);
+    let proche = '';
+    if (procheAlerte) {
+      proche = ` Votre proche (${contactNom}) a été prévenu.`;
+    } else if (envoisExternesBloques && (contactEmail || contactTel)) {
+      proche =
+        " Compte de démonstration : votre proche n'a pas été prévenu (aucun email ni SMS n'est envoyé).";
+    }
+    let message: string;
+    if (structuresAlertees > 0) {
+      message =
+        `Alerte envoyée à ${structuresAlertees} établissement${structuresAlertees > 1 ? 's' : ''} de santé proche${structuresAlertees > 1 ? 's' : ''}.` +
+        `${proche} Restez calme, un soignant va prendre en charge votre alerte.`;
+    } else if (!hasLocation) {
+      message =
+        "Votre position n'a pas pu être obtenue : aucun établissement de santé n'a été alerté." +
+        `${proche} Appelez immédiatement les secours, puis activez la localisation et relancez l'alerte.`;
+    } else {
+      message =
+        "Aucun soignant disponible n'a pu être alerté près de vous." +
+        `${proche} Appelez immédiatement les secours.`;
+    }
+
     await this.notificationsService.createNotification({
       userId: userId,
       type: 'SOS_DECLENCHE',
       titre: 'SOS Lancé',
-      message:
-        'Votre alerte SOS a été transmise aux structures médicales proches. Restez calme.',
+      message,
     });
 
+    // Pas de profil médical (chiffré) dans la réponse : le patient n'en a pas besoin ici.
+    const urgenceSansPatient = Object.fromEntries(
+      Object.entries(urgence).filter(([cle]) => cle !== 'patient'),
+    );
     return {
       success: true,
-      data: urgence,
-      message: 'Alerte SOS envoyée avec succès',
+      data: {
+        ...urgenceSansPatient,
+        structuresAlertees,
+        soignantsAlertes,
+        procheAlerte,
+        positionTransmise: hasLocation,
+      },
+      message,
     };
   }
 
@@ -1588,9 +1682,8 @@ export class CarnetSanteService {
         ...u,
         patient: {
           ...u.patient,
-          profilMedical: u.patient.profilMedical
-            ? this.decryptProfil(u.patient.profilMedical)
-            : null,
+          // Fiche d'urgence réduite, jamais le profil médical complet.
+          profilMedical: this.ficheUrgence(u.patient.profilMedical),
         },
       })),
       message: `${urgences.length} alerte(s) active(s)`,
