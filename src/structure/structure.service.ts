@@ -1,3 +1,5 @@
+// Dette de typage préexistante, backlog points 21 et 22
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-enum-comparison */
 import {
   Injectable,
   Logger,
@@ -13,6 +15,8 @@ import * as crypto from 'crypto';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { EmailService } from 'src/common/services/email.service';
 import { AuthService } from 'src/auth/auth.service';
+import { SessionsService } from 'src/auth/sessions.service';
+import { SessionClientType } from 'generated/prisma/enums';
 import { RolesService } from 'src/common/rbac/roles.service';
 import { StorageService } from 'src/storage/storage.service';
 import {
@@ -42,12 +46,16 @@ export class StructureService {
     private readonly authService: AuthService,
     private readonly rolesService: RolesService,
     private readonly storage: StorageService,
-  ) { }
+    private readonly sessions: SessionsService,
+  ) {}
 
   // ─── Vérifier un token d'invitation ──────────────────────────
 
   async verifyInviteToken(rawToken: string) {
-    const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const hashedToken = crypto
+      .createHash('sha256')
+      .update(rawToken)
+      .digest('hex');
 
     const structure = await this.prisma.structure.findFirst({
       where: {
@@ -65,7 +73,7 @@ export class StructureService {
 
     if (!structure) {
       throw new UnauthorizedException(
-        'Lien d\'invitation invalide ou expiré. Contactez l\'administrateur MedConnecte.',
+        "Lien d'invitation invalide ou expiré. Contactez l'administrateur MedConnecte.",
       );
     }
 
@@ -101,7 +109,10 @@ export class StructureService {
         estOuvertManuel: true,
         logoFile: { select: { key: true } },
         membres: {
-          where: { role: { in: ['MEDECIN', 'STRUCTURE_ADMIN'] }, isActive: true },
+          where: {
+            role: { in: ['MEDECIN', 'STRUCTURE_ADMIN'] },
+            isActive: true,
+          },
           select: { specialite: true },
         },
       },
@@ -158,13 +169,24 @@ export class StructureService {
 
     const { logoFile, ...rest } = structure;
     const logoUrl = logoFile ? this.storage.getPublicUrl(logoFile.key) : null;
-    return { data: { ...rest, logoUrl }, message: 'Détails récupérés', success: true };
+    return {
+      data: { ...rest, logoUrl },
+      message: 'Détails récupérés',
+      success: true,
+    };
   }
 
   // ─── Setup structure (admin clique sur le lien) ───────────────
 
-  async setupStructure(rawToken: string, dto: SetupStructureDto, res: Response) {
-    const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+  async setupStructure(
+    rawToken: string,
+    dto: SetupStructureDto,
+    res: Response,
+  ) {
+    const hashedToken = crypto
+      .createHash('sha256')
+      .update(rawToken)
+      .digest('hex');
 
     const structure = await this.prisma.structure.findFirst({
       where: {
@@ -176,7 +198,7 @@ export class StructureService {
 
     if (!structure) {
       throw new UnauthorizedException(
-        'Lien d\'invitation invalide ou expiré. Contactez l\'administrateur MedConnecte.',
+        "Lien d'invitation invalide ou expiré. Contactez l'administrateur MedConnecte.",
       );
     }
 
@@ -221,7 +243,7 @@ export class StructureService {
           estOuvertManuel: dto.estOuvertManuel,
           adminId: admin.id,
           isConfigured: true,
-          inviteToken: null,  // Invalider le token
+          inviteToken: null, // Invalider le token
           inviteExpires: null,
         },
         select: {
@@ -250,41 +272,34 @@ export class StructureService {
         structureId: structure.id,
       });
       if (appRoleId) {
-        await this.prisma.user.update({ where: { id: result.admin.id }, data: { appRoleId } });
+        await this.prisma.user.update({
+          where: { id: result.admin.id },
+          data: { appRoleId },
+        });
       }
     } catch (e) {
       this.logger.error('Assignation appRole admin structure échouée', e);
     }
 
-    // Générer le JWT
-    const { access_token, refreshToken, refreshTokenExpires } = this.authService.generateTokens({
-      userId: result.admin.id,
-      role: result.admin.role,
-      structureId: structure.id,
-    });
-
-    // Mettre à jour le refreshToken
-    const hashedRefresh = crypto.createHash('sha256').update(refreshToken).digest('hex');
-    await this.prisma.user.update({
-      where: { id: result.admin.id },
-      data: { refreshToken: hashedRefresh, refreshTokenExpires },
-    });
-
-    // Refresh token uniquement dans le cookie httpOnly (jamais dans le JSON).
-    res.cookie('refresh_token', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
-      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 jours
-    });
+    // Ouvre une session web : refresh uniquement dans le cookie httpOnly (jamais dans le JSON).
+    const jetons = await this.sessions.ouvrir(
+      {
+        id: result.admin.id,
+        role: result.admin.role,
+        structureId: structure.id,
+      },
+      { type: SessionClientType.WEB },
+    );
+    this.sessions.poserCookie(res, jetons.refreshToken, jetons.dureeMs);
 
     return {
       data: {
-        access_token,
+        access_token: jetons.access_token,
         user: result.admin,
         structure: result.structure,
       },
-      message: 'Votre espace a été configuré avec succès. Bienvenue sur MedConnecte !',
+      message:
+        'Votre espace a été configuré avec succès. Bienvenue sur MedConnecte !',
       success: true,
     };
   }
@@ -340,7 +355,10 @@ export class StructureService {
     let appRoleId: string | undefined;
     try {
       if (dto.appRoleId) {
-        await this.rolesService.assertAssignableStructureRole(dto.appRoleId, structureId);
+        await this.rolesService.assertAssignableStructureRole(
+          dto.appRoleId,
+          structureId,
+        );
         appRoleId = dto.appRoleId;
       } else {
         appRoleId =
@@ -369,7 +387,8 @@ export class StructureService {
         appRoleId,
         isActive: true,
         structureId: structureId,
-        specialite: dto.role === 'MEDECIN' ? (dto as any).specialite : undefined,
+        specialite:
+          dto.role === 'MEDECIN' ? (dto as any).specialite : undefined,
       },
       select: {
         id: true,
@@ -407,13 +426,18 @@ export class StructureService {
 
   async getMembres(structureId: string, requestingUserId: string) {
     // Vérifier juste que l'utilisateur appartient à la structure
-    const user = await this.prisma.user.findUnique({ where: { id: requestingUserId } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: requestingUserId },
+    });
     if (!user || user.structureId !== structureId) {
       throw new ForbiddenException("Vous n'appartenez pas à cette structure");
     }
 
     const membres = await this.prisma.user.findMany({
-      where: { structureId, role: { in: ['MEDECIN', 'PHARMACIEN', 'ACCUEIL'] } },
+      where: {
+        structureId,
+        role: { in: ['MEDECIN', 'PHARMACIEN', 'ACCUEIL'] },
+      },
       select: {
         id: true,
         nom: true,
@@ -441,7 +465,13 @@ export class StructureService {
       where: { id: structureId },
       include: {
         admin: {
-          select: { id: true, nom: true, prenom: true, email: true, telephone: true },
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            email: true,
+            telephone: true,
+          },
         },
         membres: {
           where: { role: { in: ['MEDECIN', 'PHARMACIEN', 'ACCUEIL'] } },
@@ -462,7 +492,11 @@ export class StructureService {
     }
 
     const logoUrl = await this.storage.getPublicUrlById(structure.logoFileId);
-    return { data: { ...structure, logoUrl }, message: 'Structure récupérée', success: true };
+    return {
+      data: { ...structure, logoUrl },
+      message: 'Structure récupérée',
+      success: true,
+    };
   }
 
   // ─── Mettre à jour la structure ───────────────────────────────
@@ -478,13 +512,16 @@ export class StructureService {
     if (dto.nom !== undefined) updateData.nom = dto.nom.trim();
     if (dto.adresse !== undefined) updateData.adresse = dto.adresse.trim();
     if (dto.ville !== undefined) updateData.ville = dto.ville.trim();
-    if (dto.telephone !== undefined) updateData.telephone = dto.telephone.trim();
-    if (dto.description !== undefined) updateData.description = dto.description.trim();
+    if (dto.telephone !== undefined)
+      updateData.telephone = dto.telephone.trim();
+    if (dto.description !== undefined)
+      updateData.description = dto.description.trim();
     if (dto.latitude !== undefined) updateData.latitude = dto.latitude;
     if (dto.longitude !== undefined) updateData.longitude = dto.longitude;
     if (dto.horaires !== undefined) updateData.horaires = dto.horaires;
     if (dto.estDeGarde !== undefined) updateData.estDeGarde = dto.estDeGarde;
-    if (dto.estOuvertManuel !== undefined) updateData.estOuvertManuel = dto.estOuvertManuel;
+    if (dto.estOuvertManuel !== undefined)
+      updateData.estOuvertManuel = dto.estOuvertManuel;
 
     const updated = await this.prisma.structure.update({
       where: { id: structureId },
@@ -524,10 +561,16 @@ export class StructureService {
       where: { id: structureId },
       select: { logoFileId: true },
     });
-    await this.prisma.structure.update({ where: { id: structureId }, data: { logoFileId: fileId } });
+    await this.prisma.structure.update({
+      where: { id: structureId },
+      data: { logoFileId: fileId },
+    });
     if (current?.logoFileId && current.logoFileId !== fileId) {
       await this.storage
-        .deleteStoredFile({ id: current.logoFileId, requester: { userId: requestingUserId } })
+        .deleteStoredFile({
+          id: current.logoFileId,
+          requester: { userId: requestingUserId },
+        })
         .catch(() => undefined);
     }
     const logoUrl = await this.storage.getPublicUrlById(fileId);
@@ -542,9 +585,15 @@ export class StructureService {
       select: { logoFileId: true },
     });
     if (current?.logoFileId) {
-      await this.prisma.structure.update({ where: { id: structureId }, data: { logoFileId: null } });
+      await this.prisma.structure.update({
+        where: { id: structureId },
+        data: { logoFileId: null },
+      });
       await this.storage
-        .deleteStoredFile({ id: current.logoFileId, requester: { userId: requestingUserId } })
+        .deleteStoredFile({
+          id: current.logoFileId,
+          requester: { userId: requestingUserId },
+        })
         .catch(() => undefined);
     }
     return { data: { logoUrl: null }, message: 'Logo supprimé', success: true };
@@ -583,7 +632,11 @@ export class StructureService {
 
   private async checkStructureAccess(structureId: string, userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.structureId !== structureId || user.role !== 'STRUCTURE_ADMIN') {
+    if (
+      !user ||
+      user.structureId !== structureId ||
+      user.role !== 'STRUCTURE_ADMIN'
+    ) {
       throw new ForbiddenException(
         "Action réservée à l'administrateur de la structure",
       );
@@ -592,7 +645,11 @@ export class StructureService {
   }
 
   // ─── Supprimer un membre ──────────────────────────────────────
-  async deleteMembre(structureId: string, membreId: string, requestingUserId: string) {
+  async deleteMembre(
+    structureId: string,
+    membreId: string,
+    requestingUserId: string,
+  ) {
     await this.checkStructureAccess(structureId, requestingUserId);
 
     const membre = await this.prisma.user.findFirst({
@@ -603,7 +660,9 @@ export class StructureService {
     }
 
     if (membre.id === requestingUserId) {
-      throw new BadRequestException("Vous ne pouvez pas vous supprimer vous-même");
+      throw new BadRequestException(
+        'Vous ne pouvez pas vous supprimer vous-même',
+      );
     }
 
     await this.prisma.user.delete({

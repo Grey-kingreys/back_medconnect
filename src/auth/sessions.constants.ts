@@ -2,6 +2,8 @@ import { SessionClientType } from 'generated/prisma/enums';
 
 /** Fenêtre de grâce de l'ancien refresh après rotation (refresh concurrents, réponse perdue). */
 export const GRACE_REFRESH_MS = 30_000;
+/** Intervalle d'effacement des secrets de grâce échus (D20). */
+export const PURGE_GRACE_MS = 60_000;
 /** Durée de vie du jeton d'accès. */
 export const DUREE_ACCES = '15m';
 export const DUREE_ACCES_SECONDES = 15 * 60;

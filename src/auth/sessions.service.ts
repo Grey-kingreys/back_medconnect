@@ -1,4 +1,10 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
 import type { Response } from 'express';
@@ -13,6 +19,7 @@ import {
   GRACE_REFRESH_MS,
   MESSAGES_SESSION,
   NOM_COOKIE_REFRESH,
+  PURGE_GRACE_MS,
   dureeSession,
   estSessionsMultiAppareilsActif,
 } from './sessions.constants';
@@ -84,14 +91,40 @@ interface SessionAvecUtilisateur {
  * et détection de réutilisation (décisions D02 à D07 du run TB3).
  */
 @Injectable()
-export class SessionsService {
+export class SessionsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(SessionsService.name);
+  private minuteurPurge?: NodeJS.Timeout;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly encryption: EncryptionService,
   ) {}
+
+  onModuleInit(): void {
+    if (!estSessionsMultiAppareilsActif()) return;
+    this.minuteurPurge = setInterval(() => {
+      this.purgerSecretsDeGrace().catch((e: unknown) =>
+        this.logger.warn(
+          `Purge des secrets de grâce échouée : ${e instanceof Error ? e.message : String(e)}`,
+        ),
+      );
+    }, PURGE_GRACE_MS);
+    this.minuteurPurge.unref();
+  }
+
+  onModuleDestroy(): void {
+    if (this.minuteurPurge) clearInterval(this.minuteurPurge);
+  }
+
+  /** Efface les secrets de grâce échus (D20). Idempotent, sans coordination entre instances. */
+  async purgerSecretsDeGrace(): Promise<number> {
+    const { count } = await this.prisma.session.updateMany({
+      where: { graceSecretEnc: { not: null }, graceUntil: { lt: new Date() } },
+      data: { graceSecretEnc: null },
+    });
+    return count;
+  }
 
   signerAcces(payload: {
     userId: string;
@@ -130,7 +163,12 @@ export class SessionsService {
           deviceId: client.deviceId,
           revokedAt: null,
         },
-        data: { revokedAt: maintenant, revokedReason: 'NOUVELLE_CONNEXION' },
+        data: {
+          revokedAt: maintenant,
+          revokedReason: 'NOUVELLE_CONNEXION',
+          graceSecretEnc: null,
+          graceUntil: null,
+        },
       });
     }
 
@@ -232,7 +270,12 @@ export class SessionsService {
     // Réutilisation d'un secret périmé : la session est révoquée.
     await this.prisma.session.update({
       where: { id },
-      data: { revokedAt: maintenant, revokedReason: 'REUTILISATION' },
+      data: {
+        revokedAt: maintenant,
+        revokedReason: 'REUTILISATION',
+        graceSecretEnc: null,
+        graceUntil: null,
+      },
     });
     this.logger.warn(
       `Réutilisation d'un ancien jeton de renouvellement : session ${id} révoquée (utilisateur ${session.userId})`,
@@ -284,7 +327,12 @@ export class SessionsService {
     if (idSession) {
       await this.prisma.session.updateMany({
         where: { id: idSession, revokedAt: null },
-        data: { revokedAt: maintenant, revokedReason: 'DECONNEXION' },
+        data: {
+          revokedAt: maintenant,
+          revokedReason: 'DECONNEXION',
+          graceSecretEnc: null,
+          graceUntil: null,
+        },
       });
     }
   }

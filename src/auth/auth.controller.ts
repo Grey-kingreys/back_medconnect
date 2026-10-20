@@ -12,17 +12,21 @@ import {
   Res,
   HttpCode,
   HttpStatus,
-  BadRequestException,
 } from '@nestjs/common';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import {
   ApiTags,
   ApiOperation,
   ApiResponse,
   ApiBearerAuth,
+  ApiHeader,
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
+import { lireInfosClient, typeClient } from './client';
+import { SessionClientType } from 'generated/prisma/enums';
+import { NOM_COOKIE_REFRESH } from './sessions.constants';
+import { JetonRenouvellementDto } from './dto/jeton-renouvellement.dto';
 
 /** Palier strict pour les endpoints sensibles d'auth : 10 req/min/IP. */
 const AUTH_THROTTLE = { default: { limit: 10, ttl: 60_000 } };
@@ -49,12 +53,19 @@ export class AuthController {
   })
   @ApiResponse({ status: 201, description: 'Compte créé' })
   @ApiResponse({ status: 409, description: 'Email déjà utilisé' })
+  @ApiHeader({
+    name: 'X-Client',
+    required: false,
+    description:
+      "« mobile » pour l'application mobile : refresh renvoyé dans le JSON (refreshToken, expiresIn, sessionId), sans cookie ; deviceId et plateforme obligatoires. Absent : web, refresh dans le cookie httpOnly.",
+  })
   @Throttle(AUTH_THROTTLE)
   register(
     @Body() dto: RegisterDto,
     @Res({ passthrough: true }) res: Response,
+    @Req() req: Request,
   ) {
-    return this.authService.register(dto, res);
+    return this.authService.register(dto, res, lireInfosClient(req, dto));
   }
 
   @Post('login')
@@ -66,13 +77,19 @@ export class AuthController {
   })
   @ApiResponse({ status: 200, description: 'Connexion réussie' })
   @ApiResponse({ status: 401, description: 'Email ou mot de passe incorrect' })
+  @ApiHeader({
+    name: 'X-Client',
+    required: false,
+    description:
+      "« mobile » pour l'application mobile : refresh renvoyé dans le JSON (refreshToken, expiresIn, sessionId), sans cookie ; deviceId et plateforme obligatoires. Absent : web, refresh dans le cookie httpOnly.",
+  })
   login(
     @Body() dto: LoginDto,
     @Res({ passthrough: true }) res: Response,
     @Req() req: any,
   ) {
     // req.ip fiable car `trust proxy` est configuré dans main.ts (derrière Caddy).
-    return this.authService.login(dto, res, req.ip);
+    return this.authService.login(dto, res, req.ip, lireInfosClient(req, dto));
   }
 
   @UseGuards(AuthGuard)
@@ -143,20 +160,55 @@ export class AuthController {
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Renouveler le access token via refresh token' })
-  refresh(@Req() req: any, @Res({ passthrough: true }) res: Response) {
-    // Le refresh token vit UNIQUEMENT dans le cookie httpOnly (plus de fallback body).
-    const token = req.cookies?.['refresh_token'];
-
-    if (!token) throw new BadRequestException('refresh_token requis');
-    return this.authService.refreshAccessToken(token, res);
+  @ApiHeader({
+    name: 'X-Client',
+    required: false,
+    description:
+      '« mobile » : refresh lu dans le corps et renvoyé dans le JSON, sans cookie. Absent : web, refresh lu dans le cookie httpOnly uniquement.',
+  })
+  @ApiResponse({
+    status: 401,
+    description:
+      'code SESSION_EXPIREE, SESSION_REVOQUEE, REFRESH_REUTILISE ou COMPTE_DESACTIVE',
+  })
+  refresh(
+    @Req() req: any,
+    @Body() dto: JetonRenouvellementDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    // Mobile : corps uniquement. Web : cookie uniquement.
+    const type = typeClient(req);
+    const refresh =
+      type === SessionClientType.MOBILE
+        ? dto.refreshToken
+        : req.cookies?.[NOM_COOKIE_REFRESH];
+    return this.authService.refreshAccessToken(refresh, res, type);
   }
 
-  @UseGuards(AuthGuard)
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Déconnexion (invalide le refresh token)' })
-  logout(@Req() req: any, @Res({ passthrough: true }) res: Response) {
-    return this.authService.logout(req.user.userId, res);
+  @ApiOperation({
+    summary: "Déconnexion de cet appareil (jeton d'accès ou refresh seul)",
+  })
+  @ApiHeader({
+    name: 'X-Client',
+    required: false,
+    description:
+      '« mobile » : refresh lu dans le corps. Absent : web, refresh lu dans le cookie httpOnly et cookie effacé.',
+  })
+  logout(
+    @Req() req: any,
+    @Body() dto: JetonRenouvellementDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const type = typeClient(req);
+    const refresh =
+      type === SessionClientType.MOBILE
+        ? dto.refreshToken
+        : req.cookies?.[NOM_COOKIE_REFRESH];
+    const [schema, jeton] = String(req.headers?.authorization ?? '').split(' ');
+    const jetonAcces = schema === 'Bearer' && jeton ? jeton : undefined;
+    return this.authService.logout({ refresh, jetonAcces }, res, type);
   }
 }

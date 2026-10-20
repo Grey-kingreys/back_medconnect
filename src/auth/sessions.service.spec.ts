@@ -6,6 +6,7 @@ import {
   DUREE_SESSION_COURTE_MS,
   DUREE_SESSION_LONGUE_MS,
   GRACE_REFRESH_MS,
+  PURGE_GRACE_MS,
   dureeSession,
   estSessionsMultiAppareilsActif,
 } from './sessions.constants';
@@ -155,7 +156,12 @@ describe('SessionsService', () => {
       });
       expect(prisma.session.updateMany).toHaveBeenCalledWith({
         where: { userId: 'u1', deviceId: 'appareil-12345', revokedAt: null },
-        data: { revokedAt: MAINTENANT, revokedReason: 'NOUVELLE_CONNEXION' },
+        data: {
+          revokedAt: MAINTENANT,
+          revokedReason: 'NOUVELLE_CONNEXION',
+          graceSecretEnc: null,
+          graceUntil: null,
+        },
       });
       expect(r.dureeMs).toBe(DUREE_SESSION_LONGUE_MS);
     });
@@ -259,7 +265,11 @@ describe('SessionsService', () => {
       );
       expect(prisma.session.update).toHaveBeenCalledWith({
         where: { id: ID },
-        data: expect.objectContaining({ revokedReason: 'REUTILISATION' }),
+        data: expect.objectContaining({
+          revokedReason: 'REUTILISATION',
+          graceSecretEnc: null,
+          graceUntil: null,
+        }),
       });
       expect(logWarn).toHaveBeenCalled();
       expect(JSON.stringify(logWarn.mock.calls)).not.toContain(SECRET);
@@ -409,7 +419,12 @@ describe('SessionsService', () => {
       await service.fermer({ refresh });
       expect(prisma.session.updateMany).toHaveBeenCalledWith({
         where: { id: ID, revokedAt: null },
-        data: { revokedAt: MAINTENANT, revokedReason: 'DECONNEXION' },
+        data: {
+          revokedAt: MAINTENANT,
+          revokedReason: 'DECONNEXION',
+          graceSecretEnc: null,
+          graceUntil: null,
+        },
       });
     });
 
@@ -434,6 +449,47 @@ describe('SessionsService', () => {
         service.fermer({ refresh: 'invalide' }),
       ).resolves.toBeUndefined();
       expect(prisma.session.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('purge des secrets de grâce (D20)', () => {
+    it('purgerSecretsDeGrace efface les secrets échus et renvoie le nombre', async () => {
+      prisma.session.updateMany.mockResolvedValue({ count: 3 });
+
+      const n = await service.purgerSecretsDeGrace();
+
+      expect(n).toBe(3);
+      expect(prisma.session.updateMany).toHaveBeenCalledWith({
+        where: {
+          graceSecretEnc: { not: null },
+          graceUntil: { lt: expect.any(Date) },
+        },
+        data: { graceSecretEnc: null },
+      });
+    });
+
+    it('onModuleInit avec le drapeau à false : aucun minuteur', () => {
+      process.env.SESSIONS_MULTI_APPAREILS = 'false';
+      const purge = jest.spyOn(service, 'purgerSecretsDeGrace');
+
+      service.onModuleInit();
+      jest.advanceTimersByTime(PURGE_GRACE_MS * 2);
+
+      expect(purge).not.toHaveBeenCalled();
+    });
+
+    it('onModuleInit actif : purge après 60 s, onModuleDestroy arrête le minuteur', () => {
+      const purge = jest
+        .spyOn(service, 'purgerSecretsDeGrace')
+        .mockResolvedValue(0);
+
+      service.onModuleInit();
+      jest.advanceTimersByTime(PURGE_GRACE_MS);
+      expect(purge).toHaveBeenCalledTimes(1);
+
+      service.onModuleDestroy();
+      jest.advanceTimersByTime(PURGE_GRACE_MS * 3);
+      expect(purge).toHaveBeenCalledTimes(1);
     });
   });
 

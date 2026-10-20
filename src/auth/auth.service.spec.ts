@@ -27,7 +27,7 @@ describe('AuthService', () => {
       update: jest.Mock;
     };
   };
-  let jwtService: { sign: jest.Mock };
+  let jwtService: { sign: jest.Mock; verifyAsync: jest.Mock };
   let emailService: {
     sendSuspiciousLoginEmail: jest.Mock;
     sendWelcomeEmail: jest.Mock;
@@ -39,6 +39,19 @@ describe('AuthService', () => {
     reset: jest.Mock;
   };
   let rolesService: { resolveAssignableRoleId: jest.Mock };
+  let sessions: {
+    ouvrir: jest.Mock;
+    poserCookie: jest.Mock;
+    effacerCookie: jest.Mock;
+    renouveler: jest.Mock;
+    fermer: jest.Mock;
+  };
+  const WEB = { type: 'WEB' } as never;
+  const MOBILE = {
+    type: 'MOBILE',
+    deviceId: 'appareil-test-1',
+    plateforme: 'android',
+  } as never;
   let service: AuthService;
   let res: { cookie: jest.Mock; clearCookie: jest.Mock };
 
@@ -74,7 +87,10 @@ describe('AuthService', () => {
         update: jest.fn().mockResolvedValue({}),
       },
     };
-    jwtService = { sign: jest.fn().mockReturnValue('jwt-de-test') };
+    jwtService = {
+      sign: jest.fn().mockReturnValue('jwt-de-test'),
+      verifyAsync: jest.fn(),
+    };
     emailService = {
       sendSuspiciousLoginEmail: jest.fn().mockResolvedValue(undefined),
       sendWelcomeEmail: jest.fn().mockResolvedValue(undefined),
@@ -88,6 +104,19 @@ describe('AuthService', () => {
     rolesService = {
       resolveAssignableRoleId: jest.fn().mockResolvedValue('role-1'),
     };
+    sessions = {
+      ouvrir: jest.fn().mockResolvedValue({
+        access_token: 'jwt-de-test',
+        refreshToken: 'sid-1.' + 'a'.repeat(64),
+        expiresIn: 900,
+        sessionId: 'sid-1',
+        dureeMs: 30 * 24 * 3600 * 1000,
+      }),
+      poserCookie: jest.fn(),
+      effacerCookie: jest.fn(),
+      renouveler: jest.fn(),
+      fermer: jest.fn(),
+    };
     res = { cookie: jest.fn(), clearCookie: jest.fn() };
 
     service = new AuthService(
@@ -97,6 +126,7 @@ describe('AuthService', () => {
       loginThrottle as never,
       rolesService as never,
       {} as never, // permissionsService
+      sessions as never,
     );
   });
 
@@ -107,7 +137,7 @@ describe('AuthService', () => {
       prisma.user.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.login(dto, res as never, '1.2.3.4'),
+        service.login(dto, res as never, '1.2.3.4', WEB),
       ).rejects.toBeInstanceOf(UnauthorizedException);
       expect(loginThrottle.guard).toHaveBeenCalledWith(
         dto.email,
@@ -125,7 +155,12 @@ describe('AuthService', () => {
       prisma.user.findUnique.mockResolvedValue(utilisateur());
 
       await expect(
-        service.login({ ...dto, password: 'faux' }, res as never, '1.2.3.4'),
+        service.login(
+          { ...dto, password: 'faux' },
+          res as never,
+          '1.2.3.4',
+          WEB,
+        ),
       ).rejects.toBeInstanceOf(UnauthorizedException);
       expect(loginThrottle.registerFailure).toHaveBeenCalledTimes(1);
       expect(loginThrottle.reset).not.toHaveBeenCalled();
@@ -137,7 +172,12 @@ describe('AuthService', () => {
       loginThrottle.registerFailure.mockResolvedValue(true);
 
       await expect(
-        service.login({ ...dto, password: 'faux' }, res as never, '1.2.3.4'),
+        service.login(
+          { ...dto, password: 'faux' },
+          res as never,
+          '1.2.3.4',
+          WEB,
+        ),
       ).rejects.toBeInstanceOf(UnauthorizedException);
       expect(emailService.sendSuspiciousLoginEmail).toHaveBeenCalledWith(
         'awa@example.com',
@@ -153,7 +193,7 @@ describe('AuthService', () => {
       );
 
       await expect(
-        service.login(dto, res as never, '1.2.3.4'),
+        service.login(dto, res as never, '1.2.3.4', WEB),
       ).rejects.toBeInstanceOf(UnauthorizedException);
       // Comportement actuel : un compte désactivé n'incrémente pas le compteur d'échecs.
       expect(loginThrottle.registerFailure).not.toHaveBeenCalled();
@@ -163,16 +203,16 @@ describe('AuthService', () => {
       const blocage = new Error('bloqué');
       loginThrottle.guard.mockRejectedValue(blocage);
 
-      await expect(service.login(dto, res as never, '1.2.3.4')).rejects.toBe(
-        blocage,
-      );
+      await expect(
+        service.login(dto, res as never, '1.2.3.4', WEB),
+      ).rejects.toBe(blocage);
       expect(prisma.user.findUnique).not.toHaveBeenCalled();
     });
 
-    it('réussit : tokens, cookie de refresh, remise à zéro du compteur', async () => {
+    it('réussit : session web, cookie de refresh, remise à zéro du compteur', async () => {
       prisma.user.findUnique.mockResolvedValue(utilisateur());
 
-      const out = await service.login(dto, res as never, '1.2.3.4');
+      const out = await service.login(dto, res as never, '1.2.3.4', WEB);
 
       expect(prisma.user.findUnique).toHaveBeenCalledWith(
         expect.objectContaining({ where: { email: 'awa@example.com' } }),
@@ -186,16 +226,41 @@ describe('AuthService', () => {
         structureId: 's1',
       });
 
-      const [nom, valeur, options] = res.cookie.mock.calls[0];
-      expect(nom).toBe('refresh_token');
-      expect(options).toMatchObject({ httpOnly: true });
+      expect(sessions.ouvrir).toHaveBeenCalledWith(
+        { id: 'u1', role: 'MEDECIN', structureId: 's1' },
+        { type: 'WEB' },
+      );
+      expect(sessions.poserCookie).toHaveBeenCalledWith(
+        res,
+        'sid-1.' + 'a'.repeat(64),
+        30 * 24 * 3600 * 1000,
+      );
 
-      // Le refresh token n'est ni dans le JSON, ni stocké en clair en base.
-      expect(JSON.stringify(out)).not.toContain(valeur);
-      const maj = prisma.user.update.mock.calls[0][0];
-      expect(maj.where).toEqual({ id: 'u1' });
-      expect(maj.data.refreshToken).toBe(sha256(valeur));
-      expect(maj.data.refreshToken).not.toBe(valeur);
+      // Le refresh token n'est jamais dans le JSON web et plus écrit dans User.
+      expect(out.data).not.toHaveProperty('refreshToken');
+      expect(out.data).not.toHaveProperty('sessionId');
+      expect(JSON.stringify(out)).not.toContain('a'.repeat(64));
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('mobile : refresh et sessionId dans le JSON, aucun cookie', async () => {
+      prisma.user.findUnique.mockResolvedValue(utilisateur());
+
+      const out = await service.login(dto, res as never, '1.2.3.4', MOBILE);
+
+      expect(sessions.ouvrir).toHaveBeenCalledWith(
+        { id: 'u1', role: 'MEDECIN', structureId: 's1' },
+        MOBILE,
+      );
+      expect(sessions.poserCookie).not.toHaveBeenCalled();
+      expect(res.cookie).not.toHaveBeenCalled();
+      expect(out.data).toMatchObject({
+        access_token: 'jwt-de-test',
+        refreshToken: 'sid-1.' + 'a'.repeat(64),
+        expiresIn: 900,
+        sessionId: 'sid-1',
+      });
+      expect(out.data.user).toMatchObject({ id: 'u1' });
     });
   });
 
@@ -211,7 +276,7 @@ describe('AuthService', () => {
       prisma.user.findUnique.mockResolvedValue({ id: 'existant' });
 
       await expect(
-        service.register(dto as never, res as never),
+        service.register(dto as never, res as never, WEB),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(prisma.user.create).not.toHaveBeenCalled();
     });
@@ -227,7 +292,7 @@ describe('AuthService', () => {
         createdAt: new Date(),
       });
 
-      const out = await service.register(dto as never, res as never);
+      const out = await service.register(dto as never, res as never, WEB);
 
       const { data } = prisma.user.create.mock.calls[0][0];
       expect(data.role).toBe('PATIENT');
@@ -240,11 +305,13 @@ describe('AuthService', () => {
 
       expect(out.success).toBe(true);
       expect(out.data.user.role).toBe('PATIENT');
-      expect(res.cookie).toHaveBeenCalledWith(
-        'refresh_token',
-        expect.any(String),
-        expect.objectContaining({ httpOnly: true }),
+      expect(sessions.ouvrir).toHaveBeenCalledWith(
+        { id: 'u2', role: 'PATIENT', structureId: null },
+        { type: 'WEB' },
       );
+      expect(sessions.poserCookie).toHaveBeenCalledTimes(1);
+      expect(out.data).not.toHaveProperty('refreshToken');
+      expect(out.data).not.toHaveProperty('sessionId');
       expect(emailService.sendWelcomeEmail).toHaveBeenCalledWith(
         'mamadou@example.com',
         'Barry',
@@ -266,7 +333,7 @@ describe('AuthService', () => {
         createdAt: new Date(),
       });
 
-      await service.register(dto as never, res as never);
+      await service.register(dto as never, res as never, WEB);
 
       // Comportement actuel : appRoleId vaut undefined, un backfill rattrape plus tard.
       expect(
@@ -275,44 +342,181 @@ describe('AuthService', () => {
     });
   });
 
-  describe('refreshAccessToken', () => {
-    it('refuse un refresh token invalide, expiré ou révoqué', async () => {
-      prisma.user.findFirst.mockResolvedValue(null);
+  describe('register mobile', () => {
+    it('refresh et sessionId dans le JSON, aucun cookie', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.user.create.mockResolvedValue({
+        id: 'u2',
+        email: 'mamadou@example.com',
+        nom: 'Barry',
+        prenom: 'Mamadou',
+        role: 'PATIENT',
+        createdAt: new Date(),
+      });
 
-      await expect(
-        service.refreshAccessToken('inconnu', res as never),
-      ).rejects.toBeInstanceOf(UnauthorizedException);
-      const { where } = prisma.user.findFirst.mock.calls[0][0];
-      expect(where.refreshToken).toBe(sha256('inconnu'));
-      expect(where.isActive).toBe(true);
-      expect(where.refreshTokenExpires.gt).toBeInstanceOf(Date);
-      expect(res.cookie).not.toHaveBeenCalled();
+      const out = await service.register(
+        {
+          nom: 'Barry',
+          prenom: 'Mamadou',
+          email: 'mamadou@example.com',
+          password: 'MotDePasse-de-test-2',
+        } as never,
+        res as never,
+        MOBILE,
+      );
+
+      expect(sessions.poserCookie).not.toHaveBeenCalled();
+      expect(out.data).toMatchObject({
+        access_token: 'jwt-de-test',
+        refreshToken: 'sid-1.' + 'a'.repeat(64),
+        expiresIn: 900,
+        sessionId: 'sid-1',
+      });
+      expect(out.data.user).toMatchObject({ id: 'u2', role: 'PATIENT' });
+    });
+  });
+
+  describe('refreshAccessToken', () => {
+    const jetons = {
+      access_token: 'jwt-renouvele',
+      refreshToken: 'sid-1.' + 'b'.repeat(64),
+      expiresIn: 900,
+      sessionId: 'sid-1',
+      dureeMs: 30 * 24 * 3600 * 1000,
+    };
+
+    it('refresh absent : 401 SESSION_EXPIREE, cookie effacé en web', async () => {
+      let erreur: unknown;
+      try {
+        await service.refreshAccessToken(
+          undefined,
+          res as never,
+          'WEB' as never,
+        );
+      } catch (e) {
+        erreur = e;
+      }
+      expect(erreur).toBeInstanceOf(UnauthorizedException);
+      expect((erreur as UnauthorizedException).getResponse()).toMatchObject({
+        code: 'SESSION_EXPIREE',
+      });
+      expect(sessions.effacerCookie).toHaveBeenCalledWith(res);
+      expect(sessions.renouveler).not.toHaveBeenCalled();
     });
 
-    it('fait tourner le refresh token et renvoie un nouvel access token', async () => {
-      prisma.user.findFirst.mockResolvedValue(utilisateur());
+    it('refresh absent en mobile : 401 sans toucher au cookie', async () => {
+      await expect(
+        service.refreshAccessToken(undefined, res as never, 'MOBILE' as never),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(sessions.effacerCookie).not.toHaveBeenCalled();
+    });
 
-      const out = await service.refreshAccessToken('ancien', res as never);
+    it('web : cookie posé, data ne contient que access_token', async () => {
+      sessions.renouveler.mockResolvedValue(jetons);
 
-      expect(out.data).toEqual({ access_token: 'jwt-de-test' });
-      const [nom, nouveau] = res.cookie.mock.calls[0];
-      expect(nom).toBe('refresh_token');
-      expect(nouveau).not.toBe('ancien');
-      const maj = prisma.user.update.mock.calls[0][0];
-      expect(maj.data.refreshToken).toBe(sha256(nouveau));
+      const out = await service.refreshAccessToken(
+        'ancien',
+        res as never,
+        'WEB' as never,
+      );
+
+      expect(sessions.renouveler).toHaveBeenCalledWith('ancien', 'WEB');
+      expect(sessions.poserCookie).toHaveBeenCalledWith(
+        res,
+        jetons.refreshToken,
+        jetons.dureeMs,
+      );
+      expect(out.data).toEqual({ access_token: 'jwt-renouvele' });
+      expect(JSON.stringify(out)).not.toContain('b'.repeat(64));
+    });
+
+    it('mobile : refresh, expiresIn et sessionId dans le JSON, aucun cookie', async () => {
+      sessions.renouveler.mockResolvedValue(jetons);
+
+      const out = await service.refreshAccessToken(
+        'ancien',
+        res as never,
+        'MOBILE' as never,
+      );
+
+      expect(sessions.renouveler).toHaveBeenCalledWith('ancien', 'MOBILE');
+      expect(out.data).toEqual({
+        access_token: 'jwt-renouvele',
+        refreshToken: jetons.refreshToken,
+        expiresIn: 900,
+        sessionId: 'sid-1',
+      });
+      expect(sessions.poserCookie).not.toHaveBeenCalled();
+      expect(sessions.effacerCookie).not.toHaveBeenCalled();
+    });
+
+    it('échec de renouveler en web : cookie effacé, erreur propagée telle quelle', async () => {
+      const refus = new UnauthorizedException({
+        message: 'réutilisé',
+        code: 'REFRESH_REUTILISE',
+      });
+      sessions.renouveler.mockRejectedValue(refus);
+
+      await expect(
+        service.refreshAccessToken('ancien', res as never, 'WEB' as never),
+      ).rejects.toBe(refus);
+      expect(sessions.effacerCookie).toHaveBeenCalledWith(res);
+      expect(sessions.poserCookie).not.toHaveBeenCalled();
     });
   });
 
   describe('logout', () => {
-    it('révoque le refresh token en base et efface le cookie', async () => {
-      const out = await service.logout('u1', res as never);
+    it("jeton d'accès valide : fermer reçoit sid et userId", async () => {
+      jwtService.verifyAsync.mockResolvedValue({ userId: 'u1', sid: 'sid-1' });
 
-      expect(prisma.user.update).toHaveBeenCalledWith({
-        where: { id: 'u1' },
-        data: { refreshToken: null, refreshTokenExpires: null },
+      const out = await service.logout(
+        { jetonAcces: 'jwt-valide' },
+        res as never,
+        'WEB' as never,
+      );
+
+      expect(jwtService.verifyAsync).toHaveBeenCalledWith('jwt-valide', {
+        secret: 'secret-de-test',
       });
-      expect(res.clearCookie).toHaveBeenCalledWith('refresh_token');
+      expect(sessions.fermer).toHaveBeenCalledWith({
+        refresh: undefined,
+        sid: 'sid-1',
+        userId: 'u1',
+      });
+      expect(out).toEqual({
+        data: null,
+        message: 'Déconnexion réussie',
+        success: true,
+      });
+    });
+
+    it("jeton d'accès invalide et refresh mobile : fermer reçoit le refresh, réponse 200", async () => {
+      jwtService.verifyAsync.mockRejectedValue(new Error('expiré'));
+
+      const out = await service.logout(
+        { refresh: 'sid-1.refresh', jetonAcces: 'jwt-expire' },
+        res as never,
+        'MOBILE' as never,
+      );
+
+      expect(sessions.fermer).toHaveBeenCalledWith({
+        refresh: 'sid-1.refresh',
+        sid: undefined,
+        userId: undefined,
+      });
       expect(out.success).toBe(true);
+    });
+
+    it('web : cookie effacé', async () => {
+      await service.logout({ refresh: 'r' }, res as never, 'WEB' as never);
+
+      expect(sessions.effacerCookie).toHaveBeenCalledWith(res);
+    });
+
+    it('mobile : cookie jamais touché', async () => {
+      await service.logout({ refresh: 'r' }, res as never, 'MOBILE' as never);
+
+      expect(sessions.effacerCookie).not.toHaveBeenCalled();
     });
   });
 
@@ -390,7 +594,7 @@ describe('AuthService', () => {
     it('signe le payload avec le secret et 15 minutes de validité', () => {
       const payload = { userId: 'u1', role: 'MEDECIN', structureId: 's1' };
 
-      const out = service.generateTokens(payload);
+      const out = service['generateTokens'](payload);
 
       expect(jwtService.sign).toHaveBeenCalledWith(payload, {
         secret: 'secret-de-test',
@@ -405,8 +609,8 @@ describe('AuthService', () => {
     });
 
     it('génère un refresh token différent à chaque appel', () => {
-      const a = service.generateTokens({ userId: 'u1', role: 'PATIENT' });
-      const b = service.generateTokens({ userId: 'u1', role: 'PATIENT' });
+      const a = service['generateTokens']({ userId: 'u1', role: 'PATIENT' });
+      const b = service['generateTokens']({ userId: 'u1', role: 'PATIENT' });
 
       expect(a.refreshToken).not.toBe(b.refreshToken);
     });
@@ -441,7 +645,7 @@ describe('AuthService', () => {
         else process.env.DEMO_MODE = valeur;
 
         await expect(
-          service.connexionDemo(ID_DEMO, res as never),
+          service.connexionDemo(ID_DEMO, res as never, WEB),
         ).rejects.toBeInstanceOf(NotFoundException);
         expect(prisma.user.findUnique).not.toHaveBeenCalled();
         expect(res.cookie).not.toHaveBeenCalled();
@@ -454,7 +658,7 @@ describe('AuthService', () => {
       );
 
       await expect(
-        service.connexionDemo(ID_DEMO, res as never),
+        service.connexionDemo(ID_DEMO, res as never, WEB),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(res.cookie).not.toHaveBeenCalled();
       expect(prisma.user.update).not.toHaveBeenCalled();
@@ -464,7 +668,7 @@ describe('AuthService', () => {
       prisma.user.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.connexionDemo(ID_DEMO, res as never),
+        service.connexionDemo(ID_DEMO, res as never, WEB),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(res.cookie).not.toHaveBeenCalled();
     });
@@ -473,7 +677,7 @@ describe('AuthService', () => {
       prisma.user.findUnique.mockResolvedValue(compteDemo({ isActive: false }));
 
       await expect(
-        service.connexionDemo(ID_DEMO, res as never),
+        service.connexionDemo(ID_DEMO, res as never, WEB),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
@@ -490,14 +694,14 @@ describe('AuthService', () => {
         },
         res as never,
         '1.2.3.4',
+        WEB,
       );
-      const [, refreshLogin, optionsLogin] = res.cookie.mock.calls[0];
 
-      res.cookie.mockClear();
-      prisma.user.update.mockClear();
+      sessions.ouvrir.mockClear();
+      sessions.poserCookie.mockClear();
       prisma.user.findUnique.mockResolvedValue(compteDemo());
 
-      const viaDemo = await service.connexionDemo(ID_DEMO, res as never);
+      const viaDemo = await service.connexionDemo(ID_DEMO, res as never, WEB);
 
       expect(prisma.user.findUnique).toHaveBeenLastCalledWith(
         expect.objectContaining({ where: { id: ID_DEMO } }),
@@ -505,17 +709,35 @@ describe('AuthService', () => {
       expect(viaDemo).toEqual(viaLogin);
       expect(JSON.stringify(viaDemo)).not.toContain('password');
 
-      const [nom, refreshDemo, optionsDemo] = res.cookie.mock.calls[0];
-      expect(nom).toBe('refresh_token');
-      expect(optionsDemo).toEqual(optionsLogin);
-      expect(refreshDemo).not.toBe(refreshLogin);
-      expect(JSON.stringify(viaDemo)).not.toContain(refreshDemo);
-
-      const maj = prisma.user.update.mock.calls[0][0];
-      expect(maj.where).toEqual({ id: ID_DEMO });
-      expect(maj.data.refreshToken).toBe(sha256(refreshDemo));
+      expect(sessions.ouvrir).toHaveBeenCalledWith(
+        { id: ID_DEMO, role: 'MEDECIN', structureId: 's1' },
+        { type: 'WEB' },
+      );
+      expect(sessions.poserCookie).toHaveBeenCalledTimes(1);
+      expect(viaDemo.data).not.toHaveProperty('refreshToken');
+      expect(viaDemo.data).not.toHaveProperty('sessionId');
+      expect(prisma.user.update).not.toHaveBeenCalled();
       // Pas de remise à zéro anti-brute-force ici : aucun mot de passe en jeu.
       expect(loginThrottle.reset).toHaveBeenCalledTimes(1);
+    });
+
+    it('mobile : refresh et sessionId dans le JSON, aucun cookie', async () => {
+      prisma.user.findUnique.mockResolvedValue(compteDemo());
+
+      const out = await service.connexionDemo(ID_DEMO, res as never, MOBILE);
+
+      expect(sessions.ouvrir).toHaveBeenCalledWith(
+        { id: ID_DEMO, role: 'MEDECIN', structureId: 's1' },
+        MOBILE,
+      );
+      expect(sessions.poserCookie).not.toHaveBeenCalled();
+      expect(out.data).toMatchObject({
+        access_token: 'jwt-de-test',
+        refreshToken: 'sid-1.' + 'a'.repeat(64),
+        expiresIn: 900,
+        sessionId: 'sid-1',
+      });
+      expect(out.data.user).toMatchObject({ id: ID_DEMO });
     });
   });
 

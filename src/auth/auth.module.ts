@@ -17,7 +17,8 @@ import { SessionsService } from './sessions.service';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         secret: config.getOrThrow<string>('JWT_SECRET'),
-        signOptions: { expiresIn: '7d' },
+        // Filet de sécurité : tout jeton signé sans durée explicite expire en 15 min (TB3).
+        signOptions: { expiresIn: '15m' },
       }),
     }),
   ],

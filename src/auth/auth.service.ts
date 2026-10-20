@@ -17,6 +17,14 @@ import { EmailService } from 'src/common/services/email.service';
 import { RolesService } from 'src/common/rbac/roles.service';
 import { PermissionsService } from 'src/common/rbac/permissions.service';
 import { LoginThrottleService } from './login-throttle.service';
+import {
+  SessionsService,
+  type InfosClient,
+  type JetonsSession,
+  type UtilisateurJeton,
+} from './sessions.service';
+import { MESSAGES_SESSION } from './sessions.constants';
+import { SessionClientType } from 'generated/prisma/enums';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import {
@@ -30,6 +38,7 @@ export type UserPayload = {
   userId: string;
   role: string;
   structureId?: string;
+  sid?: string;
 };
 
 /** Champs lus pour ouvrir une session (connexion classique et connexion démo). */
@@ -61,7 +70,30 @@ export class AuthService {
     private readonly loginThrottle: LoginThrottleService,
     private readonly rolesService: RolesService,
     private readonly permissionsService: PermissionsService,
+    private readonly sessions: SessionsService,
   ) {}
+
+  /**
+   * Ouvre la session et renvoie les jetons selon le client.
+   * Web : refresh uniquement dans le cookie httpOnly. Mobile : refresh dans le JSON, sans cookie.
+   */
+  private async emettreJetons(
+    user: UtilisateurJeton,
+    res: Response,
+    client: InfosClient,
+  ) {
+    const jetons = await this.sessions.ouvrir(user, client);
+    if (client.type === SessionClientType.MOBILE) {
+      return {
+        access_token: jetons.access_token,
+        refreshToken: jetons.refreshToken,
+        expiresIn: jetons.expiresIn,
+        sessionId: jetons.sessionId,
+      };
+    }
+    this.sessions.poserCookie(res, jetons.refreshToken, jetons.dureeMs);
+    return { access_token: jetons.access_token };
+  }
 
   /** Résout l'appRoleId à assigner (non bloquant : null en cas d'échec, le backfill rattrape). */
   private async resolveAppRoleId(
@@ -80,7 +112,12 @@ export class AuthService {
 
   // ─── Login ────────────────────────────────────────────────────
 
-  async login(loginDto: LoginDto, res: Response, ip: string) {
+  async login(
+    loginDto: LoginDto,
+    res: Response,
+    ip: string,
+    client: InfosClient,
+  ) {
     const { email, password } = loginDto;
 
     // Anti-brute-force : blocage dur (429 + Retry-After) si seuil dépassé, sinon backoff progressif.
@@ -120,7 +157,7 @@ export class AuthService {
     // Connexion réussie → remise à zéro des compteurs anti-brute-force.
     await this.loginThrottle.reset(email, ip);
 
-    return this.ouvrirSession(user, res);
+    return this.ouvrirSession(user, res, client);
   }
 
   // ─── Connexion démo (mode démo uniquement) ────────────────────
@@ -131,7 +168,7 @@ export class AuthService {
    * Refuse (403) tout compte absent, inactif ou dont l'email n'est pas en
    * `@demo.medconnecte.gn`, y compris un vrai compte. 404 si le mode est inactif.
    */
-  async connexionDemo(userId: string, res: Response) {
+  async connexionDemo(userId: string, res: Response, client: InfosClient) {
     if (!estModeDemoActif()) {
       throw new NotFoundException();
     }
@@ -147,40 +184,27 @@ export class AuthService {
       );
     }
 
-    return this.ouvrirSession(user, res);
+    return this.ouvrirSession(user, res, client);
   }
 
-  /** Émet les jetons, enregistre le refresh haché, pose le cookie et construit la réponse de connexion. */
-  private async ouvrirSession(user: UtilisateurSession, res: Response) {
-    const { access_token, refreshToken, refreshTokenExpires } =
-      this.generateTokens({
-        userId: user.id,
-        role: user.role,
-        structureId: user.structureId ?? undefined,
-      });
+  /** Ouvre la session et construit la réponse de connexion. */
+  private async ouvrirSession(
+    user: UtilisateurSession,
+    res: Response,
+    client: InfosClient,
+  ) {
+    const jetons = await this.emettreJetons(
+      { id: user.id, role: user.role, structureId: user.structureId },
+      res,
+      client,
+    );
 
-    const hashedRefresh = crypto
-      .createHash('sha256')
-      .update(refreshToken)
-      .digest('hex');
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { refreshToken: hashedRefresh, refreshTokenExpires },
-    });
-
-    // Envoyer le refresh token dans un cookie sécurisé
-    res.cookie('refresh_token', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
-      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 jours
-    });
-
-    // Le refresh token n'est JAMAIS renvoyé dans le JSON : uniquement via le cookie
-    // httpOnly ci-dessus (sinon le bénéfice httpOnly est annulé — exposition XSS).
+    // Web : le refresh token n'est JAMAIS renvoyé dans le JSON, uniquement via le cookie
+    // httpOnly (sinon le bénéfice httpOnly est annulé, exposition XSS).
+    // Mobile : le refresh est dans le JSON, sans cookie.
     return {
       data: {
-        access_token: access_token,
+        ...jetons,
         user: {
           id: user.id,
           email: user.email,
@@ -200,7 +224,7 @@ export class AuthService {
 
   // ─── Register (patients uniquement) ──────────────────────────
 
-  async register(registerDto: RegisterDto, res: Response) {
+  async register(registerDto: RegisterDto, res: Response, client: InfosClient) {
     const {
       nom,
       prenom,
@@ -248,35 +272,21 @@ export class AuthService {
       },
     });
 
-    const { access_token, refreshToken, refreshTokenExpires } =
-      this.generateTokens({ userId: user.id, role: user.role });
-
-    const hashedRefresh = crypto
-      .createHash('sha256')
-      .update(refreshToken)
-      .digest('hex');
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { refreshToken: hashedRefresh, refreshTokenExpires },
-    });
-
-    // Envoyer le refresh token dans un cookie sécurisé
-    res.cookie('refresh_token', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
-      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 jours
-    });
+    const jetons = await this.emettreJetons(
+      { id: user.id, role: user.role, structureId: null },
+      res,
+      client,
+    );
 
     // Email de bienvenue (non bloquant)
     this.emailService
       .sendWelcomeEmail(user.email, user.nom, user.prenom)
       .catch((e) => this.logger.error('Email de bienvenue échoué', e));
 
-    // Refresh token uniquement dans le cookie httpOnly (cf. login).
+    // Refresh token : cookie httpOnly pour le web, JSON pour le mobile (cf. login).
     return {
       data: {
-        access_token: access_token,
+        ...jetons,
         user: {
           id: user.id,
           email: user.email,
@@ -565,6 +575,7 @@ export class AuthService {
     return bcrypt.hash(password, 12);
   }
 
+  // Inutilisée depuis TB3 (sessions par appareil, SessionsService) ; à retirer avec la colonne User.refreshToken.
   generateTokens(payload: UserPayload) {
     const access_token = this.jwtService.sign(payload, {
       secret: process.env.JWT_SECRET,
@@ -577,6 +588,7 @@ export class AuthService {
     return { access_token, refreshToken, refreshTokenExpires };
   }
 
+  // Inutilisée depuis TB3 (sessions par appareil, SessionsService) ; à retirer avec la colonne User.refreshToken.
   generateToken(payload: UserPayload): string {
     return this.jwtService.sign(payload, {
       secret: process.env.JWT_SECRET,
@@ -584,71 +596,76 @@ export class AuthService {
     });
   }
 
-  async refreshAccessToken(rawRefreshToken: string, res: Response) {
-    const hashed = crypto
-      .createHash('sha256')
-      .update(rawRefreshToken)
-      .digest('hex');
+  /**
+   * Renouvelle les jetons. Web : refresh lu dans le cookie, nouveau cookie posé, jamais dans le JSON.
+   * Mobile : refresh lu dans le corps, renvoyé dans le JSON, aucun cookie.
+   */
+  async refreshAccessToken(
+    refresh: string | undefined,
+    res: Response,
+    type: SessionClientType,
+  ) {
+    const web = type === SessionClientType.WEB;
+    if (!refresh) {
+      if (web) this.sessions.effacerCookie(res);
+      throw new UnauthorizedException({
+        message: MESSAGES_SESSION.expiree,
+        code: 'SESSION_EXPIREE',
+      });
+    }
 
-    const user = await this.prisma.user.findFirst({
-      where: {
-        refreshToken: hashed,
-        refreshTokenExpires: { gt: new Date() },
-        isActive: true,
-      },
-    });
+    let jetons: JetonsSession;
+    try {
+      jetons = await this.sessions.renouveler(refresh, type);
+    } catch (e) {
+      if (web) this.sessions.effacerCookie(res);
+      throw e;
+    }
 
-    if (!user)
-      throw new UnauthorizedException(
-        'Refresh token invalide ou expiré. Reconnectez-vous.',
-      );
-
-    // Rotation : générer un nouveau refresh token à chaque appel
-    const {
-      access_token,
-      refreshToken: newRefresh,
-      refreshTokenExpires,
-    } = this.generateTokens({
-      userId: user.id,
-      role: user.role,
-      structureId: user.structureId ?? undefined,
-    });
-
-    const hashedNew = crypto
-      .createHash('sha256')
-      .update(newRefresh)
-      .digest('hex');
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { refreshToken: hashedNew, refreshTokenExpires },
-    });
-
-    // Mettre à jour le cookie avec le nouveau refresh token
-    res.cookie('refresh_token', newRefresh, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-    });
-
-    // Nouveau refresh token uniquement dans le cookie httpOnly (rotation).
+    if (web) {
+      this.sessions.poserCookie(res, jetons.refreshToken, jetons.dureeMs);
+      return {
+        data: { access_token: jetons.access_token },
+        message: 'Token renouvelé',
+        success: true,
+      };
+    }
     return {
       data: {
-        access_token,
+        access_token: jetons.access_token,
+        refreshToken: jetons.refreshToken,
+        expiresIn: jetons.expiresIn,
+        sessionId: jetons.sessionId,
       },
       message: 'Token renouvelé',
       success: true,
     };
   }
 
-  async logout(userId: string, res: Response) {
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { refreshToken: null, refreshTokenExpires: null },
-    });
+  /** Déconnexion de cet appareil : par le refresh, ou par le sid d'un jeton d'accès valide. Répond toujours 200. */
+  async logout(
+    entree: { refresh?: string; jetonAcces?: string },
+    res: Response,
+    type: SessionClientType,
+  ) {
+    let userId: string | undefined;
+    let sid: string | undefined;
+    if (entree.jetonAcces) {
+      try {
+        const p = await this.jwtService.verifyAsync<{
+          userId: string;
+          sid?: string;
+        }>(entree.jetonAcces, { secret: process.env.JWT_SECRET });
+        userId = p.userId;
+        sid = p.sid;
+      } catch {
+        /* jeton expiré ou invalide : la déconnexion continue avec le refresh */
+      }
+    }
 
-    // Effacer le cookie
-    res.clearCookie('refresh_token');
+    await this.sessions.fermer({ refresh: entree.refresh, sid, userId });
+
+    if (type === SessionClientType.WEB) this.sessions.effacerCookie(res);
 
     return { data: null, message: 'Déconnexion réussie', success: true };
   }
