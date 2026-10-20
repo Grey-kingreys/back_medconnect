@@ -1,13 +1,27 @@
 /**
  * Codes machine stables, renvoyés dans le champ `code` du corps d'erreur et lus
- * par l'application mobile. Le web ne lit que `message`. TB2 complétera ce catalogue.
+ * par l'application mobile. Le web ne lit que `message`. Ajout pur : le corps
+ * garde `statusCode`, `message` et `error`.
  */
 export const CODES_ERREUR = [
+  // Session expirée, se reconnecter.
   'SESSION_EXPIREE',
+  // Session déconnectée depuis un autre appareil ou par sécurité.
   'SESSION_REVOQUEE',
+  // Refresh déjà utilisé, session révoquée par sécurité.
   'REFRESH_REUTILISE',
+  // Compte désactivé par un administrateur.
   'COMPTE_DESACTIVE',
+  // Saisie invalide, champs fautifs dans `champs` (nom et contraintes, jamais la valeur).
   'VALIDATION',
+  // Accès refusé (attribué par défaut à toute 403 sans code).
+  'PERMISSION_REFUSEE',
+  // L'alerte SOS est réservée aux patients.
+  'SOS_ROLE_INTERDIT',
+  // Une alerte est déjà en cours, `donnees.peutRelancerA` donne l'heure de relance possible.
+  'SOS_DEJA_ACTIF',
+  // Changement de statut impossible depuis le statut actuel.
+  'TRANSITION_INTERDITE',
 ] as const;
 
 export type CodeErreur = (typeof CODES_ERREUR)[number];

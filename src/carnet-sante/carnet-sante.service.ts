@@ -990,6 +990,20 @@ export class CarnetSanteService {
           'Vous pouvez seulement annuler votre rendez-vous.',
         );
       }
+      // Annulation permise seulement avant le rendez-vous et avant toute décision finale.
+      const messagesTransition: Partial<Record<AppointmentStatus, string>> = {
+        TERMINE: 'Ce rendez-vous a déjà eu lieu, il ne peut plus être annulé.',
+        REFUSE:
+          "Ce rendez-vous a été refusé par l'établissement, il n'y a rien à annuler.",
+        ANNULE: 'Ce rendez-vous est déjà annulé.',
+      };
+      const messageTransition = messagesTransition[rv.status];
+      if (messageTransition) {
+        throw new ConflictException({
+          message: messageTransition,
+          code: 'TRANSITION_INTERDITE',
+        });
+      }
     } else {
       // Soignant : permission d'écriture + lien avec le rendez-vous (médecin ou structure).
       const aPermission = await this.permissionsService.hasPermissions(
@@ -1404,6 +1418,7 @@ export class CarnetSanteService {
           statusCode: 409,
           error: 'Conflict',
           message,
+          code: 'SOS_DEJA_ACTIF',
           peutRelancerA: peutRelancerA.toISOString(),
         });
       }

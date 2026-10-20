@@ -1,15 +1,19 @@
 import {
   ArgumentsHost,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Logger,
   NotFoundException,
   PayloadTooLargeException,
   UnauthorizedException,
+  ValidationPipe,
 } from '@nestjs/common';
 import { ThrottlerException } from '@nestjs/throttler';
 import { Prisma } from 'generated/prisma/client';
+import { UpdateRendezVousStatusDto } from 'src/carnet-sante/dto/carnet-sante.dto';
 import { AllExceptionsFilter, MESSAGES } from './all-exceptions.filter';
+import { fabriquerErreurValidation } from './erreur-validation';
 
 /**
  * Tests unitaires du filtre global : ArgumentsHost et Response simulés.
@@ -56,6 +60,129 @@ describe('AllExceptionsFilter', () => {
       statusCode: 403,
       message,
       error: 'Accès refusé',
+      code: 'PERMISSION_REFUSEE',
+    });
+  });
+
+  it('attribue PERMISSION_REFUSEE à un 403 anglais par défaut', () => {
+    filtre.catch(new ForbiddenException(), host);
+    expect(corpsRenvoye().code).toBe('PERMISSION_REFUSEE');
+  });
+
+  it("conserve le code d'un 403 qui en porte un", () => {
+    filtre.catch(
+      new ForbiddenException({
+        message: 'Message projet',
+        code: 'SOS_ROLE_INTERDIT',
+      }),
+      host,
+    );
+    expect(corpsRenvoye().code).toBe('SOS_ROLE_INTERDIT');
+  });
+
+  it('recopie peutRelancerA dans donnees et ignore les autres clés', () => {
+    filtre.catch(
+      new ConflictException({
+        message: 'Message projet',
+        code: 'SOS_DEJA_ACTIF',
+        peutRelancerA: '2026-10-20T10:00:00.000Z',
+        autre: 'x',
+      }),
+      host,
+    );
+    expect(corpsRenvoye()).toEqual({
+      statusCode: 409,
+      message: 'Message projet',
+      error: 'Déjà existant',
+      code: 'SOS_DEJA_ACTIF',
+      donnees: { peutRelancerA: '2026-10-20T10:00:00.000Z' },
+    });
+  });
+
+  it("n'ajoute pas donnees sans clé autorisée", () => {
+    filtre.catch(
+      new ConflictException({ message: 'Message projet', autre: 'x' }),
+      host,
+    );
+    expect(corpsRenvoye()).not.toHaveProperty('donnees');
+  });
+
+  it('ignore champs si le code n’est pas VALIDATION', () => {
+    filtre.catch(
+      new BadRequestException({
+        message: 'Message projet',
+        champs: [{ champ: 'a', contraintes: ['b'] }],
+      }),
+      host,
+    );
+    expect(corpsRenvoye()).not.toHaveProperty('champs');
+  });
+
+  it('assainit champs : ni valeur ni élément invalide', () => {
+    filtre.catch(
+      new BadRequestException({
+        message: ['x'],
+        code: 'VALIDATION',
+        champs: [{ champ: 'a', contraintes: ['b', 3], valeur: 'SECRET' }, 'x'],
+      }),
+      host,
+    );
+    expect(corpsRenvoye().champs).toEqual([{ champ: 'a', contraintes: ['b'] }]);
+  });
+
+  describe('avec le vrai ValidationPipe', () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      exceptionFactory: fabriquerErreurValidation,
+    });
+    const rejet = () =>
+      pipe
+        .transform(
+          { status: 'PIRATE', intrus: 'SECRET-789' },
+          { type: 'body', metatype: UpdateRendezVousStatusDto },
+        )
+        .then(
+          () => {
+            throw new Error('Le pipe aurait dû rejeter la saisie.');
+          },
+          (e: unknown) => e,
+        );
+
+    const verifier = (corps: Record<string, unknown>) => {
+      expect(corps.statusCode).toBe(400);
+      expect(corps.message).toBe(MESSAGES.validation);
+      expect(corps.code).toBe('VALIDATION');
+      expect(corps.champs).toEqual(
+        expect.arrayContaining([
+          { champ: 'status', contraintes: ['isEnum'] },
+          { champ: 'intrus', contraintes: ['whitelistValidation'] },
+        ]),
+      );
+      const sansDetails = { ...corps };
+      delete sansDetails.details;
+      const texte = JSON.stringify(sansDetails);
+      expect(texte).not.toContain('PIRATE');
+      expect(texte).not.toContain('SECRET-789');
+    };
+
+    it('renvoie code et champs, sans la valeur saisie', async () => {
+      filtre.catch(await rejet(), host);
+      verifier(corpsRenvoye());
+      expect(corpsRenvoye()).toHaveProperty('details');
+    });
+
+    it('renvoie code et champs en production, sans details', async () => {
+      const ancien = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      try {
+        filtre.catch(await rejet(), host);
+        verifier(corpsRenvoye());
+        expect(corpsRenvoye()).not.toHaveProperty('details');
+      } finally {
+        process.env.NODE_ENV = ancien;
+      }
     });
   });
 

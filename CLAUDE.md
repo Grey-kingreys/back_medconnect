@@ -54,7 +54,7 @@ File asynchrone dans `src/queue/` (**BullMQ**).
   - Durées : jeton d'accès 15 min portant `sid` ; sessions glissantes de 30 jours (web,
     mobile patient) et 12 h (mobile autres rôles), Q11 révisable.
   - `POST /auth/logout` est public (refresh seul ou jeton d'accès).
-  - Codes machine du champ `code` : catalogue `src/common/filters/codes-erreur.ts`.
+  - Erreurs (TB2) : le corps `{ statusCode, message, error }` peut porter `code` (catalogue `src/common/filters/codes-erreur.ts`, toute 403 sans code reçoit PERMISSION_REFUSEE), `champs` pour VALIDATION (nom et contraintes, jamais la valeur, y compris en production) et `donnees` (liste blanche, aujourd'hui `peutRelancerA` du 409 SOS_DEJA_ACTIF). Le SOS est réservé au rôle PATIENT (403 SOS_ROLE_INTERDIT) ; le patient n'annule un rendez-vous que depuis PROGRAMME, EN_ATTENTE ou CONFIRME (409 TRANSITION_INTERDITE).
   - Révocation (TB4) : routes `GET /auth/sessions`, `DELETE /auth/sessions/:id` et
     `POST /auth/sessions/revoquer-autres`. Le changement de mot de passe déconnecte les
     autres appareils (`deconnecterAutresAppareils`, vrai par défaut) ; la réinitialisation

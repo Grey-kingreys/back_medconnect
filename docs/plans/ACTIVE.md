@@ -10,13 +10,14 @@ Détails: docs/plans/runs/2026-10-20-lot1/ (lot 1 du plan mobile côté back ; r
 
 | ID | Tâche | Tier | Statut | Tent. |
 |----|-------|------|--------|-------|
-| B1 | TB4 révocation des sessions, compte désactivé, socket sessionRevoquee, purge | spécifié | validé par le chef d'équipe back (rapports/B1-chef.md) | 1 |
-| B2 | TB1 limiteur par utilisateur, stockage Redis, SOS permissif si Redis tombe | spécifié | à faire | 0 |
+| B3 | TB2 codes d'erreur stables (champs, donnees, PERMISSION_REFUSEE), SOS réservé au patient, annulation de rendez-vous contrôlée (tasks/B3-codes-erreur-controles.md) | spécifié | à faire | 0 |
 
 ## Faites (preuve = commit)
 
 | ID | Tâche | Commit |
 |----|-------|--------|
+| B1 | TB4 révocation des sessions, compte désactivé, socket sessionRevoquee, purge | 0e58e81 |
+| B2 | TB1 limiteur par utilisateur, stockage Redis, SOS permissif si Redis tombe | cd0b4a8 |
 
 ## Questions parquées
 
@@ -26,8 +27,8 @@ Détails: docs/plans/runs/2026-10-20-lot1/ (lot 1 du plan mobile côté back ; r
 
 ## Dernières décisions (5 max, historique complet dans decisions.md)
 
-- D14 Limiteur compté par utilisateur (jeton Bearer vérifié dans la garde globale), sinon par IP (révisable)
-- D15 register, login, forgot-password, reset-password restent comptés par IP (révisable)
-- D16 Stockage Redis maison (Lua atomique) pour toutes les routes limitées (révisable)
-- D17 Redis absent ou lent : SOS laissé passer, autres routes comptées en mémoire locale (révisable)
-- D18 File email et SMS du SOS bornée à 2 s, erreur journalisée sans faire échouer le SOS (révisable)
+- D21 `champs` de VALIDATION = nom et clés de contraintes, jamais la valeur, aussi en production (révisable)
+- D22 Toute 403 sans code reçoit PERMISSION_REFUSEE dans le filtre (révisable)
+- D24 SOS réservé au rôle PATIENT, contrôle dans le contrôleur (révisable)
+- D25 Annulation patient permise depuis PROGRAMME, EN_ATTENTE, CONFIRME ; 409 TRANSITION_INTERDITE sinon (révisable)
+- D26 Branche soignant de updateRendezVousStatus non contrôlée dans B3 (révisable)

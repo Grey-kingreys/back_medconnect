@@ -11,6 +11,7 @@ import {
   Req,
   HttpCode,
   HttpStatus,
+  ForbiddenException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -289,6 +290,11 @@ export class CarnetSanteController {
 
   @Post('rendez-vous/:id/status')
   @ApiOperation({ summary: "Mettre à jour le statut d'un rendez-vous" })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Annulation impossible depuis le statut actuel (code TRANSITION_INTERDITE).',
+  })
   updateRendezVousStatus(
     @Param('id') id: string,
     @Body() dto: UpdateRendezVousStatusDto,
@@ -350,7 +356,24 @@ export class CarnetSanteController {
   @LimitePermissiveSiRedisIndisponible()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Lancer une alerte SOS' })
+  @ApiResponse({
+    status: 403,
+    description: 'Compte non patient (code SOS_ROLE_INTERDIT).',
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Alerte déjà en cours (code SOS_DEJA_ACTIF, donnees.peutRelancerA).',
+  })
   createUrgence(@Req() req: RequestWithUser, @Body() dto: CreateUrgenceDto) {
+    // Un soignant victime d'un malaise utilise son compte patient (plan mobile, B33).
+    if (req.user.role !== 'PATIENT') {
+      throw new ForbiddenException({
+        message:
+          "L'alerte SOS est réservée aux comptes patients. En cas d'urgence, appelez directement les secours ou connectez-vous avec votre compte patient.",
+        code: 'SOS_ROLE_INTERDIT',
+      });
+    }
     return this.carnetSanteService.createUrgence(req.user.userId, dto);
   }
 

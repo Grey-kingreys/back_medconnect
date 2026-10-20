@@ -9,6 +9,7 @@ import {
 import type { Request, Response } from 'express';
 import { Prisma } from 'generated/prisma/client';
 import { type CodeErreur, estCodeErreur } from './codes-erreur';
+import type { ChampFautif } from './erreur-validation';
 
 // Messages affichés tels quels par le front (audience non-dev).
 export const MESSAGES = {
@@ -42,6 +43,9 @@ const LIBELLES: Record<number, string> = {
   500: 'Erreur interne',
 };
 
+// Champs d'une exception recopiés dans `donnees` (liste blanche ; TB10b ajoutera finDelaiAt).
+const DONNEES_AUTORISEES = ['peutRelancerA'] as const;
+
 // Messages anglais par défaut de Nest et d'Express (libellés HTTP standard).
 const MESSAGES_PAR_DEFAUT = new Set(
   [
@@ -71,6 +75,8 @@ interface CorpsErreur {
   error: string;
   details?: unknown;
   code?: CodeErreur;
+  champs?: ChampFautif[];
+  donnees?: { peutRelancerA?: string };
 }
 
 /**
@@ -122,6 +128,20 @@ export class AllExceptionsFilter implements ExceptionFilter {
           ? (reponseBrute as { code?: unknown }).code
           : undefined;
       if (estCodeErreur(code)) resultat.code = code;
+      else if (statut === 403) resultat.code = 'PERMISSION_REFUSEE';
+
+      if (typeof reponseBrute === 'object' && reponseBrute !== null) {
+        const brut = reponseBrute as Record<string, unknown>;
+        if (resultat.code === 'VALIDATION' && Array.isArray(brut.champs)) {
+          resultat.champs = assainirChamps(brut.champs);
+        }
+        for (const cle of DONNEES_AUTORISEES) {
+          const valeur = brut[cle];
+          if (typeof valeur === 'string') {
+            resultat.donnees = { ...resultat.donnees, [cle]: valeur };
+          }
+        }
+      }
       return resultat;
     }
 
@@ -191,6 +211,26 @@ function corps(statusCode: number, message: string): CorpsErreur {
       LIBELLES[statusCode] ??
       (statusCode >= 500 ? LIBELLES[500] : 'Demande refusée'),
   };
+}
+
+// Ne garde que `champ` et `contraintes` : aucune autre clé, donc jamais de valeur.
+function assainirChamps(brut: unknown[]): ChampFautif[] {
+  const resultat: ChampFautif[] = [];
+  for (const element of brut) {
+    if (typeof element !== 'object' || element === null) continue;
+    const { champ, contraintes } = element as {
+      champ?: unknown;
+      contraintes?: unknown;
+    };
+    if (typeof champ !== 'string' || !Array.isArray(contraintes)) continue;
+    resultat.push({
+      champ,
+      contraintes: contraintes.filter(
+        (c): c is string => typeof c === 'string',
+      ),
+    });
+  }
+  return resultat;
 }
 
 function messageParStatut(statut: number): string {

@@ -107,7 +107,9 @@ describe('CarnetSanteService - alerte SOS (délai, anti-relance, diffusion)', ()
       const corps = (erreur as ConflictException).getResponse() as {
         message: string;
         peutRelancerA: string;
+        code: string;
       };
+      expect(corps.code).toBe('SOS_DEJA_ACTIF');
       expect(typeof corps.message).toBe('string');
       expect(corps.message).toContain('Clinique X');
       expect(corps.message).toContain('environ 7 minutes');
@@ -172,7 +174,9 @@ describe('CarnetSanteService - alerte SOS (délai, anti-relance, diffusion)', ()
       expect(erreur).toBeInstanceOf(ConflictException);
       const corps = (erreur as ConflictException).getResponse() as {
         message: string;
+        code: string;
       };
+      expect(corps.code).toBe('SOS_DEJA_ACTIF');
       expect(corps.message).toContain('environ 3 minutes');
       expect(prisma.urgence.create).not.toHaveBeenCalled();
     });
