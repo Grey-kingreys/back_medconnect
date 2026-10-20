@@ -1,406 +1,476 @@
+// Dette de typage préexistante, backlog points 21 et 22
+
 import {
-    IsOptional,
-    IsString,
-    IsEnum,
-    IsArray,
-    IsNumber,
-    IsDateString,
-    IsNotEmpty,
-    IsBoolean,
-    IsUrl,
-    IsUUID,
-    Min,
-    Length,
+  IsOptional,
+  IsString,
+  IsEnum,
+  IsArray,
+  IsNumber,
+  IsDateString,
+  IsNotEmpty,
+  IsUUID,
+  IsInt,
+  Min,
+  Max,
+  Length,
+  ArrayMinSize,
+  ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Expose, Exclude, Type, Transform } from 'class-transformer';
-
+import { AppointmentStatus } from 'generated/prisma/client';
+import { UrgenceStatus } from 'generated/prisma/enums';
 
 // ─── Profil Médical ───────────────────────────────────────────────────────────
 
 export enum GroupeSanguinEnum {
-    A_POSITIF = 'A_POSITIF',
-    A_NEGATIF = 'A_NEGATIF',
-    B_POSITIF = 'B_POSITIF',
-    B_NEGATIF = 'B_NEGATIF',
-    AB_POSITIF = 'AB_POSITIF',
-    AB_NEGATIF = 'AB_NEGATIF',
-    O_POSITIF = 'O_POSITIF',
-    O_NEGATIF = 'O_NEGATIF',
-    INCONNU = 'INCONNU',
+  A_POSITIF = 'A_POSITIF',
+  A_NEGATIF = 'A_NEGATIF',
+  B_POSITIF = 'B_POSITIF',
+  B_NEGATIF = 'B_NEGATIF',
+  AB_POSITIF = 'AB_POSITIF',
+  AB_NEGATIF = 'AB_NEGATIF',
+  O_POSITIF = 'O_POSITIF',
+  O_NEGATIF = 'O_NEGATIF',
+  INCONNU = 'INCONNU',
 }
 
 export class UpsertProfilMedicalDto {
-    @ApiPropertyOptional({ enum: GroupeSanguinEnum })
-    @IsOptional()
-    @IsEnum(GroupeSanguinEnum)
-    groupeSanguin?: GroupeSanguinEnum;
+  @ApiPropertyOptional({ enum: GroupeSanguinEnum })
+  @IsOptional()
+  @IsEnum(GroupeSanguinEnum)
+  groupeSanguin?: GroupeSanguinEnum;
 
-    @ApiPropertyOptional({ example: '["Pénicilline", "Arachides"]' })
-    @IsOptional()
-    @IsString()
-    allergies?: string;
+  @ApiPropertyOptional({ example: '["Pénicilline", "Arachides"]' })
+  @IsOptional()
+  @IsString()
+  allergies?: string;
 
-    @ApiPropertyOptional({ example: '["Diabète type 2", "Hypertension"]' })
-    @IsOptional()
-    @IsString()
-    pathologies?: string;
+  @ApiPropertyOptional({ example: '["Diabète type 2", "Hypertension"]' })
+  @IsOptional()
+  @IsString()
+  pathologies?: string;
 
-    @ApiPropertyOptional({ example: '["Metformine 500mg", "Amlodipine 5mg"]' })
-    @IsOptional()
-    @IsString()
-    traitements?: string;
+  @ApiPropertyOptional({ example: '["Metformine 500mg", "Amlodipine 5mg"]' })
+  @IsOptional()
+  @IsString()
+  traitements?: string;
 
-    @ApiPropertyOptional({ example: 175 })
-    @IsOptional()
-    @IsNumber()
-    @Min(0)
-    taille?: number;
+  @ApiPropertyOptional({ example: 175 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  taille?: number;
 
-    @ApiPropertyOptional({ example: 70 })
-    @IsOptional()
-    @IsNumber()
-    @Min(0)
-    poids?: number;
+  @ApiPropertyOptional({ example: 70 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  poids?: number;
 
-    @ApiPropertyOptional({ example: '1990-05-15' })
-    @IsOptional()
-    @IsDateString()
-    dateNaissance?: string;
+  @ApiPropertyOptional({ example: '1990-05-15' })
+  @IsOptional()
+  @IsDateString()
+  dateNaissance?: string;
 
-    @ApiPropertyOptional({ example: 'M', description: 'M | F | Autre' })
-    @IsOptional()
-    @IsString()
-    genre?: string;
+  @ApiPropertyOptional({ example: 'M', description: 'M | F | Autre' })
+  @IsOptional()
+  @IsString()
+  genre?: string;
 
-    @ApiPropertyOptional({ example: 'Mamadou Diallo' })
-    @IsOptional()
-    @IsString()
-    contactNom?: string;
+  @ApiPropertyOptional({ example: 'Mamadou Diallo' })
+  @IsOptional()
+  @IsString()
+  contactNom?: string;
 
-    @ApiPropertyOptional({ example: '+224622000000' })
-    @IsOptional()
-    @IsString()
-    contactTelephone?: string;
+  @ApiPropertyOptional({ example: '+224622000000' })
+  @IsOptional()
+  @IsString()
+  contactTelephone?: string;
 
-    @ApiPropertyOptional({ example: 'proche@email.com' })
-    @IsOptional()
-    @IsString()
-    contactEmail?: string;
+  @ApiPropertyOptional({ example: 'proche@email.com' })
+  @IsOptional()
+  @IsString()
+  contactEmail?: string;
 }
 
 // ─── Consultation ─────────────────────────────────────────────────────────────
 
 export class CreateConsultationDto {
-    @ApiProperty({ example: 'Fièvre et maux de tête depuis 3 jours' })
-    @IsNotEmpty()
-    @IsString()
-    @Length(3, 500)
-    motif: string;
+  @ApiProperty({ example: 'Fièvre et maux de tête depuis 3 jours' })
+  @IsNotEmpty()
+  @IsString()
+  @Length(3, 500)
+  motif: string;
 
-    @ApiPropertyOptional({ description: 'ID du patient (pour les médecins)' })
-    @IsOptional()
-    @IsString()
-    patientId?: string;
+  @ApiPropertyOptional({ description: 'ID du patient (pour les médecins)' })
+  @IsOptional()
+  @IsString()
+  patientId?: string;
 
-    @ApiPropertyOptional({ example: 'Dr. Kouyaté Mamadou' })
-    @IsOptional()
-    @IsString()
-    @Length(0, 150)
-    medecinNom?: string;
+  @ApiPropertyOptional({ example: 'Dr. Kouyaté Mamadou' })
+  @IsOptional()
+  @IsString()
+  @Length(0, 150)
+  medecinNom?: string;
 
-    @ApiPropertyOptional({ example: 'Paludisme simple' })
-    @IsOptional()
-    @IsString()
-    @Length(0, 500)
-    diagnostic?: string;
+  @ApiPropertyOptional({ example: 'Paludisme simple' })
+  @IsOptional()
+  @IsString()
+  @Length(0, 500)
+  diagnostic?: string;
 
-    @ApiPropertyOptional({ example: 'Patient à revoir dans 5 jours' })
-    @IsOptional()
-    @IsString()
-    @Length(0, 2000)
-    notes?: string;
+  @ApiPropertyOptional({ example: 'Patient à revoir dans 5 jours' })
+  @IsOptional()
+  @IsString()
+  @Length(0, 2000)
+  notes?: string;
 
-    @ApiPropertyOptional({ example: '2026-04-20T10:00:00Z' })
-    @IsOptional()
-    @IsDateString()
-    dateConsultation?: string;
+  @ApiPropertyOptional({ example: '2026-04-20T10:00:00Z' })
+  @IsOptional()
+  @IsDateString()
+  dateConsultation?: string;
 
-    @ApiPropertyOptional({ description: 'ID de la structure (si applicable)' })
-    @IsOptional()
-    @IsString()
-    structureId?: string;
+  @ApiPropertyOptional({ description: 'ID de la structure (si applicable)' })
+  @IsOptional()
+  @IsString()
+  structureId?: string;
 }
 
 // ─── Ordonnance ───────────────────────────────────────────────────────────────
 
 export class MedicamentOrdonnanceDto {
-    @ApiProperty({ example: 'Coartem 20/120mg' })
-    @IsNotEmpty()
-    @IsString()
-    nom: string;
+  @ApiProperty({ example: 'Coartem 20/120mg' })
+  @IsNotEmpty({ message: 'Indiquez le nom du médicament.' })
+  @IsString()
+  nom: string;
 
-    @ApiProperty({ example: '2 comprimés matin et soir' })
-    @IsNotEmpty()
-    @IsString()
-    dosage: string;
+  @ApiProperty({ example: '2 comprimés matin et soir' })
+  @IsNotEmpty({ message: 'Indiquez la posologie.' })
+  @IsString()
+  dosage: string;
 
-    @ApiProperty({ example: '3 jours' })
-    @IsNotEmpty()
-    @IsString()
-    duree: string;
+  @ApiProperty({ example: '3 jours' })
+  @IsNotEmpty({ message: 'Indiquez la durée du traitement.' })
+  @IsString()
+  duree: string;
 
-    @ApiPropertyOptional({ example: 'Prendre pendant les repas' })
-    @IsOptional()
-    @IsString()
-    instructions?: string;
+  @ApiPropertyOptional({ example: 'Prendre pendant les repas' })
+  @IsOptional()
+  @IsString()
+  instructions?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Identifiant du médicament dans le catalogue, absent pour une saisie libre',
+  })
+  @IsOptional()
+  @IsUUID('4', {
+    message:
+      "Ce médicament n'a pas été reconnu dans le catalogue. Choisissez-le à nouveau dans la liste ou saisissez son nom librement.",
+  })
+  medicamentId?: string;
 }
 
 export class CreateOrdonnanceDto {
-    @ApiPropertyOptional({ description: 'ID de la consultation liée' })
-    @IsOptional()
-    @IsString()
-    consultationId?: string;
+  @ApiPropertyOptional({ description: 'ID de la consultation liée' })
+  @IsOptional()
+  @IsString()
+  consultationId?: string;
 
-    @ApiPropertyOptional({ example: 'Dr. Kouyaté' })
-    @IsOptional()
-    @IsString()
-    medecinNom?: string;
+  @ApiPropertyOptional({ example: 'Dr. Kouyaté' })
+  @IsOptional()
+  @IsString()
+  medecinNom?: string;
 
-    @ApiProperty({ type: [MedicamentOrdonnanceDto] })
-    @IsArray()
-    @Type(() => MedicamentOrdonnanceDto)
-    medicaments: MedicamentOrdonnanceDto[];
+  @ApiProperty({ type: [MedicamentOrdonnanceDto] })
+  @IsArray()
+  @ArrayMinSize(1, {
+    message: "Ajoutez au moins un médicament à l'ordonnance.",
+  })
+  @ValidateNested({ each: true })
+  @Type(() => MedicamentOrdonnanceDto)
+  medicaments: MedicamentOrdonnanceDto[];
 
-    @ApiPropertyOptional({ description: 'ID du patient (pour les médecins)' })
-    @IsOptional()
-    @IsString()
-    patientId?: string;
+  @ApiPropertyOptional({ description: 'ID du patient (pour les médecins)' })
+  @IsOptional()
+  @IsString()
+  patientId?: string;
 
-    @ApiPropertyOptional()
-    @IsOptional()
-    @IsString()
-    notes?: string;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  notes?: string;
 
-    @ApiPropertyOptional({ example: '2026-07-01' })
-    @IsOptional()
-    @IsDateString()
-    dateExpiration?: string;
+  @ApiPropertyOptional({ example: '2026-07-01' })
+  @IsOptional()
+  @IsDateString()
+  dateExpiration?: string;
 
-    @ApiPropertyOptional({ description: 'ID du StoredFile (ordonnance scannée, bucket privé) confirmé.' })
-    @IsOptional()
-    @IsUUID()
-    scanFileId?: string;
+  @ApiPropertyOptional({
+    description:
+      'ID du StoredFile (ordonnance scannée, bucket privé) confirmé.',
+  })
+  @IsOptional()
+  @IsUUID()
+  scanFileId?: string;
 }
 
 // ─── Résultat d'analyse ───────────────────────────────────────────────────────
 
 export class CreateResultatAnalyseDto {
-    @ApiProperty({ example: 'Bilan sanguin complet' })
-    @IsNotEmpty()
-    @IsString()
-    @Length(2, 200)
-    typeAnalyse: string;
+  @ApiProperty({ example: 'Bilan sanguin complet' })
+  @IsNotEmpty()
+  @IsString()
+  @Length(2, 200)
+  typeAnalyse: string;
 
-    @ApiPropertyOptional({ description: 'ID du patient (pour les médecins)' })
-    @IsOptional()
-    @IsString()
-    patientId?: string;
+  @ApiPropertyOptional({ description: 'ID du patient (pour les médecins)' })
+  @IsOptional()
+  @IsString()
+  patientId?: string;
 
-    @ApiPropertyOptional({ example: 'Laboratoire National de Conakry' })
-    @IsOptional()
-    @IsString()
-    @Length(0, 200)
-    laboratoire?: string;
+  @ApiPropertyOptional({ example: 'Laboratoire National de Conakry' })
+  @IsOptional()
+  @IsString()
+  @Length(0, 200)
+  laboratoire?: string;
 
-    @ApiProperty({ example: 'Hémoglobine: 12.5 g/dL — Glycémie: 5.2 mmol/L' })
-    @IsNotEmpty()
-    @IsString()
-    resultats: string;
+  @ApiProperty({ example: 'Hémoglobine: 12.5 g/dL ; Glycémie: 5.2 mmol/L' })
+  @IsNotEmpty()
+  @IsString()
+  resultats: string;
 
-    @ApiPropertyOptional({ description: 'ID du StoredFile (document PDF/image/DICOM, bucket privé) confirmé.' })
-    @IsOptional()
-    @IsUUID()
-    documentFileId?: string;
+  @ApiPropertyOptional({
+    description:
+      'ID du StoredFile (document PDF/image/DICOM, bucket privé) confirmé.',
+  })
+  @IsOptional()
+  @IsUUID()
+  documentFileId?: string;
 
-    @ApiProperty({ example: '2026-04-15' })
-    @IsNotEmpty()
-    @IsDateString()
-    dateAnalyse: string;
+  @ApiProperty({ example: '2026-04-15' })
+  @IsNotEmpty()
+  @IsDateString()
+  dateAnalyse: string;
 
-    @ApiPropertyOptional()
-    @IsOptional()
-    @IsString()
-    notes?: string;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  notes?: string;
 }
 
 // ─── Vaccination ──────────────────────────────────────────────────────────────
 
 export class CreateVaccinationDto {
-    @ApiProperty({ example: 'Vaccin contre la fièvre jaune' })
-    @IsNotEmpty()
-    @IsString()
-    @Length(2, 200)
-    vaccin: string;
+  @ApiProperty({ example: 'Vaccin contre la fièvre jaune' })
+  @IsNotEmpty()
+  @IsString()
+  @Length(2, 200)
+  vaccin: string;
 
-    @ApiPropertyOptional({ description: 'ID du patient (pour les médecins)' })
-    @IsOptional()
-    @IsString()
-    patientId?: string;
+  @ApiPropertyOptional({ description: 'ID du patient (pour les médecins)' })
+  @IsOptional()
+  @IsString()
+  patientId?: string;
 
-    @ApiProperty({ example: '2026-03-01' })
-    @IsNotEmpty()
-    @IsDateString()
-    dateVaccin: string;
+  @ApiProperty({ example: '2026-03-01' })
+  @IsNotEmpty()
+  @IsDateString()
+  dateVaccin: string;
 
-    @ApiPropertyOptional({ example: '2036-03-01' })
-    @IsOptional()
-    @IsDateString()
-    prochainRappel?: string;
+  @ApiPropertyOptional({ example: '2036-03-01' })
+  @IsOptional()
+  @IsDateString()
+  prochainRappel?: string;
 
-    @ApiPropertyOptional({ example: 'LOT-2024-GN-01' })
-    @IsOptional()
-    @IsString()
-    lotNumero?: string;
+  @ApiPropertyOptional({ example: 'LOT-2024-GN-01' })
+  @IsOptional()
+  @IsString()
+  lotNumero?: string;
 
-    @ApiPropertyOptional({ example: 'Centre de Santé Ratoma' })
-    @IsOptional()
-    @IsString()
-    administrePar?: string;
+  @ApiPropertyOptional({ example: 'Centre de Santé Ratoma' })
+  @IsOptional()
+  @IsString()
+  administrePar?: string;
 
-    @ApiPropertyOptional()
-    @IsOptional()
-    @IsString()
-    notes?: string;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  notes?: string;
 }
 
 // ─── Rendez-vous ──────────────────────────────────────────────────────────────
 
 export enum AppointmentStatusEnum {
-    PROGRAMME = 'PROGRAMME',
-    CONFIRME = 'CONFIRME',
-    ANNULE = 'ANNULE',
-    TERMINE = 'TERMINE',
-    EN_ATTENTE = 'EN_ATTENTE',
-    REFUSE = 'REFUSE',
+  PROGRAMME = 'PROGRAMME',
+  CONFIRME = 'CONFIRME',
+  ANNULE = 'ANNULE',
+  TERMINE = 'TERMINE',
+  EN_ATTENTE = 'EN_ATTENTE',
+  REFUSE = 'REFUSE',
 }
 
 export class CreateRendezVousDto {
-    @ApiProperty({ example: '2026-04-20T10:00:00Z' })
-    @IsNotEmpty()
-    @IsDateString()
-    date: string;
+  @ApiProperty({ example: '2026-04-20T10:00:00Z' })
+  @IsNotEmpty()
+  @IsDateString()
+  date: string;
 
-    @ApiProperty({ example: 'Consultation de suivi' })
-    @IsNotEmpty()
-    @IsString()
-    @Length(3, 500)
-    motif: string;
+  @ApiProperty({ example: 'Consultation de suivi' })
+  @IsNotEmpty()
+  @IsString()
+  @Length(3, 500)
+  motif: string;
 
-    @ApiPropertyOptional()
-    @IsOptional()
-    @IsString()
-    notes?: string;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  notes?: string;
 
-    @ApiProperty({ description: 'ID du patient' })
-    @IsNotEmpty()
-    @IsString()
-    patientId: string;
+  @ApiProperty({ description: 'ID du patient' })
+  @IsNotEmpty()
+  @IsString()
+  patientId: string;
 
-    @ApiPropertyOptional({ description: 'ID de la structure' })
-    @IsOptional()
-    @IsString()
-    structureId?: string;
+  @ApiPropertyOptional({ description: 'ID de la structure' })
+  @IsOptional()
+  @IsString()
+  structureId?: string;
 
-    @ApiPropertyOptional({
-        description:
-            'ID du médecin ciblé. Vide = RDV « avec la structure » (à prendre en charge par un médecin).',
-    })
-    @IsOptional()
-    @IsString()
-    medecinId?: string;
+  @ApiPropertyOptional({
+    description:
+      'ID du médecin ciblé. Vide = RDV « avec la structure » (à prendre en charge par un médecin).',
+  })
+  @IsOptional()
+  @IsString()
+  medecinId?: string;
 
-    @ApiPropertyOptional({ enum: AppointmentStatusEnum })
-    @IsOptional()
-    @IsEnum(AppointmentStatusEnum)
-    status?: AppointmentStatusEnum;
+  @ApiPropertyOptional({ enum: AppointmentStatusEnum })
+  @IsOptional()
+  @IsEnum(AppointmentStatusEnum)
+  status?: AppointmentStatusEnum;
 }
-
 
 // ─── Auto-diagnostic ──────────────────────────────────────────────────────────
 
 export class CreateAutoDiagnosticDto {
-    @ApiProperty({
-        example: 'Fièvre à 39°C depuis 2 jours, maux de tête, courbatures',
-    })
-    @IsNotEmpty()
-    @IsString()
-    @Length(10, 2000)
-    symptomes: string;
+  @ApiProperty({
+    example: 'Fièvre à 39°C depuis 2 jours, maux de tête, courbatures',
+  })
+  @IsNotEmpty()
+  @IsString()
+  @Length(10, 2000)
+  symptomes: string;
 }
 
 export class AutoDiagnosticResponseDto {
-    @Expose()
-    id: string;
+  @Expose()
+  id: string;
 
-    @Expose()
-    patientId: string;
+  @Expose()
+  patientId: string;
 
-    @Expose()
-    symptomes: string;
+  @Expose()
+  symptomes: string;
 
-    @Expose()
-    @Transform(({ value }) => {
-        if (typeof value === 'string') {
-            try { return JSON.parse(value); } catch { return value; }
-        }
+  @Expose()
+  @Transform(({ value }: { value: unknown }): unknown => {
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value) as unknown;
+      } catch {
         return value;
-    })
-    analyseia: any;
-
-    @Expose()
-    recommendation: string;
-
-    @Expose()
-    createdAt: Date;
-
-    constructor(partial: Partial<AutoDiagnosticResponseDto>) {
-        Object.assign(this, partial);
+      }
     }
+    return value;
+  })
+  analyseia: any;
+
+  @Expose()
+  recommendation: string;
+
+  @Expose()
+  createdAt: Date;
+
+  constructor(partial: Partial<AutoDiagnosticResponseDto>) {
+    Object.assign(this, partial);
+  }
 }
 
 // ─── Urgences ───────────────────────────────────────────────────────────────
 
 export enum UrgenceStatusEnum {
-    LANCE = 'LANCE',
-    PRIS_EN_CHARGE = 'PRIS_EN_CHARGE',
-    TERMINE = 'TERMINE',
-    ANNULE = 'ANNULE',
+  LANCE = 'LANCE',
+  PRIS_EN_CHARGE = 'PRIS_EN_CHARGE',
+  TERMINE = 'TERMINE',
+  ANNULE = 'ANNULE',
 }
 
 export class CreateUrgenceDto {
-    @ApiPropertyOptional({ example: 9.5370 })
-    @IsOptional()
-    @IsNumber()
-    latitude?: number;
+  @ApiPropertyOptional({ example: 9.537 })
+  @IsOptional()
+  @IsNumber()
+  latitude?: number;
 
-    @ApiPropertyOptional({ example: -13.6773 })
-    @IsOptional()
-    @IsNumber()
-    longitude?: number;
+  @ApiPropertyOptional({ example: -13.6773 })
+  @IsOptional()
+  @IsNumber()
+  longitude?: number;
 
-    @ApiPropertyOptional({ example: 'Accident domestique, besoin de secours' })
-    @IsOptional()
-    @IsString()
-    message?: string;
+  @ApiPropertyOptional({ example: 'Accident domestique, besoin de secours' })
+  @IsOptional()
+  @IsString()
+  message?: string;
+}
+
+export class UpdateUrgenceStatusDto {
+  @ApiProperty({ enum: UrgenceStatus, example: UrgenceStatus.PRIS_EN_CHARGE })
+  @IsEnum(UrgenceStatus, { message: "Le statut de l'alerte est invalide." })
+  status: UrgenceStatus;
+}
+
+// Prise en charge d'une alerte SOS : délai d'arrivée annoncé au patient.
+export class TakeChargeUrgenceDto {
+  @ApiProperty({
+    example: 15,
+    minimum: 1,
+    maximum: 240,
+    description:
+      "Délai d'arrivée estimé des secours, en minutes (entier de 1 à 240).",
+  })
+  @Type(() => Number)
+  @IsInt({
+    message:
+      'Indiquez dans combien de minutes vos équipes arriveront (un nombre entier de minutes).',
+  })
+  @Min(1, {
+    message:
+      'Indiquez dans combien de minutes vos équipes arriveront (entre 1 et 240).',
+  })
+  @Max(240, {
+    message:
+      'Indiquez dans combien de minutes vos équipes arriveront (entre 1 et 240).',
+  })
+  delaiArriveeMinutes: number;
 }
 
 // ─── AI Emergency (First Aid) ────────────────────────────────────────────────
 
 export class AiEmergencyRequestDto {
-    @ApiProperty({ example: 'Que faire en cas d\'étouffement ?' })
-    @IsNotEmpty()
-    @IsString()
-    @Length(2, 500)
-    question: string;
+  @ApiProperty({ example: "Que faire en cas d'étouffement ?" })
+  @IsNotEmpty()
+  @IsString()
+  @Length(2, 500)
+  question: string;
+}
+
+// ─── Statut de rendez-vous ────────────────────────────────────────────────────
+
+export class UpdateRendezVousStatusDto {
+  @ApiProperty({ enum: AppointmentStatus })
+  @IsEnum(AppointmentStatus, {
+    message: "Ce statut de rendez-vous n'est pas reconnu.",
+  })
+  status: AppointmentStatus;
 }

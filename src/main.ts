@@ -7,6 +7,7 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { Logger } from 'nestjs-pino';
 import { RedisIoAdapter } from './common/redis-io.adapter';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
 async function bootstrap() {
   // `bufferLogs` : conserve les logs émis avant que Pino ne soit prêt.
@@ -41,11 +42,15 @@ async function bootstrap() {
   // Validation globale
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist: true,       // Supprime les champs non déclarés dans les DTOs
+      whitelist: true, // Supprime les champs non déclarés dans les DTOs
       forbidNonWhitelisted: true,
-      transform: true,       // Transforme automatiquement les types
+      transform: true, // Transforme automatiquement les types
     }),
   );
+
+  // Filtre d'erreurs global : messages en français, sans détail technique,
+  // au format { statusCode, message, error } attendu par le front.
+  app.useGlobalFilters(new AllExceptionsFilter());
 
   // CORS
   app.enableCors({
@@ -53,21 +58,30 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // Swagger
-  const config = new DocumentBuilder()
-    .setTitle('MedConnecte API')
-    .setDescription('API de la plateforme de santé numérique MedConnecte')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build();
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api', app, document);
+  // Swagger : jamais exposé en production par défaut. La documentation publique
+  // cartographie toute l'API (routes, champs, rôles) et élargit la surface
+  // d'attaque. Ouverture volontaire possible (préproduction) : SWAGGER_ENABLED=true.
+  const swaggerActif =
+    process.env.NODE_ENV !== 'production' ||
+    process.env.SWAGGER_ENABLED === 'true';
+  if (swaggerActif) {
+    const config = new DocumentBuilder()
+      .setTitle('MedConnecte API')
+      .setDescription('API de la plateforme de santé numérique MedConnecte')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api', app, document);
+  }
 
   // `||` et non `??` : une variable déclarée mais vide doit retomber sur le défaut.
   const port = process.env.PORT || 3001;
   await app.listen(port);
 
   logger.log(`🚀 MedConnecte API démarrée sur http://localhost:${port}`);
-  logger.log(`📚 Swagger disponible sur http://localhost:${port}/api`);
+  if (swaggerActif) {
+    logger.log(`📚 Swagger disponible sur http://localhost:${port}/api`);
+  }
 }
 bootstrap();

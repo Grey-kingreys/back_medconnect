@@ -1,3 +1,5 @@
+// Dette de typage préexistante, backlog points 21 et 22
+/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
 import {
   Controller,
   Get,
@@ -37,21 +39,31 @@ import {
 @ApiTags('Authentification')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) { }
+  constructor(private readonly authService: AuthService) {}
 
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Inscription patient', description: 'Crée un compte patient (accès public)' })
+  @ApiOperation({
+    summary: 'Inscription patient',
+    description: 'Crée un compte patient (accès public)',
+  })
   @ApiResponse({ status: 201, description: 'Compte créé' })
   @ApiResponse({ status: 409, description: 'Email déjà utilisé' })
-  register(@Body() dto: RegisterDto, @Res({ passthrough: true }) res: Response) {
+  @Throttle(AUTH_THROTTLE)
+  register(
+    @Body() dto: RegisterDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     return this.authService.register(dto, res);
   }
 
   @Post('login')
   @Throttle(AUTH_THROTTLE)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Connexion', description: 'Authentifie un utilisateur (tous rôles)' })
+  @ApiOperation({
+    summary: 'Connexion',
+    description: 'Authentifie un utilisateur (tous rôles)',
+  })
   @ApiResponse({ status: 200, description: 'Connexion réussie' })
   @ApiResponse({ status: 401, description: 'Email ou mot de passe incorrect' })
   login(
@@ -66,7 +78,10 @@ export class AuthController {
   @UseGuards(AuthGuard)
   @Get('me')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Mon profil', description: 'Retourne le profil de l\'utilisateur connecté' })
+  @ApiOperation({
+    summary: 'Mon profil',
+    description: "Retourne le profil de l'utilisateur connecté",
+  })
   getMe(@Req() req: any) {
     return this.authService.getMe(req.user.userId);
   }
@@ -91,7 +106,10 @@ export class AuthController {
   @Post('forgot-password')
   @Throttle(AUTH_THROTTLE)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Mot de passe oublié', description: 'Envoie un email de réinitialisation' })
+  @ApiOperation({
+    summary: 'Mot de passe oublié',
+    description: 'Envoie un email de réinitialisation',
+  })
   forgotPassword(@Body() dto: ForgotPasswordDto) {
     return this.authService.forgotPassword(dto);
   }
@@ -125,10 +143,7 @@ export class AuthController {
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Renouveler le access token via refresh token' })
-  refresh(
-    @Req() req: any,
-    @Res({ passthrough: true }) res: Response,
-  ) {
+  refresh(@Req() req: any, @Res({ passthrough: true }) res: Response) {
     // Le refresh token vit UNIQUEMENT dans le cookie httpOnly (plus de fallback body).
     const token = req.cookies?.['refresh_token'];
 

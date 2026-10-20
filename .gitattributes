@@ -1,0 +1,2 @@
+# Hooks git : fins de ligne LF obligatoires, sinon sh echoue (worktrees, checkout Windows)
+.githooks/* text eol=lf

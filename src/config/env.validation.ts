@@ -1,3 +1,5 @@
+// Dette préexistante, backlog points 21 et 22
+/* eslint-disable @typescript-eslint/no-base-to-string */
 /**
  * Validation centralisée des variables d'environnement (fail-fast au boot).
  *
@@ -10,7 +12,12 @@
  * pour ne pas alourdir le lock (cf. CLAUDE.md — node_modules = volume Docker).
  */
 
-const WEAK_SECRETS = new Set(['secret', 'medconnecte-secret-key', 'changeme', 'password']);
+const WEAK_SECRETS = new Set([
+  'secret',
+  'medconnecte-secret-key',
+  'changeme',
+  'password',
+]);
 
 type Rule = {
   key: string;
@@ -55,7 +62,9 @@ const RULES: Rule[] = [
     key: 'RESEND_API_KEY',
     required: true,
     validate: (v) =>
-      v.startsWith('re_') ? null : "format inattendu (clé Resend attendue, préfixe 're_')",
+      v.startsWith('re_')
+        ? null
+        : "format inattendu (clé Resend attendue, préfixe 're_')",
   },
   {
     key: 'REDIS_URL',
@@ -73,7 +82,9 @@ const RULES: Rule[] = [
     key: 'SUPER_ADMIN_EMAIL',
     required: true,
     validate: (v) =>
-      /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? null : 'doit être une adresse email valide',
+      /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)
+        ? null
+        : 'doit être une adresse email valide',
   },
   {
     key: 'SUPER_ADMIN_PASSWORD',
@@ -102,11 +113,53 @@ const RULES: Rule[] = [
     validate: (v) =>
       v.startsWith('https://') || v.startsWith('http://')
         ? null
-        : "doit être une URL (ex. https://cdn.medconnecte.com) — base des liens publics",
+        : 'doit être une URL (ex. https://cdn.medconnecte.com), base des liens publics',
+  },
+  // Secret partagé avec les services IA (en-tête X-MedConnecte-Secret).
+  // Optionnel, sans défaut : absent, le contrôle est désactivé des deux côtés.
+  {
+    key: 'AI_SHARED_SECRET',
+    required: false,
+    validate: (v) =>
+      v.length < 32
+        ? `doit faire au moins 32 caractères (actuellement ${v.length})`
+        : null,
+  },
+  // Ouverture volontaire de Swagger en production (préproduction par exemple).
+  // Optionnelle, sans défaut : absente, Swagger reste fermé en production.
+  {
+    key: 'SWAGGER_ENABLED',
+    required: false,
+    validate: (v) =>
+      v === 'true' || v === 'false' ? null : "doit valoir 'true' ou 'false'",
+  },
+  // Mode démo (cf. src/demo/) : comptes et données fictives, connexion sans mot de
+  // passe. Inactif par défaut ; seule la valeur `true` (casse indifférente) l'active.
+  {
+    key: 'DEMO_MODE',
+    required: false,
+    default: 'false',
+    validate: (v) =>
+      ['true', 'false'].includes(v.toLowerCase())
+        ? null
+        : "doit valoir 'true' ou 'false'",
+  },
+  // Remise à zéro des données démo au démarrage (purge puis recréation), seulement
+  // si DEMO_MODE est actif. Inactive par défaut ; seule `true` (casse indifférente) l'active.
+  {
+    key: 'DEMO_RESET',
+    required: false,
+    default: 'false',
+    validate: (v) =>
+      ['true', 'false'].includes(v.toLowerCase())
+        ? null
+        : "doit valoir 'true' ou 'false'",
   },
 ];
 
-export function validateEnv(config: Record<string, unknown>): Record<string, unknown> {
+export function validateEnv(
+  config: Record<string, unknown>,
+): Record<string, unknown> {
   const errors: string[] = [];
 
   for (const rule of RULES) {

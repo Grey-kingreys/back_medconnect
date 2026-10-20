@@ -1,8 +1,11 @@
+// Dette de typage préexistante, backlog points 21 et 22
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-floating-promises */
 import {
   Injectable,
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  ConflictException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from 'src/common/services/prisma.service';
@@ -15,6 +18,7 @@ import {
   CreateAutoDiagnosticDto,
   CreateRendezVousDto,
   CreateUrgenceDto,
+  TakeChargeUrgenceDto,
   UrgenceStatusEnum,
   AiEmergencyRequestDto,
 } from './dto/carnet-sante.dto';
@@ -27,6 +31,24 @@ import { EncryptionService } from 'src/common/services/encryption.service';
 import { SmsService } from 'src/common/services/sms.service';
 import { QueueService } from 'src/queue/queue.service';
 import { StorageService } from 'src/storage/storage.service';
+import { PermissionsService } from 'src/common/rbac/permissions.service';
+import { PERMISSIONS } from 'src/common/rbac/permissions.constants';
+import { estCompteDemo } from 'src/demo/demo-mode';
+import {
+  AppointmentStatus,
+  UrgenceStatus,
+  Prisma,
+} from 'generated/prisma/client';
+import type {
+  ProfilMedical,
+  Consultation,
+  Ordonnance,
+  ResultatAnalyse,
+  Vaccination,
+} from 'generated/prisma/client';
+
+// Délai minimal entre deux alertes SOS tant que la précédente n'est pas prise en charge.
+export const SOS_ANTI_DOUBLON_MINUTES = 5;
 
 @Injectable()
 export class CarnetSanteService {
@@ -40,7 +62,8 @@ export class CarnetSanteService {
     private readonly smsService: SmsService,
     private readonly queueService: QueueService,
     private readonly storage: StorageService,
-  ) { }
+    private readonly permissionsService: PermissionsService,
+  ) {}
 
   private readonly logger = new Logger(CarnetSanteService.name);
 
@@ -54,13 +77,15 @@ export class CarnetSanteService {
    *
    * @returns `isMedecinTraitant` — le médecin traitant voit tout le carnet,
    *   une structure autorisée ne voit que ce qu'elle y a elle-même produit.
+   * @returns `actorStructureId` : établissement réel de l'acteur en base
+   *   (`null` s'il n'en a pas, absent si l'acteur est le patient lui-même).
    */
   private async checkAccess(
     actorId: string,
     patientId: string,
     structureId?: string,
     mode: 'lecture' | 'ecriture' = 'ecriture',
-  ): Promise<{ isMedecinTraitant: boolean }> {
+  ): Promise<{ isMedecinTraitant: boolean; actorStructureId?: string | null }> {
     if (actorId === patientId) return { isMedecinTraitant: false }; // Son propre dossier
 
     const [patient, actor] = await Promise.all([
@@ -98,25 +123,29 @@ export class CarnetSanteService {
       );
     }
 
-    return { isMedecinTraitant };
+    return { isMedecinTraitant, actorStructureId: actor?.structureId ?? null };
   }
 
   // ─── Vue Médecin : Carnet complet d'un patient ─────────────────
 
-  async getPatientCarnetForDoctor(medecinId: string, patientId: string, structureId?: string) {
+  async getPatientCarnetForDoctor(
+    medecinId: string,
+    patientId: string,
+    structureId?: string,
+  ) {
     const patient = await this.prisma.user.findUnique({
       where: { id: patientId },
-      select: { 
-        id: true, 
-        nom: true, 
-        prenom: true, 
-        email: true, 
-        telephone: true, 
+      select: {
+        id: true,
+        nom: true,
+        prenom: true,
+        email: true,
+        telephone: true,
         medecinTraitantId: true,
         dateNaissance: true,
         taille: true,
-        poids: true
-      }
+        poids: true,
+      },
     });
 
     if (!patient) throw new NotFoundException('Patient non trouvé');
@@ -134,47 +163,81 @@ export class CarnetSanteService {
     });
 
     // Récupérer les consultations et ordonnances
-    // Si Médecin traitant (Niveau 1) -> Tout voir. 
+    // Si Médecin traitant (Niveau 1) -> Tout voir.
     // Si Structure (Niveau 2) -> Ne voir QUE les consultations et ordonnances de sa structure.
     const consultations = await this.prisma.consultation.findMany({
-      where: isMedecinTraitant ? { patientId, deletedAt: null } : { patientId, deletedAt: null, structureId: structureId as string },
-      include: { 
+      where: isMedecinTraitant
+        ? { patientId, deletedAt: null }
+        : { patientId, deletedAt: null, structureId: structureId as string },
+      include: {
         structure: { select: { id: true, nom: true, type: true } },
-        medecin: { select: { nom: true, prenom: true } }
+        medecin: { select: { nom: true, prenom: true } },
       },
       orderBy: { dateConsultation: 'desc' },
-      take: 50
+      take: 50,
     });
 
     const ordonnances = await this.prisma.ordonnance.findMany({
-      where: isMedecinTraitant ? { patientId, deletedAt: null } : { patientId, deletedAt: null, consultation: { structureId: structureId as string } },
+      where: isMedecinTraitant
+        ? { patientId, deletedAt: null }
+        : {
+            patientId,
+            deletedAt: null,
+            consultation: { structureId: structureId as string },
+          },
       include: { medecin: { select: { nom: true, prenom: true } } },
       orderBy: { dateEmission: 'desc' },
-      take: 50
+      take: 50,
     });
 
-    // Analyses et Vaccinations : Médecin traitant comme structure autorisée
-    // (au-delà de `checkAccess`, l'accès est déjà refusé).
+    // Analyses et Vaccinations : le médecin traitant voit tout ; une structure
+    // autorisée ne voit que celles dont l'auteur est membre de la structure
+    // (ces tables n'ont pas de `structureId`, cf. décision D03).
+    const filtreAuteur = isMedecinTraitant
+      ? {}
+      : { medecin: { structureId: structureId as string } };
     const [analyses, vaccinations] = await Promise.all([
       this.prisma.resultatAnalyse.findMany({
-        where: { patientId, deletedAt: null },
+        where: { patientId, deletedAt: null, ...filtreAuteur },
         include: { medecin: { select: { nom: true, prenom: true } } },
         orderBy: { dateAnalyse: 'desc' },
-        take: 20
+        take: 20,
       }),
       this.prisma.vaccination.findMany({
-        where: { patientId, deletedAt: null },
+        where: { patientId, deletedAt: null, ...filtreAuteur },
         include: { medecin: { select: { nom: true, prenom: true } } },
-        orderBy: { dateVaccin: 'desc' }
+        orderBy: { dateVaccin: 'desc' },
       }),
     ]);
 
-    // Récupérer les STATISTIQUES GLOBALES
-    const [totalConsultations, totalOrdonnances, totalAnalyses, totalVaccinations] = await Promise.all([
-      this.prisma.consultation.count({ where: { patientId, deletedAt: null } }),
-      this.prisma.ordonnance.count({ where: { patientId, deletedAt: null } }),
-      this.prisma.resultatAnalyse.count({ where: { patientId, deletedAt: null } }),
-      this.prisma.vaccination.count({ where: { patientId, deletedAt: null } }),
+    // Statistiques : mêmes filtres que les listes, pour ne pas révéler le
+    // volume du carnet hors du périmètre de la structure.
+    const [
+      totalConsultations,
+      totalOrdonnances,
+      totalAnalyses,
+      totalVaccinations,
+    ] = await Promise.all([
+      this.prisma.consultation.count({
+        where: isMedecinTraitant
+          ? { patientId, deletedAt: null }
+          : { patientId, deletedAt: null, structureId: structureId as string },
+      }),
+      this.prisma.ordonnance.count({
+        where: isMedecinTraitant
+          ? { patientId, deletedAt: null }
+          : {
+              patientId,
+              deletedAt: null,
+              consultation: { structureId: structureId as string },
+            },
+      }),
+      this.prisma.resultatAnalyse.count({
+        where: { patientId, deletedAt: null, ...filtreAuteur },
+      }),
+      this.prisma.vaccination.count({
+        where: { patientId, deletedAt: null, ...filtreAuteur },
+      }),
     ]);
 
     const stats = {
@@ -186,30 +249,42 @@ export class CarnetSanteService {
 
     return {
       data: {
-        patient: { 
-          id: patient.id, nom: patient.nom, prenom: patient.prenom, 
+        patient: {
+          id: patient.id,
+          nom: patient.nom,
+          prenom: patient.prenom,
           email: patient.email,
           telephone: patient.telephone,
-          dateNaissance: patient.dateNaissance, taille: patient.taille, poids: patient.poids
+          dateNaissance: patient.dateNaissance,
+          taille: patient.taille,
+          poids: patient.poids,
         },
         isMedecinTraitant,
         profil: profil ? this.decryptProfil(profil) : null,
         stats,
-        consultations: consultations.map(c => ({
+        consultations: consultations.map((c) => ({
           ...this.decryptConsultation(c),
-          medecinNom: c.medecinNom || (c.medecin ? `Dr. ${c.medecin.prenom} ${c.medecin.nom}` : null)
+          medecinNom:
+            c.medecinNom ||
+            (c.medecin ? `Dr. ${c.medecin.prenom} ${c.medecin.nom}` : null),
         })),
-        ordonnances: ordonnances.map(o => ({
+        ordonnances: ordonnances.map((o) => ({
           ...this.decryptOrdonnance(o),
-          medecinNom: o.medecinNom || (o.medecin ? `Dr. ${o.medecin.prenom} ${o.medecin.nom}` : null)
+          medecinNom:
+            o.medecinNom ||
+            (o.medecin ? `Dr. ${o.medecin.prenom} ${o.medecin.nom}` : null),
         })),
-        vaccinations: vaccinations.map(v => ({
+        vaccinations: vaccinations.map((v) => ({
           ...this.decryptVaccination(v),
-          administrePar: v.administrePar || (v.medecin ? `Dr. ${v.medecin.prenom} ${v.medecin.nom}` : null)
+          administrePar:
+            v.administrePar ||
+            (v.medecin ? `Dr. ${v.medecin.prenom} ${v.medecin.nom}` : null),
         })),
-        analyses: analyses.map(a => ({
+        analyses: analyses.map((a) => ({
           ...this.decryptAnalyse(a),
-          laboratoire: a.laboratoire || (a.medecin ? `Dr. ${a.medecin.prenom} ${a.medecin.nom}` : null)
+          laboratoire:
+            a.laboratoire ||
+            (a.medecin ? `Dr. ${a.medecin.prenom} ${a.medecin.nom}` : null),
         })),
       },
       message: 'Carnet du patient récupéré',
@@ -218,26 +293,33 @@ export class CarnetSanteService {
   }
 
   async getProfilMedical(userId: string) {
-    const profil = await this.prisma.profilMedical.findUnique({ where: { userId } });
-    return { 
-      data: profil ? this.decryptProfil(profil) : null, 
-      message: profil ? 'Profil médical trouvé' : 'Aucun profil médical créé', 
-      success: true 
+    const profil = await this.prisma.profilMedical.findUnique({
+      where: { userId },
+    });
+    return {
+      data: profil ? this.decryptProfil(profil) : null,
+      message: profil ? 'Profil médical trouvé' : 'Aucun profil médical créé',
+      success: true,
     };
   }
 
   async upsertProfilMedical(userId: string, dto: UpsertProfilMedicalDto) {
-    const data: any = {};
+    const data: Omit<Prisma.ProfilMedicalUncheckedCreateInput, 'userId'> = {};
     if (dto.groupeSanguin !== undefined) data.groupeSanguin = dto.groupeSanguin;
-    if (dto.allergies !== undefined) data.allergies = this.encryptionService.encrypt(dto.allergies);
-    if (dto.pathologies !== undefined) data.pathologies = this.encryptionService.encrypt(dto.pathologies);
-    if (dto.traitements !== undefined) data.traitements = this.encryptionService.encrypt(dto.traitements);
+    if (dto.allergies !== undefined)
+      data.allergies = this.encryptionService.encrypt(dto.allergies);
+    if (dto.pathologies !== undefined)
+      data.pathologies = this.encryptionService.encrypt(dto.pathologies);
+    if (dto.traitements !== undefined)
+      data.traitements = this.encryptionService.encrypt(dto.traitements);
     if (dto.taille !== undefined) data.taille = dto.taille;
     if (dto.poids !== undefined) data.poids = dto.poids;
-    if (dto.dateNaissance !== undefined) data.dateNaissance = new Date(dto.dateNaissance);
+    if (dto.dateNaissance !== undefined)
+      data.dateNaissance = new Date(dto.dateNaissance);
     if (dto.genre !== undefined) data.genre = dto.genre;
     if (dto.contactNom !== undefined) data.contactNom = dto.contactNom;
-    if (dto.contactTelephone !== undefined) data.contactTelephone = dto.contactTelephone;
+    if (dto.contactTelephone !== undefined)
+      data.contactTelephone = dto.contactTelephone;
     if (dto.contactEmail !== undefined) data.contactEmail = dto.contactEmail;
 
     const profil = await this.prisma.profilMedical.upsert({
@@ -245,15 +327,19 @@ export class CarnetSanteService {
       create: { userId, ...data },
       update: data,
     });
-    return { data: this.decryptProfil(profil), message: 'Profil médical enregistré', success: true };
+    return {
+      data: this.decryptProfil(profil),
+      message: 'Profil médical enregistré',
+      success: true,
+    };
   }
 
   async getConsultations(userId: string, role?: string) {
     const isDoctor = role === 'MEDECIN' || role === 'STRUCTURE_ADMIN';
 
     const where = isDoctor
-      ? { medecinId: userId, deletedAt: null }   // Le médecin voit celles qu'il a rédigées
-      : { patientId: userId, deletedAt: null };  // Le patient voit les siennes
+      ? { medecinId: userId, deletedAt: null } // Le médecin voit celles qu'il a rédigées
+      : { patientId: userId, deletedAt: null }; // Le patient voit les siennes
 
     const consultations = await this.prisma.consultation.findMany({
       where,
@@ -263,22 +349,28 @@ export class CarnetSanteService {
         patient: isDoctor
           ? { select: { id: true, nom: true, prenom: true } }
           : false,
-        ordonnances: { select: { id: true, dateEmission: true, medecinNom: true } },
+        ordonnances: {
+          select: { id: true, dateEmission: true, medecinNom: true },
+        },
       },
       orderBy: { dateConsultation: 'desc' },
     });
 
-    return { 
-      data: consultations.map(c => ({
+    return {
+      data: consultations.map((c) => ({
         ...this.decryptConsultation(c),
-        medecinNom: c.medecinNom || (c.medecin ? `Dr. ${c.medecin.prenom} ${c.medecin.nom}` : null),
-        ...(isDoctor && (c as any).patient ? {
-          patientNom: `${(c as any).patient.prenom} ${(c as any).patient.nom}`,
-          patientId: (c as any).patient.id,
-        } : {}),
-      })), 
-      message: `${consultations.length} consultation(s)`, 
-      success: true 
+        medecinNom:
+          c.medecinNom ||
+          (c.medecin ? `Dr. ${c.medecin.prenom} ${c.medecin.nom}` : null),
+        ...(isDoctor && 'patient' in c && c.patient
+          ? {
+              patientNom: `${c.patient.prenom} ${c.patient.nom}`,
+              patientId: c.patient.id,
+            }
+          : {}),
+      })),
+      message: `${consultations.length} consultation(s)`,
+      success: true,
     };
   }
 
@@ -286,23 +378,56 @@ export class CarnetSanteService {
     const consultation = await this.prisma.consultation.findFirst({
       where: { id: consultationId, patientId: userId, deletedAt: null },
       include: {
-        structure: { select: { id: true, nom: true, type: true, adresse: true, ville: true } },
+        structure: {
+          select: {
+            id: true,
+            nom: true,
+            type: true,
+            adresse: true,
+            ville: true,
+          },
+        },
         ordonnances: true,
       },
     });
 
     if (!consultation) throw new NotFoundException('Consultation non trouvée');
 
-    return { 
-      data: this.decryptConsultation(consultation), 
-      message: 'Consultation trouvée', 
-      success: true 
+    return {
+      data: this.decryptConsultation(consultation),
+      message: 'Consultation trouvée',
+      success: true,
     };
   }
 
-  async createConsultation(actorId: string, dto: CreateConsultationDto, structureId?: string) {
+  async createConsultation(
+    actorId: string,
+    dto: CreateConsultationDto,
+    structureId?: string,
+  ) {
     const patientId = dto.patientId || actorId;
-    await this.checkAccess(actorId, patientId, structureId);
+    const { actorStructureId } = await this.checkAccess(
+      actorId,
+      patientId,
+      structureId,
+    );
+
+    // Établissement enregistré : pour un soignant, c'est son établissement réel
+    // en base (pas celui du corps de requête ni seulement celui du JWT). Le
+    // patient qui saisit sa propre consultation garde le comportement existant
+    // (décision D04).
+    let structureEnregistree: string | null | undefined;
+    if (actorId === patientId) {
+      structureEnregistree = dto.structureId || structureId;
+    } else {
+      const etablissementReel = actorStructureId ?? null;
+      if (dto.structureId && dto.structureId !== etablissementReel) {
+        throw new ForbiddenException(
+          'Vous ne pouvez enregistrer une consultation que pour votre propre établissement de santé.',
+        );
+      }
+      structureEnregistree = etablissementReel;
+    }
 
     // Vérifier que la structure existe si fournie
     if (dto.structureId) {
@@ -315,7 +440,9 @@ export class CarnetSanteService {
     // Récupérer le nom du médecin si c'est un professionnel
     let medecinNom = dto.medecinNom;
     if (!medecinNom && actorId !== patientId) {
-      const actor = await this.prisma.user.findUnique({ where: { id: actorId } });
+      const actor = await this.prisma.user.findUnique({
+        where: { id: actorId },
+      });
       if (actor) medecinNom = `Dr. ${actor.prenom} ${actor.nom}`;
     }
 
@@ -325,9 +452,11 @@ export class CarnetSanteService {
         motif: this.encryptionService.encrypt(dto.motif.trim()),
         medecinId: actorId !== patientId ? actorId : null,
         medecinNom: medecinNom?.trim(),
-        diagnostic: this.encryptionService.encrypt(dto.diagnostic?.trim() || ''),
+        diagnostic: this.encryptionService.encrypt(
+          dto.diagnostic?.trim() || '',
+        ),
         notes: this.encryptionService.encrypt(dto.notes?.trim() || ''),
-        structureId: dto.structureId || structureId,
+        structureId: structureEnregistree,
         dateConsultation: dto.dateConsultation
           ? new Date(dto.dateConsultation)
           : new Date(),
@@ -345,7 +474,7 @@ export class CarnetSanteService {
         type: 'SYSTEME',
         titre: 'Nouvelle consultation',
         message: `Une nouvelle consultation a été enregistrée par ${consultation.medecinNom || 'un médecin'}.`,
-        lien: `/dashboard/carnet-sante/consultations/${consultation.id}`
+        lien: `/dashboard/carnet-sante/consultations/${consultation.id}`,
       });
     }
 
@@ -362,7 +491,10 @@ export class CarnetSanteService {
     });
     if (!consultation) throw new NotFoundException('Consultation non trouvée');
 
-    await this.prisma.consultation.update({ where: { id: consultationId }, data: { deletedAt: new Date() } });
+    await this.prisma.consultation.update({
+      where: { id: consultationId },
+      data: { deletedAt: new Date() },
+    });
 
     return { data: null, message: 'Consultation supprimée', success: true };
   }
@@ -375,8 +507,8 @@ export class CarnetSanteService {
       include: {
         medecin: { select: { id: true, nom: true, prenom: true } },
         consultation: {
-          include: { structure: { select: { id: true, nom: true } } }
-        }
+          include: { structure: { select: { id: true, nom: true } } },
+        },
       },
       orderBy: { dateEmission: 'desc' },
     });
@@ -384,14 +516,44 @@ export class CarnetSanteService {
     return {
       data: ordonnances.map((o) => ({
         ...this.decryptOrdonnance(o),
-        medecinNom: o.medecinNom || (o.medecin ? `Dr. ${o.medecin.prenom} ${o.medecin.nom}` : null)
+        // La consultation liée est chiffrée en base (motif, diagnostic, notes).
+        consultation: o.consultation
+          ? this.decryptConsultation(o.consultation)
+          : null,
+        medecinNom:
+          o.medecinNom ||
+          (o.medecin ? `Dr. ${o.medecin.prenom} ${o.medecin.nom}` : null),
       })),
       message: `${ordonnances.length} ordonnance(s)`,
       success: true,
     };
   }
 
-  async createOrdonnance(actorId: string, dto: CreateOrdonnanceDto, structureId?: string) {
+  async createOrdonnance(
+    actorId: string,
+    dto: CreateOrdonnanceDto,
+    structureId?: string,
+  ) {
+    // Lignes liées au catalogue : les médicaments doivent toujours exister (une requête).
+    const medicamentIds = [
+      ...new Set(
+        dto.medicaments
+          .map((m) => m.medicamentId)
+          .filter((id): id is string => !!id),
+      ),
+    ];
+    if (medicamentIds.length > 0) {
+      const trouves = await this.prisma.medicament.findMany({
+        where: { id: { in: medicamentIds } },
+        select: { id: true },
+      });
+      if (trouves.length !== medicamentIds.length) {
+        throw new BadRequestException(
+          "Un médicament de l'ordonnance n'est plus dans le catalogue. Retirez-le puis choisissez-le à nouveau, ou saisissez son nom librement.",
+        );
+      }
+    }
+
     const patientId = dto.patientId || actorId;
     await this.checkAccess(actorId, patientId, structureId);
 
@@ -406,13 +568,19 @@ export class CarnetSanteService {
     // Récupérer le nom du médecin si c'est un professionnel
     let medecinNom = dto.medecinNom;
     if (!medecinNom && actorId !== patientId) {
-      const actor = await this.prisma.user.findUnique({ where: { id: actorId } });
+      const actor = await this.prisma.user.findUnique({
+        where: { id: actorId },
+      });
       if (actor) medecinNom = `Dr. ${actor.prenom} ${actor.nom}`;
     }
 
     // Ordonnance scannée (bucket privé) : vérifie + rattache le document au patient.
     if (dto.scanFileId) {
-      await this.storage.claimPrivateForPatient(dto.scanFileId, actorId, patientId);
+      await this.storage.claimPrivateForPatient(
+        dto.scanFileId,
+        actorId,
+        patientId,
+      );
     }
 
     const ordonnance = await this.prisma.ordonnance.create({
@@ -421,7 +589,9 @@ export class CarnetSanteService {
         medecinId: actorId !== patientId ? actorId : null,
         consultationId: dto.consultationId,
         medecinNom: medecinNom?.trim(),
-        medicaments: this.encryptionService.encrypt(JSON.stringify(dto.medicaments)),
+        medicaments: this.encryptionService.encrypt(
+          JSON.stringify(dto.medicaments),
+        ),
         notes: this.encryptionService.encrypt(dto.notes?.trim() || ''),
         dateExpiration: dto.dateExpiration
           ? new Date(dto.dateExpiration)
@@ -437,7 +607,7 @@ export class CarnetSanteService {
         type: 'NOUVELLE_ORDONNANCE',
         titre: 'Nouvelle ordonnance',
         message: `${medecinNom || 'Un médecin'} vous a prescrit une nouvelle ordonnance.`,
-        lien: `/dashboard/carnet-sante/ordonnances`
+        lien: `/dashboard/carnet-sante/ordonnances`,
       });
     }
 
@@ -454,13 +624,15 @@ export class CarnetSanteService {
     });
     if (!ordonnance) throw new NotFoundException('Ordonnance non trouvée');
 
-    await this.prisma.ordonnance.update({ where: { id: ordonnanceId }, data: { deletedAt: new Date() } });
+    await this.prisma.ordonnance.update({
+      where: { id: ordonnanceId },
+      data: { deletedAt: new Date() },
+    });
 
     return { data: null, message: 'Ordonnance supprimée', success: true };
   }
 
   // ─── Résultats d'analyses ─────────────────────────────────────
-
 
   async getAnalyses(userId: string) {
     const analyses = await this.prisma.resultatAnalyse.findMany({
@@ -469,34 +641,48 @@ export class CarnetSanteService {
       orderBy: { dateAnalyse: 'desc' },
     });
 
-    return { 
-      data: analyses.map(a => ({
-        ...this.decryptAnalyse(a),
-        laboratoire: a.laboratoire || (a.medecin ? `Dr. ${a.medecin.prenom} ${a.medecin.nom}` : null)
-      })), 
-      message: `${analyses.length} résultat(s)`, 
-      success: true 
+    return {
+      data: analyses.map((a) => {
+        // Le laboratoire est chiffré en base : on part de la valeur déchiffrée,
+        // jamais de `a.laboratoire` brut (sinon le patient voit le texte chiffré).
+        const analyse = this.decryptAnalyse(a);
+        return {
+          ...analyse,
+          laboratoire:
+            analyse.laboratoire ||
+            (a.medecin ? `Dr. ${a.medecin.prenom} ${a.medecin.nom}` : null),
+        };
+      }),
+      message: `${analyses.length} résultat(s)`,
+      success: true,
     };
   }
 
-  async createAnalyse(actorId: string, dto: CreateResultatAnalyseDto, structureId?: string) {
-
+  async createAnalyse(
+    actorId: string,
+    dto: CreateResultatAnalyseDto,
+    structureId?: string,
+  ) {
     const patientId = dto.patientId || actorId;
     await this.checkAccess(actorId, patientId, structureId);
 
     // Déterminer le laboratoire par défaut (nom de la structure de l'acteur)
     let laboratoire = dto.laboratoire;
     if (!laboratoire && actorId !== patientId) {
-      const actor = await this.prisma.user.findUnique({ 
+      const actor = await this.prisma.user.findUnique({
         where: { id: actorId },
-        include: { structure: true }
+        include: { structure: true },
       });
       if (actor?.structure) laboratoire = actor.structure.nom;
     }
 
     // Document d'analyse (bucket privé) : vérifie + rattache le document au patient.
     if (dto.documentFileId) {
-      await this.storage.claimPrivateForPatient(dto.documentFileId, actorId, patientId);
+      await this.storage.claimPrivateForPatient(
+        dto.documentFileId,
+        actorId,
+        patientId,
+      );
     }
 
     const analyse = await this.prisma.resultatAnalyse.create({
@@ -517,9 +703,9 @@ export class CarnetSanteService {
       await this.notificationsService.createNotification({
         userId: patientId,
         type: 'NOUVELLE_ORDONNANCE', // On pourrait utiliser SYSTEME si pas de type ANALYSE
-        titre: 'Résultats d\'analyses',
+        titre: "Résultats d'analyses",
         message: `Vos résultats pour "${analyse.typeAnalyse}" sont disponibles.`,
-        lien: `/dashboard/carnet-sante/analyses`
+        lien: `/dashboard/carnet-sante/analyses`,
       });
     }
 
@@ -532,12 +718,14 @@ export class CarnetSanteService {
     });
     if (!analyse) throw new NotFoundException('Résultat non trouvé');
 
-    await this.prisma.resultatAnalyse.update({ where: { id: analyseId }, data: { deletedAt: new Date() } });
+    await this.prisma.resultatAnalyse.update({
+      where: { id: analyseId },
+      data: { deletedAt: new Date() },
+    });
     return { data: null, message: 'Résultat supprimé', success: true };
   }
 
   // ─── Vaccinations ─────────────────────────────────────────────
-
 
   async getVaccinations(userId: string) {
     const vaccinations = await this.prisma.vaccination.findMany({
@@ -546,26 +734,32 @@ export class CarnetSanteService {
       orderBy: { dateVaccin: 'desc' },
     });
 
-    return { 
-      data: vaccinations.map(v => ({
+    return {
+      data: vaccinations.map((v) => ({
         ...this.decryptVaccination(v),
-        administrePar: v.administrePar || (v.medecin ? `Dr. ${v.medecin.prenom} ${v.medecin.nom}` : null)
-      })), 
-      message: `${vaccinations.length} vaccination(s)`, 
-      success: true 
+        administrePar:
+          v.administrePar ||
+          (v.medecin ? `Dr. ${v.medecin.prenom} ${v.medecin.nom}` : null),
+      })),
+      message: `${vaccinations.length} vaccination(s)`,
+      success: true,
     };
   }
 
-  async createVaccination(actorId: string, dto: CreateVaccinationDto, structureId?: string) {
+  async createVaccination(
+    actorId: string,
+    dto: CreateVaccinationDto,
+    structureId?: string,
+  ) {
     const patientId = dto.patientId || actorId;
     await this.checkAccess(actorId, patientId, structureId);
 
     // Déterminer qui administre (Dr. Nom si pro)
     let administrePar = dto.administrePar;
     if (!administrePar && actorId !== patientId) {
-      const actor = await this.prisma.user.findUnique({ 
+      const actor = await this.prisma.user.findUnique({
         where: { id: actorId },
-        include: { structure: true }
+        include: { structure: true },
       });
       if (actor) {
         administrePar = `Dr. ${actor.prenom} ${actor.nom}`;
@@ -579,7 +773,9 @@ export class CarnetSanteService {
         medecinId: actorId !== patientId ? actorId : null,
         vaccin: this.encryptionService.encrypt(dto.vaccin.trim()),
         dateVaccin: new Date(dto.dateVaccin),
-        prochainRappel: dto.prochainRappel ? new Date(dto.prochainRappel) : null,
+        prochainRappel: dto.prochainRappel
+          ? new Date(dto.prochainRappel)
+          : null,
         lotNumero: dto.lotNumero?.trim(),
         administrePar: administrePar?.trim(),
         notes: this.encryptionService.encrypt(dto.notes?.trim() || ''),
@@ -593,11 +789,15 @@ export class CarnetSanteService {
         type: 'SYSTEME',
         titre: 'Vaccination enregistrée',
         message: `Votre vaccination contre "${vaccination.vaccin}" a été ajoutée à votre carnet.`,
-        lien: `/dashboard/carnet-sante/vaccinations`
+        lien: `/dashboard/carnet-sante/vaccinations`,
       });
     }
 
-    return { data: vaccination, message: 'Vaccination enregistrée', success: true };
+    return {
+      data: vaccination,
+      message: 'Vaccination enregistrée',
+      success: true,
+    };
   }
 
   async deleteVaccination(userId: string, vaccinationId: string) {
@@ -606,7 +806,10 @@ export class CarnetSanteService {
     });
     if (!vac) throw new NotFoundException('Vaccination non trouvée');
 
-    await this.prisma.vaccination.update({ where: { id: vaccinationId }, data: { deletedAt: new Date() } });
+    await this.prisma.vaccination.update({
+      where: { id: vaccinationId },
+      data: { deletedAt: new Date() },
+    });
     return { data: null, message: 'Vaccination supprimée', success: true };
   }
 
@@ -627,7 +830,9 @@ export class CarnetSanteService {
       where,
       include: {
         patient: { select: { id: true, nom: true, prenom: true } },
-        medecin: { select: { id: true, nom: true, prenom: true, specialite: true } },
+        medecin: {
+          select: { id: true, nom: true, prenom: true, specialite: true },
+        },
         structure: { select: { id: true, nom: true } },
       },
       orderBy: { date: 'asc' },
@@ -651,7 +856,7 @@ export class CarnetSanteService {
     structureId?: string,
   ) {
     let medecinId: string | null;
-    let status: string;
+    let status: AppointmentStatus;
 
     if (dto.medecinId) {
       medecinId = dto.medecinId;
@@ -672,11 +877,13 @@ export class CarnetSanteService {
         date: new Date(dto.date),
         motif: dto.motif.trim(),
         notes: dto.notes?.trim(),
-        status: status as any,
+        status,
       },
       include: {
         patient: { select: { id: true, nom: true, prenom: true } },
-        medecin: { select: { id: true, nom: true, prenom: true, specialite: true } },
+        medecin: {
+          select: { id: true, nom: true, prenom: true, specialite: true },
+        },
         structure: { select: { id: true, nom: true } },
       },
     });
@@ -709,14 +916,22 @@ export class CarnetSanteService {
     });
     if (!rv) throw new NotFoundException('Rendez-vous introuvable.');
     if (rv.status !== 'EN_ATTENTE') {
-      throw new BadRequestException("Ce rendez-vous n'est pas en attente de validation.");
+      throw new BadRequestException(
+        "Ce rendez-vous n'est pas en attente de validation.",
+      );
     }
 
     if (rv.medecinId) {
       if (rv.medecinId !== actorId) {
-        throw new ForbiddenException("Ce rendez-vous est adressé à un autre médecin.");
+        throw new ForbiddenException(
+          'Ce rendez-vous est adressé à un autre médecin.',
+        );
       }
-    } else if (actorRole !== 'MEDECIN' || !actorStructureId || rv.structureId !== actorStructureId) {
+    } else if (
+      actorRole !== 'MEDECIN' ||
+      !actorStructureId ||
+      rv.structureId !== actorStructureId
+    ) {
       throw new ForbiddenException(
         'Seul un médecin de la structure peut prendre en charge ce rendez-vous.',
       );
@@ -726,34 +941,87 @@ export class CarnetSanteService {
       where: { id: rvId },
       data:
         decision === 'valider'
-          ? { status: 'CONFIRME', ...(rv.medecinId ? {} : { medecinId: actorId }) }
+          ? {
+              status: 'CONFIRME',
+              ...(rv.medecinId ? {} : { medecinId: actorId }),
+            }
           : { status: 'REFUSE' },
       include: {
         patient: { select: { id: true, nom: true, prenom: true } },
-        medecin: { select: { id: true, nom: true, prenom: true, specialite: true } },
+        medecin: {
+          select: { id: true, nom: true, prenom: true, specialite: true },
+        },
         structure: { select: { id: true, nom: true } },
       },
     });
     return {
       data: updated,
-      message: decision === 'valider' ? 'Rendez-vous confirmé' : 'Rendez-vous refusé',
+      message:
+        decision === 'valider' ? 'Rendez-vous confirmé' : 'Rendez-vous refusé',
       success: true,
     };
   }
 
-  async updateRendezVousStatus(rvId: string, status: string) {
-    const rv = await this.prisma.rendezVous.update({
+  async updateRendezVousStatus(
+    rvId: string,
+    status: AppointmentStatus,
+    actorId: string,
+    actorStructureId?: string | null,
+  ) {
+    const rv = await this.prisma.rendezVous.findUnique({
       where: { id: rvId },
-      data: { status: status as any },
+      select: {
+        id: true,
+        patientId: true,
+        medecinId: true,
+        structureId: true,
+        status: true,
+      },
     });
-    return { data: rv, message: 'Statut du rendez-vous mis à jour', success: true };
+    if (!rv) throw new NotFoundException('Rendez-vous introuvable.');
+
+    if (actorId === rv.patientId) {
+      // Le patient peut seulement annuler son propre rendez-vous.
+      if (status !== 'ANNULE') {
+        throw new ForbiddenException(
+          'Vous pouvez seulement annuler votre rendez-vous.',
+        );
+      }
+    } else {
+      // Soignant : permission d'écriture + lien avec le rendez-vous (médecin ou structure).
+      const aPermission = await this.permissionsService.hasPermissions(
+        actorId,
+        [PERMISSIONS.RENDEZVOUS_WRITE],
+      );
+      const estMedecin = actorId === rv.medecinId;
+      const estDeLaStructure =
+        !!rv.structureId && rv.structureId === actorStructureId;
+      if (!aPermission || !(estMedecin || estDeLaStructure)) {
+        throw new ForbiddenException("Vous n'avez pas accès à ce rendez-vous.");
+      }
+    }
+
+    const updated = await this.prisma.rendezVous.update({
+      where: { id: rvId },
+      data: { status },
+    });
+    return {
+      data: updated,
+      message: 'Statut du rendez-vous mis à jour',
+      success: true,
+    };
   }
-
-
 
   // ─── Helpers de Décryptage ───────────────────────────────────
 
-  private decryptProfil(profil: any) {
+  /** Déchiffre une valeur optionnelle : null reste null (comportement de decrypt). */
+  private decryptNullable(value: string | null): string | null {
+    return value === null ? null : this.encryptionService.decrypt(value);
+  }
+
+  private decryptProfil<
+    T extends Pick<ProfilMedical, 'allergies' | 'pathologies' | 'traitements'>,
+  >(profil: T) {
     return {
       ...profil,
       allergies: this.encryptionService.decrypt(profil.allergies || ''),
@@ -762,39 +1030,71 @@ export class CarnetSanteService {
     };
   }
 
-  private decryptConsultation(c: any) {
+  /**
+   * Fiche d'urgence transmise aux soignants lors d'un SOS : uniquement ce qui sert à
+   * intervenir (groupe sanguin, allergies, pathologies, traitements). Jamais le profil
+   * complet (poids, taille, date de naissance, coordonnées du proche...).
+   */
+  private ficheUrgence(
+    profil: Pick<
+      ProfilMedical,
+      'groupeSanguin' | 'allergies' | 'pathologies' | 'traitements'
+    > | null,
+  ) {
+    if (!profil) return null;
+    const dechiffre = this.decryptProfil(profil);
     return {
-      ...c,
-      motif: this.encryptionService.decrypt(c.motif),
-      diagnostic: this.encryptionService.decrypt(c.diagnostic),
-      notes: this.encryptionService.decrypt(c.notes),
+      groupeSanguin: profil.groupeSanguin,
+      allergies: dechiffre.allergies,
+      pathologies: dechiffre.pathologies,
+      traitements: dechiffre.traitements,
     };
   }
 
-  private decryptOrdonnance(o: any) {
+  private decryptConsultation<
+    T extends Pick<Consultation, 'motif' | 'diagnostic' | 'notes'>,
+  >(c: T) {
+    return {
+      ...c,
+      motif: this.encryptionService.decrypt(c.motif),
+      diagnostic: this.decryptNullable(c.diagnostic),
+      notes: this.decryptNullable(c.notes),
+    };
+  }
+
+  private decryptOrdonnance<
+    T extends Pick<Ordonnance, 'medicaments' | 'notes'>,
+  >(o: T) {
     const decryptedMedicaments = this.encryptionService.decrypt(o.medicaments);
     return {
       ...o,
       medicaments: this.safeJsonParse(decryptedMedicaments),
-      notes: this.encryptionService.decrypt(o.notes),
+      notes: this.decryptNullable(o.notes),
     };
   }
 
-  private decryptAnalyse(a: any) {
+  private decryptAnalyse<
+    T extends Pick<
+      ResultatAnalyse,
+      'typeAnalyse' | 'laboratoire' | 'resultats' | 'notes'
+    >,
+  >(a: T) {
     return {
       ...a,
       typeAnalyse: this.encryptionService.decrypt(a.typeAnalyse),
-      laboratoire: this.encryptionService.decrypt(a.laboratoire),
+      laboratoire: this.decryptNullable(a.laboratoire),
       resultats: this.encryptionService.decrypt(a.resultats),
-      notes: this.encryptionService.decrypt(a.notes),
+      notes: this.decryptNullable(a.notes),
     };
   }
 
-  private decryptVaccination(v: any) {
+  private decryptVaccination<T extends Pick<Vaccination, 'vaccin' | 'notes'>>(
+    v: T,
+  ) {
     return {
       ...v,
       vaccin: this.encryptionService.decrypt(v.vaccin),
-      notes: this.encryptionService.decrypt(v.notes),
+      notes: this.decryptNullable(v.notes),
     };
   }
 
@@ -828,14 +1128,19 @@ export class CarnetSanteService {
     });
 
     // 2. Appel à l'IA
-    const result = await this.aiService.predictMaladie(dto.symptomes);
+    const result = (await this.aiService.predictMaladie(dto.symptomes)) as {
+      reponse?: string;
+      maladie: string;
+    };
 
     // 3. Mise à jour avec le résultat
     const updated = await this.prisma.autoDiagnostic.update({
       where: { id: diagnostic.id },
       data: {
         analyseia: JSON.stringify(result),
-        recommendation: this.encryptionService.encrypt(result.reponse || result.maladie),
+        recommendation: this.encryptionService.encrypt(
+          result.reponse || result.maladie,
+        ),
       },
     });
 
@@ -844,7 +1149,7 @@ export class CarnetSanteService {
         ...updated,
         symptomes: dto.symptomes,
         recommendation: result.reponse || result.maladie,
-        analyseia: result
+        analyseia: result,
       },
       message: 'Analyse IA terminée avec succès.',
       success: true,
@@ -852,45 +1157,63 @@ export class CarnetSanteService {
   }
 
   async getResume(userId: string) {
-    const [profilMedical, nbConsultations, nbOrdonnances, nbAnalyses, nbVaccinations, prochainRappel] =
-      await Promise.all([
-        this.prisma.profilMedical.findUnique({ where: { userId } }),
-        this.prisma.consultation.count({ where: { patientId: userId, deletedAt: null } }),
-        this.prisma.ordonnance.count({ where: { patientId: userId, deletedAt: null } }),
-        this.prisma.resultatAnalyse.count({ where: { patientId: userId, deletedAt: null } }),
-        this.prisma.vaccination.count({ where: { patientId: userId, deletedAt: null } }),
-        // Prochain rappel vaccinal
-        this.prisma.vaccination.findFirst({
-          where: {
-            patientId: userId,
-            deletedAt: null,
-            prochainRappel: { gt: new Date() },
-          },
-          orderBy: { prochainRappel: 'asc' },
-          select: { vaccin: true, prochainRappel: true },
-        }),
-      ]);
+    const [
+      profilMedical,
+      nbConsultations,
+      nbOrdonnances,
+      nbAnalyses,
+      nbVaccinations,
+      prochainRappel,
+    ] = await Promise.all([
+      this.prisma.profilMedical.findUnique({ where: { userId } }),
+      this.prisma.consultation.count({
+        where: { patientId: userId, deletedAt: null },
+      }),
+      this.prisma.ordonnance.count({
+        where: { patientId: userId, deletedAt: null },
+      }),
+      this.prisma.resultatAnalyse.count({
+        where: { patientId: userId, deletedAt: null },
+      }),
+      this.prisma.vaccination.count({
+        where: { patientId: userId, deletedAt: null },
+      }),
+      // Prochain rappel vaccinal
+      this.prisma.vaccination.findFirst({
+        where: {
+          patientId: userId,
+          deletedAt: null,
+          prochainRappel: { gt: new Date() },
+        },
+        orderBy: { prochainRappel: 'asc' },
+        select: { vaccin: true, prochainRappel: true },
+      }),
+    ]);
 
     return {
       data: {
         profil: profilMedical ? this.decryptProfil(profilMedical) : null,
-        stats: { 
-          consultations: nbConsultations, 
-          ordonnances: nbOrdonnances, 
-          analyses: nbAnalyses, 
-          vaccinations: nbVaccinations 
+        stats: {
+          consultations: nbConsultations,
+          ordonnances: nbOrdonnances,
+          analyses: nbAnalyses,
+          vaccinations: nbVaccinations,
         },
-        prochainRappelVaccinal: prochainRappel ? {
-          ...prochainRappel,
-          vaccin: this.encryptionService.decrypt(prochainRappel.vaccin || '')
-        } : null,
+        prochainRappelVaccinal: prochainRappel
+          ? {
+              ...prochainRappel,
+              vaccin: this.encryptionService.decrypt(
+                prochainRappel.vaccin || '',
+              ),
+            }
+          : null,
       },
       message: 'Résumé du carnet de santé',
       success: true,
     };
   }
 
-  private safeJsonParse(value: string): any {
+  private safeJsonParse(value: string): unknown {
     try {
       return JSON.parse(value);
     } catch {
@@ -901,21 +1224,161 @@ export class CarnetSanteService {
   // ─── AI Emergency (First Aid) ─────────────────────────────────
 
   async getAiEmergencyInstructions(dto: AiEmergencyRequestDto) {
-    this.logger.log(`Demande d'instructions de secours IA: "${dto.question}"`);
+    // Jamais le contenu de la question dans les logs (donnée de santé)
+    this.logger.log("Demande d'instructions de secours IA reçue");
     const result = await this.aiService.getEmergencyFirstAid(dto.question);
-    
+
     return {
       success: true,
       data: result,
-      message: result.certain 
-        ? 'Instructions de secours récupérées.' 
-        : 'Instructions imprécises. En cas de doute, contactez les secours.'
+      message: result.certain
+        ? 'Instructions de secours récupérées.'
+        : 'Instructions imprécises. En cas de doute, contactez les secours.',
     };
   }
 
+  // Les 5 structures actives les plus proches d'une position (distance euclidienne simple).
+  private async structuresLesPlusProches(latitude: number, longitude: number) {
+    const structures = await this.prisma.structure.findMany({
+      where: { isActive: true },
+      select: {
+        id: true,
+        nom: true,
+        latitude: true,
+        longitude: true,
+        type: true,
+      },
+    });
 
+    // Calcul de distance simple (euclidienne pour l'exemple)
+    return structures
+      .filter((s) => s.latitude !== null && s.longitude !== null)
+      .map((s) => {
+        const lat = s.latitude!;
+        const lng = s.longitude!;
+        const dist = Math.sqrt(
+          Math.pow(lat - latitude, 2) + Math.pow(lng - longitude, 2),
+        );
+        return { ...s, dist };
+      })
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, 5);
+  }
+
+  // Dernière alerte encore active du patient (lancée ou prise en charge).
+  private derniereUrgenceActive(patientId: string) {
+    return this.prisma.urgence.findFirst({
+      where: {
+        patientId,
+        status: {
+          in: [UrgenceStatusEnum.LANCE, UrgenceStatusEnum.PRIS_EN_CHARGE],
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      include: { structurePriseEnCharge: { select: { id: true, nom: true } } },
+    });
+  }
+
+  // Fin du délai d'arrivée annoncé et heure à partir de laquelle le patient peut relancer
+  // une alerte (null si la relance est déjà possible).
+  private etatRelanceUrgence(
+    urgence: {
+      status: string;
+      createdAt: Date;
+      priseEnChargeAt: Date | null;
+      delaiArriveeMinutes: number | null;
+      latitude?: number | null;
+      longitude?: number | null;
+    },
+    maintenant: Date,
+  ) {
+    let finDelaiAt: Date | null = null;
+    let peutRelancerA: Date | null = null;
+
+    if (
+      urgence.status === 'PRIS_EN_CHARGE' &&
+      urgence.priseEnChargeAt &&
+      urgence.delaiArriveeMinutes
+    ) {
+      finDelaiAt = new Date(
+        urgence.priseEnChargeAt.getTime() +
+          urgence.delaiArriveeMinutes * 60_000,
+      );
+      if (finDelaiAt > maintenant) peutRelancerA = finDelaiAt;
+    } else if (
+      urgence.status === 'LANCE' &&
+      // Sans position, l'alerte n'a été diffusée à aucun établissement : le patient
+      // doit pouvoir relancer tout de suite (après avoir activé la localisation).
+      urgence.latitude != null &&
+      urgence.longitude != null
+    ) {
+      const finAntiDoublon = new Date(
+        urgence.createdAt.getTime() + SOS_ANTI_DOUBLON_MINUTES * 60_000,
+      );
+      if (finAntiDoublon > maintenant) peutRelancerA = finAntiDoublon;
+    }
+
+    return { finDelaiAt, peutRelancerA };
+  }
+
+  async getUrgenceEnCours(userId: string) {
+    const urgence = await this.derniereUrgenceActive(userId);
+    if (!urgence) {
+      return {
+        success: true,
+        data: null,
+        message: "Vous n'avez aucune alerte SOS en cours.",
+      };
+    }
+
+    const { finDelaiAt, peutRelancerA } = this.etatRelanceUrgence(
+      urgence,
+      new Date(),
+    );
+    return {
+      success: true,
+      data: {
+        ...urgence,
+        structurePriseEnCharge: urgence.structurePriseEnCharge ?? null,
+        finDelaiAt: finDelaiAt ? finDelaiAt.toISOString() : null,
+        peutRelancerA: peutRelancerA ? peutRelancerA.toISOString() : null,
+      },
+      message: 'Alerte SOS en cours',
+    };
+  }
 
   async createUrgence(userId: string, dto: CreateUrgenceDto) {
+    // Anti-relance : pas de nouvelle alerte tant que les secours sont attendus ou que
+    // la précédente vient juste d'être envoyée. L'ancienne alerte n'est jamais modifiée.
+    const derniere = await this.derniereUrgenceActive(userId);
+    if (derniere) {
+      const maintenant = new Date();
+      const { peutRelancerA } = this.etatRelanceUrgence(derniere, maintenant);
+      if (peutRelancerA) {
+        const minutes = Math.max(
+          1,
+          Math.ceil((peutRelancerA.getTime() - maintenant.getTime()) / 60_000),
+        );
+        const duree = `${minutes} minute${minutes > 1 ? 's' : ''}`;
+        const message =
+          derniere.status === 'PRIS_EN_CHARGE'
+            ? `Votre alerte a été prise en charge par ${derniere.structurePriseEnCharge?.nom ?? 'un établissement de santé'}. ` +
+              `Les secours sont attendus dans environ ${duree}. ` +
+              "Si personne n'est arrivé d'ici là, vous pourrez relancer une alerte."
+            : 'Votre alerte a déjà été envoyée aux établissements proches. ' +
+              `Vous pourrez en relancer une dans environ ${duree}.`;
+        this.logger.log(
+          `sos.relance_refusee urgenceId=${derniere.id} statut=${derniere.status}`,
+        );
+        throw new ConflictException({
+          statusCode: 409,
+          error: 'Conflict',
+          message,
+          peutRelancerA: peutRelancerA.toISOString(),
+        });
+      }
+    }
+
     const urgence = await this.prisma.urgence.create({
       data: {
         patientId: userId,
@@ -930,32 +1393,50 @@ export class CarnetSanteService {
             nom: true,
             prenom: true,
             telephone: true,
+            email: true,
             profilMedical: true,
-          }
-        }
-      }
+          },
+        },
+      },
     });
 
     const contactEmail = urgence.patient.profilMedical?.contactEmail;
     const contactNom = urgence.patient.profilMedical?.contactNom || 'Proche';
     const contactTel = urgence.patient.profilMedical?.contactTelephone;
-    const hasLocation = dto.latitude !== undefined && dto.longitude !== undefined && dto.latitude !== null && dto.longitude !== null;
-    
+    const hasLocation =
+      dto.latitude !== undefined &&
+      dto.longitude !== undefined &&
+      dto.latitude !== null &&
+      dto.longitude !== null;
+
+    // Compte démo : aucun email ni SMS réel vers le proche (coordonnées fictives qui
+    // peuvent appartenir à quelqu'un). La diffusion interne aux soignants reste active.
+    const envoisExternesBloques = estCompteDemo(urgence.patient.email);
+    if (envoisExternesBloques && (contactEmail || contactTel)) {
+      this.logger.log(
+        `sos.demo urgenceId=${urgence.id} email et SMS au proche non envoyés (compte démo)`,
+      );
+    }
+
     // 1. Email d'alerte → file asynchrone (réponse immédiate, retries automatiques).
-    if (contactEmail) {
+    if (contactEmail && !envoisExternesBloques) {
       await this.queueService.enqueueEmergencyEmail({
         to: contactEmail,
         contactNom,
         patientNom: urgence.patient.nom,
         patientPrenom: urgence.patient.prenom,
-        location: hasLocation ? { lat: dto.latitude!, lng: dto.longitude! } : undefined,
+        location: hasLocation
+          ? { lat: dto.latitude!, lng: dto.longitude! }
+          : undefined,
         message: dto.message,
       });
     }
 
     // 2. SMS d'urgence (Nimba) → file asynchrone.
-    if (contactTel) {
-      const locationStr = hasLocation ? `Position: https://www.google.com/maps?q=${dto.latitude},${dto.longitude}` : undefined;
+    if (contactTel && !envoisExternesBloques) {
+      const locationStr = hasLocation
+        ? `Position: https://www.google.com/maps?q=${dto.latitude},${dto.longitude}`
+        : undefined;
       await this.queueService.enqueueSos({
         recipients: [String(contactTel)],
         patientName: `${urgence.patient.prenom} ${urgence.patient.nom}`,
@@ -963,33 +1444,18 @@ export class CarnetSanteService {
       });
     }
 
-    // 3. Notifier les 5 structures les plus proches
+    // 3. Notifier les 5 structures les plus proches, mais seulement les membres qui
+    //    ont la permission de traiter les alertes (sos:respond). L'accueil, les
+    //    pharmaciens et les administrateurs sans cette permission ne reçoivent ni
+    //    l'alerte ni la fiche d'urgence du patient.
+    let structuresAlertees = 0;
+    let soignantsAlertes = 0;
     if (hasLocation) {
-      const structures = await this.prisma.structure.findMany({
-        where: { isActive: true },
-        select: { id: true, nom: true, latitude: true, longitude: true, type: true }
-      });
-
-      // Calcul de distance simple (euclidienne pour l'exemple)
-      const sortedStructures = structures
-        .filter(s => s.latitude !== null && s.longitude !== null)
-        .map(s => {
-          const lat = s.latitude!;
-          const lng = s.longitude!;
-          const dist = Math.sqrt(
-            Math.pow(lat - dto.latitude!, 2) + 
-            Math.pow(lng - dto.longitude!, 2)
-          );
-          return { ...s, dist };
-        })
-        .sort((a, b) => a.dist - b.dist)
-        .slice(0, 5);
-
-      // Ni les coordonnées GPS du patient ni son identité ne sont journalisées :
-      // seuls l'ID de l'urgence et les structures notifiées le sont (audit #8).
-      this.logger.log(
-        `sos.proximite_notifiee urgenceId=${urgence.id} structures=${sortedStructures.length}`,
+      const sortedStructures = await this.structuresLesPlusProches(
+        dto.latitude!,
+        dto.longitude!,
       );
+
       const alertData = {
         urgenceId: urgence.id,
         patientId: urgence.patientId,
@@ -998,76 +1464,146 @@ export class CarnetSanteService {
         longitude: dto.longitude,
         message: dto.message,
         createdAt: urgence.createdAt,
-        profilMedical: urgence.patient.profilMedical ? this.decryptProfil(urgence.patient.profilMedical) : null
+        // Fiche d'urgence réduite, jamais le profil médical complet.
+        profilMedical: this.ficheUrgence(urgence.patient.profilMedical),
       };
 
       for (const s of sortedStructures) {
-        this.logger.debug(
-          `sos.structure_notifiee structureId=${s.id} distanceKm=${(s.dist * 111).toFixed(2)}`,
-        );
-
-        // Trouver tous les membres de la structure (admin + membres)
         const members = await this.prisma.user.findMany({
           where: {
             OR: [
               { structureId: s.id },
-              { administeredStructure: { id: s.id } }
+              { administeredStructure: { id: s.id } },
             ],
-            isActive: true
+            isActive: true,
           },
-          select: { id: true }
+          select: { id: true },
         });
 
-        const memberIds = members.map(m => m.id);
-        if (memberIds.length > 0) {
-          this.chatGateway.sendEmergencyAlert(memberIds, alertData);
-          
-          // Ajouter une notification persistante
-          await this.notificationsService.createManyNotifications(
-            memberIds,
-            {
-              type: 'SOS_ALERTE',
-              titre: 'Alerte SOS à proximité',
-              message: `URGENCE : Un patient (${alertData.patientName}) a besoin d'aide à proximité.`,
-              lien: '/dashboard/urgences'
-            }
-          );
+        const soignants: string[] = [];
+        for (const m of members) {
+          if (
+            await this.permissionsService.hasPermissions(m.id, [
+              PERMISSIONS.SOS_RESPOND,
+            ])
+          ) {
+            soignants.push(m.id);
+          }
         }
+
+        this.logger.debug(
+          `sos.structure_notifiee structureId=${s.id} distanceKm=${(s.dist * 111).toFixed(2)} soignants=${soignants.length}`,
+        );
+        if (soignants.length === 0) continue;
+
+        structuresAlertees++;
+        soignantsAlertes += soignants.length;
+        this.chatGateway.sendEmergencyAlert(soignants, alertData);
+        await this.notificationsService.createManyNotifications(soignants, {
+          type: 'SOS_ALERTE',
+          titre: 'Alerte SOS à proximité',
+          message: `URGENCE : Un patient (${alertData.patientName}) a besoin d'aide à proximité.`,
+          lien: '/dashboard',
+        });
       }
     }
 
-    // Notification Patient
+    // Ni les coordonnées GPS du patient ni son identité ne sont journalisées (audit #8).
+    this.logger.log(
+      `sos.diffusion urgenceId=${urgence.id} position=${hasLocation} structures=${structuresAlertees} soignants=${soignantsAlertes}`,
+    );
+
+    // Le patient doit savoir exactement qui a été prévenu : jamais de faux succès.
+    const procheAlerte =
+      !envoisExternesBloques && Boolean(contactEmail || contactTel);
+    let proche = '';
+    if (procheAlerte) {
+      proche = ` Votre proche (${contactNom}) a été prévenu.`;
+    } else if (envoisExternesBloques && (contactEmail || contactTel)) {
+      proche =
+        " Compte de démonstration : votre proche n'a pas été prévenu (aucun email ni SMS n'est envoyé).";
+    }
+    let message: string;
+    if (structuresAlertees > 0) {
+      message =
+        `Alerte envoyée à ${structuresAlertees} établissement${structuresAlertees > 1 ? 's' : ''} de santé proche${structuresAlertees > 1 ? 's' : ''}.` +
+        `${proche} Restez calme, un soignant va prendre en charge votre alerte.`;
+    } else if (!hasLocation) {
+      message =
+        "Votre position n'a pas pu être obtenue : aucun établissement de santé n'a été alerté." +
+        `${proche} Appelez immédiatement les secours, puis activez la localisation et relancez l'alerte.`;
+    } else {
+      message =
+        "Aucun soignant disponible n'a pu être alerté près de vous." +
+        `${proche} Appelez immédiatement les secours.`;
+    }
+
     await this.notificationsService.createNotification({
       userId: userId,
       type: 'SOS_DECLENCHE',
       titre: 'SOS Lancé',
-      message: 'Votre alerte SOS a été transmise aux structures médicales proches. Restez calme.',
+      message,
     });
 
-    return { success: true, data: urgence, message: "Alerte SOS envoyée avec succès" };
+    // Pas de profil médical (chiffré) dans la réponse : le patient n'en a pas besoin ici.
+    const urgenceSansPatient = Object.fromEntries(
+      Object.entries(urgence).filter(([cle]) => cle !== 'patient'),
+    );
+    return {
+      success: true,
+      data: {
+        ...urgenceSansPatient,
+        structuresAlertees,
+        soignantsAlertes,
+        procheAlerte,
+        positionTransmise: hasLocation,
+      },
+      message,
+    };
   }
 
-  async takeCharge(urgenceId: string, userId: string) {
+  async takeCharge(
+    urgenceId: string,
+    userId: string,
+    dto: TakeChargeUrgenceDto,
+  ) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: { structure: true }
+      include: { structure: true, administeredStructure: true },
     });
 
-    if (!user) throw new NotFoundException("Utilisateur non trouvé");
+    if (!user) throw new NotFoundException('Utilisateur non trouvé');
 
     const urgence = await this.prisma.urgence.findUnique({
-      where: { id: urgenceId }
+      where: { id: urgenceId },
     });
 
-    if (!urgence) throw new NotFoundException("Urgence non trouvée");
-    if (urgence.status !== UrgenceStatusEnum.LANCE) {
-      throw new BadRequestException("Cette urgence est déjà prise en charge ou terminée");
+    if (!urgence) throw new NotFoundException('Urgence non trouvée');
+    if (urgence.status !== UrgenceStatus.LANCE) {
+      throw new BadRequestException(
+        'Cette urgence est déjà prise en charge ou terminée',
+      );
     }
+
+    // Structure qui intervient : celle du soignant, ou celle qu'il administre.
+    const structure = user.structure ?? user.administeredStructure ?? null;
+    const handledAt = new Date();
+    const delaiArriveeMinutes = dto.delaiArriveeMinutes;
+    const finDelaiAt = new Date(
+      handledAt.getTime() + delaiArriveeMinutes * 60_000,
+    );
 
     const updatedUrgence = await this.prisma.urgence.update({
       where: { id: urgenceId },
-      data: { status: UrgenceStatusEnum.PRIS_EN_CHARGE },
-      include: { patient: true }
+      data: {
+        status: UrgenceStatusEnum.PRIS_EN_CHARGE,
+        structurePriseEnChargeId: structure?.id ?? null,
+        priseEnChargeParId: userId,
+        priseEnChargeAt: handledAt,
+        delaiArriveeMinutes,
+      },
+      // Seuls les champs utiles : ne jamais renvoyer l'objet utilisateur complet du patient.
+      include: { patient: { select: { id: true, nom: true, prenom: true } } },
     });
 
     // Notification Patient
@@ -1075,20 +1611,53 @@ export class CarnetSanteService {
       userId: updatedUrgence.patientId,
       type: 'SOS_PRIS_EN_CHARGE',
       titre: 'SOS Pris en charge',
-      message: `${user.structure?.nom || 'Une structure'} a pris en charge votre alerte SOS.`,
+      message:
+        `${structure?.nom || 'Un établissement de santé'} a pris en charge votre alerte. ` +
+        `Les secours arrivent dans environ ${delaiArriveeMinutes} minute${delaiArriveeMinutes > 1 ? 's' : ''}.`,
     });
 
-    // Broadcast à TOUS les médecins/structures pour informer que c'est pris
-    this.chatGateway.server.emit('emergencyHandled', {
+    // Diffusion ciblée : le patient, les structures notifiées à l'origine (recalculées
+    // depuis la position de l'alerte), la structure qui intervient et le soignant.
+    const structureIds = new Set<string>();
+    if (structure) structureIds.add(structure.id);
+    if (urgence.latitude !== null && urgence.longitude !== null) {
+      const proches = await this.structuresLesPlusProches(
+        urgence.latitude,
+        urgence.longitude,
+      );
+      proches.forEach((s) => structureIds.add(s.id));
+    }
+    const destinataires = new Set<string>([updatedUrgence.patientId, userId]);
+    if (structureIds.size > 0) {
+      const ids = [...structureIds];
+      const membres = await this.prisma.user.findMany({
+        where: {
+          OR: [
+            { structureId: { in: ids } },
+            { administeredStructure: { id: { in: ids } } },
+          ],
+          isActive: true,
+        },
+        select: { id: true },
+      });
+      membres.forEach((m) => destinataires.add(m.id));
+    }
+
+    this.chatGateway.sendEmergencyHandled([...destinataires], {
       urgenceId: urgenceId,
-      structureName: user.structure?.nom || `${user.prenom} ${user.nom}`,
-      handledAt: new Date()
+      structureName: structure?.nom || `${user.prenom} ${user.nom}`,
+      handledAt,
+      delaiArriveeMinutes,
+      finDelaiAt,
     });
+    this.logger.log(
+      `sos.pris_en_charge urgenceId=${urgenceId} structureId=${structure?.id ?? 'aucune'} destinataires=${destinataires.size}`,
+    );
 
-    return { 
-      success: true, 
-      data: updatedUrgence, 
-      message: `Vous avez pris en charge l'urgence de ${updatedUrgence.patient.prenom}` 
+    return {
+      success: true,
+      data: updatedUrgence,
+      message: `Vous avez pris en charge l'urgence de ${updatedUrgence.patient.prenom}`,
     };
   }
 
@@ -1102,30 +1671,35 @@ export class CarnetSanteService {
             prenom: true,
             telephone: true,
             profilMedical: true,
-          }
-        }
+          },
+        },
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
     });
 
-    return { 
-      data: urgences.map(u => ({
+    return {
+      data: urgences.map((u) => ({
         ...u,
         patient: {
           ...u.patient,
-          profilMedical: u.patient.profilMedical ? this.decryptProfil(u.patient.profilMedical) : null
-        }
-      })), 
-      message: `${urgences.length} alerte(s) active(s)`, 
-      success: true 
+          // Fiche d'urgence réduite, jamais le profil médical complet.
+          profilMedical: this.ficheUrgence(u.patient.profilMedical),
+        },
+      })),
+      message: `${urgences.length} alerte(s) active(s)`,
+      success: true,
     };
   }
 
-  async updateUrgenceStatus(id: string, status: any) {
+  async updateUrgenceStatus(id: string, status: UrgenceStatus) {
     const urgence = await this.prisma.urgence.update({
       where: { id },
-      data: { status },
+      data: { status: status },
     });
-    return { data: urgence, message: "Statut de l'urgence mis à jour", success: true };
+    return {
+      data: urgence,
+      message: "Statut de l'urgence mis à jour",
+      success: true,
+    };
   }
 }

@@ -3,9 +3,11 @@ import {
   Logger,
   UnauthorizedException,
   ConflictException,
-  BadRequestException,
   NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
+import type { Prisma } from 'generated/prisma/client';
+import { estCompteDemo, estModeDemoActif } from 'src/demo/demo-mode';
 import { JwtService } from '@nestjs/jwt';
 import { Response } from 'express';
 import * as bcrypt from 'bcrypt';
@@ -30,6 +32,24 @@ export type UserPayload = {
   structureId?: string;
 };
 
+/** Champs lus pour ouvrir une session (connexion classique et connexion démo). */
+const CHAMPS_SESSION = {
+  id: true,
+  email: true,
+  nom: true,
+  prenom: true,
+  role: true,
+  isActive: true,
+  structureId: true,
+  dateNaissance: true,
+  taille: true,
+  poids: true,
+} satisfies Prisma.UserSelect;
+
+type UtilisateurSession = Prisma.UserGetPayload<{
+  select: typeof CHAMPS_SESSION;
+}>;
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -41,12 +61,18 @@ export class AuthService {
     private readonly loginThrottle: LoginThrottleService,
     private readonly rolesService: RolesService,
     private readonly permissionsService: PermissionsService,
-  ) { }
+  ) {}
 
   /** Résout l'appRoleId à assigner (non bloquant : null en cas d'échec, le backfill rattrape). */
-  private async resolveAppRoleId(legacyRole: string, structureId?: string | null): Promise<string | null> {
+  private async resolveAppRoleId(
+    legacyRole: string,
+    structureId?: string | null,
+  ): Promise<string | null> {
     try {
-      return await this.rolesService.resolveAssignableRoleId({ legacyRole, structureId });
+      return await this.rolesService.resolveAssignableRoleId({
+        legacyRole,
+        structureId,
+      });
     } catch {
       return null;
     }
@@ -62,19 +88,7 @@ export class AuthService {
 
     const user = await this.prisma.user.findUnique({
       where: { email: email.toLowerCase() },
-      select: {
-        id: true,
-        email: true,
-        nom: true,
-        prenom: true,
-        password: true,
-        role: true,
-        isActive: true,
-        structureId: true,
-        dateNaissance: true,
-        taille: true,
-        poids: true,
-      },
+      select: { ...CHAMPS_SESSION, password: true },
     });
 
     if (!user) {
@@ -96,7 +110,9 @@ export class AuthService {
       if (blockedNow) {
         this.emailService
           .sendSuspiciousLoginEmail(user.email, user.nom, user.prenom, ip)
-          .catch((e) => this.logger.error("Email d'alerte de connexion échoué", e));
+          .catch((e) =>
+            this.logger.error("Email d'alerte de connexion échoué", e),
+          );
       }
       throw new UnauthorizedException('Email ou mot de passe incorrect');
     }
@@ -104,13 +120,49 @@ export class AuthService {
     // Connexion réussie → remise à zéro des compteurs anti-brute-force.
     await this.loginThrottle.reset(email, ip);
 
-    const { access_token, refreshToken, refreshTokenExpires } = this.generateTokens({ 
-      userId: user.id, 
-      role: user.role,
-      structureId: user.structureId ?? undefined 
+    return this.ouvrirSession(user, res);
+  }
+
+  // ─── Connexion démo (mode démo uniquement) ────────────────────
+
+  /**
+   * Ouvre une session sur un compte de démonstration, sans mot de passe.
+   * Même réponse et mêmes effets que `login` (jetons, cookie, refresh haché).
+   * Refuse (403) tout compte absent, inactif ou dont l'email n'est pas en
+   * `@demo.medconnecte.gn`, y compris un vrai compte. 404 si le mode est inactif.
+   */
+  async connexionDemo(userId: string, res: Response) {
+    if (!estModeDemoActif()) {
+      throw new NotFoundException();
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: CHAMPS_SESSION,
     });
 
-    const hashedRefresh = crypto.createHash('sha256').update(refreshToken).digest('hex');
+    if (!user || !user.isActive || !estCompteDemo(user.email)) {
+      throw new ForbiddenException(
+        "Ce compte n'est pas un compte de démonstration. Choisissez un compte dans la liste proposée.",
+      );
+    }
+
+    return this.ouvrirSession(user, res);
+  }
+
+  /** Émet les jetons, enregistre le refresh haché, pose le cookie et construit la réponse de connexion. */
+  private async ouvrirSession(user: UtilisateurSession, res: Response) {
+    const { access_token, refreshToken, refreshTokenExpires } =
+      this.generateTokens({
+        userId: user.id,
+        role: user.role,
+        structureId: user.structureId ?? undefined,
+      });
+
+    const hashedRefresh = crypto
+      .createHash('sha256')
+      .update(refreshToken)
+      .digest('hex');
     await this.prisma.user.update({
       where: { id: user.id },
       data: { refreshToken: hashedRefresh, refreshTokenExpires },
@@ -149,7 +201,16 @@ export class AuthService {
   // ─── Register (patients uniquement) ──────────────────────────
 
   async register(registerDto: RegisterDto, res: Response) {
-    const { nom, prenom, email, password, telephone, dateNaissance, taille, poids } = registerDto;
+    const {
+      nom,
+      prenom,
+      email,
+      password,
+      telephone,
+      dateNaissance,
+      taille,
+      poids,
+    } = registerDto;
 
     const existingUser = await this.prisma.user.findUnique({
       where: { email: email.toLowerCase() },
@@ -187,9 +248,13 @@ export class AuthService {
       },
     });
 
-    const { access_token, refreshToken, refreshTokenExpires } = this.generateTokens({ userId: user.id, role: user.role });
+    const { access_token, refreshToken, refreshTokenExpires } =
+      this.generateTokens({ userId: user.id, role: user.role });
 
-    const hashedRefresh = crypto.createHash('sha256').update(refreshToken).digest('hex');
+    const hashedRefresh = crypto
+      .createHash('sha256')
+      .update(refreshToken)
+      .digest('hex');
     await this.prisma.user.update({
       where: { id: user.id },
       data: { refreshToken: hashedRefresh, refreshTokenExpires },
@@ -256,7 +321,8 @@ export class AuthService {
     }
 
     // Résoudre les permissions effectives de l'utilisateur
-    const permissions = await this.permissionsService.getUserPermissions(userId);
+    const permissions =
+      await this.permissionsService.getUserPermissions(userId);
 
     // URL publique de l'avatar (bucket public R2 servi via R2_PUBLIC_URL), null si aucun.
     // Résolu inline (pas d'injection de StorageService : StorageModule importe déjà
@@ -280,28 +346,48 @@ export class AuthService {
       throw new UnauthorizedException('Utilisateur non trouvé ou inactif');
     }
 
+    // Un compte démo garde son email : c'est lui qui le signe comme compte démo.
+    if (
+      dto.email &&
+      dto.email.toLowerCase() !== user.email &&
+      estCompteDemo(user.email)
+    ) {
+      throw new ForbiddenException(
+        "L'email d'un compte de démonstration ne peut pas être modifié.",
+      );
+    }
+
     // Vérifier unicité du nouvel email
     if (dto.email && dto.email !== user.email) {
       const existing = await this.prisma.user.findUnique({
         where: { email: dto.email.toLowerCase() },
       });
       if (existing) {
-        throw new ConflictException('Cet email est déjà utilisé par un autre compte');
+        throw new ConflictException(
+          'Cet email est déjà utilisé par un autre compte',
+        );
       }
     }
 
-    const updateData: any = {};
+    const updateData: Prisma.UserUpdateInput = {};
     if (dto.nom !== undefined) updateData.nom = dto.nom.trim();
     if (dto.prenom !== undefined) updateData.prenom = dto.prenom.trim();
     if (dto.email !== undefined) updateData.email = dto.email.toLowerCase();
-    if (dto.telephone !== undefined) updateData.telephone = dto.telephone.trim();
-    if (dto.dateNaissance !== undefined) updateData.dateNaissance = new Date(dto.dateNaissance);
+    if (dto.telephone !== undefined)
+      updateData.telephone = dto.telephone.trim();
+    if (dto.dateNaissance !== undefined)
+      updateData.dateNaissance = new Date(dto.dateNaissance);
     if (dto.taille !== undefined) updateData.taille = dto.taille;
     if (dto.poids !== undefined) updateData.poids = dto.poids;
 
     if (Object.keys(updateData).length === 0) {
       return {
-        data: { id: user.id, nom: user.nom, prenom: user.prenom, email: user.email },
+        data: {
+          id: user.id,
+          nom: user.nom,
+          prenom: user.prenom,
+          email: user.email,
+        },
         message: 'Aucune modification effectuée',
         success: true,
       };
@@ -339,6 +425,13 @@ export class AuthService {
       throw new UnauthorizedException('Utilisateur non trouvé ou inactif');
     }
 
+    // Un compte démo reste sans mot de passe connu : il ne s'ouvre que par la connexion démo.
+    if (estCompteDemo(user.email)) {
+      throw new ForbiddenException(
+        "Le mot de passe d'un compte de démonstration ne peut pas être modifié.",
+      );
+    }
+
     const isValid = await bcrypt.compare(dto.currentPassword, user.password);
     if (!isValid) {
       throw new UnauthorizedException('Le mot de passe actuel est incorrect');
@@ -372,10 +465,16 @@ export class AuthService {
       where: { email: dto.email.toLowerCase() },
     });
 
-    if (!user || !user.isActive) return genericResponse;
+    // Compte démo : aucune réinitialisation possible (boîte mail fictive, accès par connexion démo).
+    if (!user || !user.isActive || estCompteDemo(user.email)) {
+      return genericResponse;
+    }
 
     const resetToken = crypto.randomBytes(32).toString('hex');
-    const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+    const hashedToken = crypto
+      .createHash('sha256')
+      .update(resetToken)
+      .digest('hex');
 
     await this.prisma.user.update({
       where: { id: user.id },
@@ -429,7 +528,8 @@ export class AuthService {
 
     return {
       data: null,
-      message: 'Mot de passe réinitialisé avec succès. Vous pouvez vous connecter.',
+      message:
+        'Mot de passe réinitialisé avec succès. Vous pouvez vous connecter.',
       success: true,
     };
   }
@@ -465,19 +565,18 @@ export class AuthService {
     return bcrypt.hash(password, 12);
   }
 
-  
   generateTokens(payload: UserPayload) {
     const access_token = this.jwtService.sign(payload, {
       secret: process.env.JWT_SECRET,
       expiresIn: '15m', // ← 15 minutes au lieu de 5
     });
- 
+
     const refreshToken = crypto.randomBytes(40).toString('hex');
     const refreshTokenExpires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 jours
- 
+
     return { access_token, refreshToken, refreshTokenExpires };
   }
- 
+
   generateToken(payload: UserPayload): string {
     return this.jwtService.sign(payload, {
       secret: process.env.JWT_SECRET,
@@ -485,9 +584,11 @@ export class AuthService {
     });
   }
 
-
   async refreshAccessToken(rawRefreshToken: string, res: Response) {
-    const hashed = crypto.createHash('sha256').update(rawRefreshToken).digest('hex');
+    const hashed = crypto
+      .createHash('sha256')
+      .update(rawRefreshToken)
+      .digest('hex');
 
     const user = await this.prisma.user.findFirst({
       where: {
@@ -497,16 +598,26 @@ export class AuthService {
       },
     });
 
-    if (!user) throw new UnauthorizedException('Refresh token invalide ou expiré. Reconnectez-vous.');
+    if (!user)
+      throw new UnauthorizedException(
+        'Refresh token invalide ou expiré. Reconnectez-vous.',
+      );
 
     // Rotation : générer un nouveau refresh token à chaque appel
-    const { access_token, refreshToken: newRefresh, refreshTokenExpires } = this.generateTokens({
+    const {
+      access_token,
+      refreshToken: newRefresh,
+      refreshTokenExpires,
+    } = this.generateTokens({
       userId: user.id,
       role: user.role,
       structureId: user.structureId ?? undefined,
     });
 
-    const hashedNew = crypto.createHash('sha256').update(newRefresh).digest('hex');
+    const hashedNew = crypto
+      .createHash('sha256')
+      .update(newRefresh)
+      .digest('hex');
     await this.prisma.user.update({
       where: { id: user.id },
       data: { refreshToken: hashedNew, refreshTokenExpires },

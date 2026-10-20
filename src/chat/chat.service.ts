@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import type { Conversation } from 'generated/prisma/client';
 import { PrismaService } from '../common/services/prisma.service';
 import { PermissionsService } from '../common/rbac/permissions.service';
 import { PERMISSIONS } from '../common/rbac/permissions.constants';
@@ -13,20 +18,17 @@ export class ChatService {
   async getConversations(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { structureId: true }
+      select: { structureId: true },
     });
 
-    const orConditions: any[] = [
-      { patientId: userId },
-      { medecinId: userId },
-    ];
+    const orConditions: any[] = [{ patientId: userId }, { medecinId: userId }];
 
     // Vérifier la permission chat:structure au lieu du simple check structureId
     if (user?.structureId) {
-      const hasChatStructurePermission = await this.permissionsService.hasPermissions(
-        userId,
-        [PERMISSIONS.CHAT_STRUCTURE]
-      );
+      const hasChatStructurePermission =
+        await this.permissionsService.hasPermissions(userId, [
+          PERMISSIONS.CHAT_STRUCTURE,
+        ]);
       if (hasChatStructurePermission) {
         orConditions.push({ structureId: user.structureId });
       }
@@ -36,55 +38,126 @@ export class ChatService {
       where: { OR: orConditions },
       include: {
         patient: { select: { id: true, nom: true, prenom: true } },
-        medecin: { select: { id: true, nom: true, prenom: true, specialite: true } },
+        medecin: {
+          select: { id: true, nom: true, prenom: true, specialite: true },
+        },
         structure: { select: { id: true, nom: true, type: true } },
         messages: {
           orderBy: { createdAt: 'desc' },
-          take: 1
-        }
+          take: 1,
+        },
       },
-      orderBy: { updatedAt: 'desc' }
+      orderBy: { updatedAt: 'desc' },
     });
   }
 
-  async getOrCreateConversation(patientId: string, type: 'PRIVE' | 'STRUCTURE', targetId: string) {
-    let conv;
+  async getOrCreateConversation(
+    patientId: string,
+    type: 'PRIVE' | 'STRUCTURE',
+    targetId: string,
+  ) {
+    let conv: Conversation | null;
     if (type === 'PRIVE') {
       conv = await this.prisma.conversation.findFirst({
-        where: { patientId, medecinId: targetId, type: 'PRIVE' }
+        where: { patientId, medecinId: targetId, type: 'PRIVE' },
       });
       if (!conv) {
         conv = await this.prisma.conversation.create({
-          data: { patientId, medecinId: targetId, type: 'PRIVE' }
+          data: { patientId, medecinId: targetId, type: 'PRIVE' },
         });
       }
     } else {
       conv = await this.prisma.conversation.findFirst({
-        where: { patientId, structureId: targetId, type: 'STRUCTURE' }
+        where: { patientId, structureId: targetId, type: 'STRUCTURE' },
       });
       if (!conv) {
         conv = await this.prisma.conversation.create({
-          data: { patientId, structureId: targetId, type: 'STRUCTURE' }
+          data: { patientId, structureId: targetId, type: 'STRUCTURE' },
         });
       }
     }
     return conv;
   }
 
+  /**
+   * Charge la conversation et dit si l'utilisateur en est participant.
+   * Règle identique à getConversations : patient, médecin, ou membre de la structure
+   * avec la permission chat:structure.
+   */
+  async checkAccess(conversationId: string, userId: string) {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { id: true, patientId: true, medecinId: true, structureId: true },
+    });
+    if (!conversation) return { conversation: null, allowed: false };
+
+    if (
+      conversation.patientId === userId ||
+      conversation.medecinId === userId
+    ) {
+      return { conversation, allowed: true };
+    }
+
+    if (conversation.structureId) {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { structureId: true },
+      });
+      if (user?.structureId === conversation.structureId) {
+        const allowed = await this.permissionsService.hasPermissions(userId, [
+          PERMISSIONS.CHAT_STRUCTURE,
+        ]);
+        return { conversation, allowed };
+      }
+    }
+    return { conversation, allowed: false };
+  }
+
+  async isParticipant(
+    conversationId: string,
+    userId: string,
+  ): Promise<boolean> {
+    return (await this.checkAccess(conversationId, userId)).allowed;
+  }
+
+  async assertParticipant(conversationId: string, userId: string) {
+    const { conversation, allowed } = await this.checkAccess(
+      conversationId,
+      userId,
+    );
+    if (!conversation) {
+      throw new NotFoundException('Cette conversation est introuvable.');
+    }
+    if (!allowed) {
+      throw new ForbiddenException(
+        "Vous n'avez pas accès à cette conversation.",
+      );
+    }
+    return conversation;
+  }
+
   async getMessages(conversationId: string, userId: string) {
+    await this.assertParticipant(conversationId, userId);
     return this.prisma.message.findMany({
       where: { conversationId },
       orderBy: { createdAt: 'asc' },
       include: {
-        sender: { select: { id: true, nom: true, prenom: true, role: true } }
-      }
+        sender: { select: { id: true, nom: true, prenom: true, role: true } },
+      },
     });
   }
 
-  async saveMessage(conversationId: string, senderId: string, content: string, isLocation: boolean = false, lat?: number, lng?: number) {
+  async saveMessage(
+    conversationId: string,
+    senderId: string,
+    content: string,
+    isLocation: boolean = false,
+    lat?: number,
+    lng?: number,
+  ) {
     await this.prisma.conversation.update({
       where: { id: conversationId },
-      data: { updatedAt: new Date() }
+      data: { updatedAt: new Date() },
     });
 
     return this.prisma.message.create({
@@ -94,11 +167,11 @@ export class ChatService {
         content,
         isLocation,
         latitude: lat,
-        longitude: lng
+        longitude: lng,
       },
       include: {
-        sender: { select: { id: true, nom: true, prenom: true, role: true } }
-      }
+        sender: { select: { id: true, nom: true, prenom: true, role: true } },
+      },
     });
   }
 }

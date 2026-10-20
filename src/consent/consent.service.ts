@@ -12,6 +12,7 @@ import * as QRCode from 'qrcode';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { SmsService } from 'src/common/services/sms.service';
 import { REDIS_CLIENT } from 'src/common/redis/redis.module';
+import { estCompteDemo, estModeDemoActif } from 'src/demo/demo-mode';
 
 /**
  * Consentement d'accès assisté par l'accueil (rôle « Accueil »).
@@ -67,7 +68,11 @@ export class ConsentService {
     const digits = phone.replace(/\D/g, '');
     const local9 = digits.slice(-9);
     return Array.from(
-      new Set([phone.trim(), digits, local9, `224${local9}`, `+224${local9}`].filter(Boolean)),
+      new Set(
+        [phone.trim(), digits, local9, `224${local9}`, `+224${local9}`].filter(
+          Boolean,
+        ),
+      ),
     );
   }
 
@@ -78,14 +83,22 @@ export class ConsentService {
     for (let attempt = 0; attempt < 5; attempt++) {
       const candidate = this.randomCode();
       // SET NX EX : ne réutilise pas un code déjà actif.
-      const ok = await this.redis.set(this.codeKey(candidate), patientId, 'EX', this.CODE_TTL_S, 'NX');
+      const ok = await this.redis.set(
+        this.codeKey(candidate),
+        patientId,
+        'EX',
+        this.CODE_TTL_S,
+        'NX',
+      );
       if (ok) {
         code = candidate;
         break;
       }
     }
     if (!code) {
-      throw new BadRequestException('Impossible de générer un code pour le moment, réessayez.');
+      throw new BadRequestException(
+        'Impossible de générer un code pour le moment, réessayez.',
+      );
     }
     const qrDataUrl = await QRCode.toDataURL(code, { width: 256, margin: 1 });
     return { code, qrDataUrl, expiresInSec: this.CODE_TTL_S };
@@ -109,8 +122,17 @@ export class ConsentService {
 
   async requestOtp(telephone: string, structureId: string) {
     const patient = await this.prisma.user.findFirst({
-      where: { telephone: { in: this.phoneCandidates(telephone) }, role: 'PATIENT' },
-      select: { id: true, nom: true, prenom: true, telephone: true },
+      where: {
+        telephone: { in: this.phoneCandidates(telephone) },
+        role: 'PATIENT',
+      },
+      select: {
+        id: true,
+        nom: true,
+        prenom: true,
+        telephone: true,
+        email: true,
+      },
     });
     if (!patient || !patient.telephone) {
       throw new NotFoundException(
@@ -129,6 +151,22 @@ export class ConsentService {
       select: { nom: true },
     });
     const nomStruct = structure?.nom ?? 'la structure';
+    // Compte démo : pas de vrai SMS (le numéro fictif peut appartenir à quelqu'un).
+    // Le code est renvoyé à l'accueil pour que la démonstration reste jouable, et
+    // seulement si le mode démo est actif.
+    if (estCompteDemo(patient.email)) {
+      this.logger.log(
+        `consent.otp_demo patientId=${patient.id} SMS non envoyé (compte démo)`,
+      );
+      return {
+        patientId: patient.id,
+        nom: patient.nom,
+        prenom: patient.prenom,
+        expiresInSec: this.OTP_TTL_S,
+        ...(estModeDemoActif() ? { codeDemo: code } : {}),
+        message: `Compte de démonstration : aucun SMS envoyé. Code de démonstration : ${estModeDemoActif() ? code : 'indisponible'}.`,
+      };
+    }
     await this.sms.sendSms(
       patient.telephone,
       `MedConnecte : code de partage de votre dossier = ${code} (valable 5 min). ` +
@@ -147,11 +185,18 @@ export class ConsentService {
   async verifyOtp(patientId: string, rawCode: string, structureId: string) {
     const raw = await this.redis.get(this.otpKey(patientId));
     if (!raw) {
-      throw new BadRequestException('Code expiré ou inexistant. Renvoyez un nouveau code.');
+      throw new BadRequestException(
+        'Code expiré ou inexistant. Renvoyez un nouveau code.',
+      );
     }
-    const { h, structureId: sid } = JSON.parse(raw) as { h: string; structureId: string };
+    const { h, structureId: sid } = JSON.parse(raw) as {
+      h: string;
+      structureId: string;
+    };
     if (sid !== structureId) {
-      throw new ForbiddenException('Ce code a été émis pour une autre structure.');
+      throw new ForbiddenException(
+        'Ce code a été émis pour une autre structure.',
+      );
     }
     if (this.hash(rawCode.trim()) !== h) {
       throw new BadRequestException('Code incorrect.');
@@ -162,7 +207,11 @@ export class ConsentService {
 
   // ─── Effet commun : accorder l'accès (idempotent) ─────────────────
 
-  private async grantAccess(patientId: string, structureId: string, via: 'code' | 'otp') {
+  private async grantAccess(
+    patientId: string,
+    structureId: string,
+    via: 'code' | 'otp',
+  ) {
     const patient = await this.prisma.user.findUnique({
       where: { id: patientId },
       select: { id: true, nom: true, prenom: true, role: true },
@@ -176,7 +225,9 @@ export class ConsentService {
     });
     const dejaAutorisee = !!existing;
     if (!existing) {
-      await this.prisma.autorisationStructure.create({ data: { patientId, structureId } });
+      await this.prisma.autorisationStructure.create({
+        data: { patientId, structureId },
+      });
     }
     this.logger.log(
       `Consentement d'accès enregistré (via ${via}) : patient=${patientId} structure=${structureId}` +
