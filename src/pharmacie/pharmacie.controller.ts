@@ -28,7 +28,9 @@ import {
   ApiBody,
   ApiProduces,
 } from '@nestjs/swagger';
-import { PharmacieService, MIME_XLSX } from './pharmacie.service';
+import { PharmacieService } from './pharmacie.service';
+import { CatalogueImportService } from './catalogue-import.service';
+import { MIME_XLSX } from './import-excel';
 import type { RequestWithUser } from 'src/auth/jwt.strategy';
 import { AuthGuard } from 'src/common/guards/auth.guard';
 import { PermissionsGuard } from 'src/common/rbac/permissions.guard';
@@ -42,7 +44,7 @@ import {
   FichierImport,
 } from './dto/pharmacie.dto';
 
-// Schéma Swagger du formulaire d'envoi du classeur
+// Schéma Swagger du formulaire d'envoi du classeur (stock et catalogue)
 const CORPS_IMPORT_STOCK = {
   schema: {
     type: 'object',
@@ -56,7 +58,10 @@ const LIMITES_IMPORT_STOCK = { limits: { fileSize: 10 * 1024 * 1024 } };
 @ApiTags('Pharmacie & Médicaments')
 @Controller('pharmacie')
 export class PharmacieController {
-  constructor(private readonly pharmacieService: PharmacieService) {}
+  constructor(
+    private readonly pharmacieService: PharmacieService,
+    private readonly catalogueImportService: CatalogueImportService,
+  ) {}
 
   // ─── Recherche publique ───────────────────────────────────────
 
@@ -124,6 +129,67 @@ export class PharmacieController {
   @ApiOperation({ summary: 'Ajouter un médicament au catalogue (Admin)' })
   createMedicament(@Body() dto: CreateMedicamentDto, @Req() req: any) {
     return this.pharmacieService.createMedicament(dto, req.user.userId);
+  }
+
+  // Import Excel du catalogue
+
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.CATALOGUE_WRITE)
+  @Get('catalogue/import/modele')
+  @ApiBearerAuth()
+  @ApiProduces(MIME_XLSX)
+  @ApiOperation({
+    summary: "Télécharger le modèle Excel d'import du catalogue",
+    description:
+      "Classeur .xlsx : feuille « Catalogue » (Nom, Nom générique, Catégorie, Description, Ordonnance requise, Formes) avec une ligne d'exemple, et feuille « Mode d'emploi ».",
+  })
+  async getModeleImportCatalogue(): Promise<StreamableFile> {
+    const contenu =
+      await this.catalogueImportService.getModeleImportCatalogue();
+    return new StreamableFile(contenu, {
+      type: MIME_XLSX,
+      disposition: 'attachment; filename="modele-import-catalogue.xlsx"',
+    });
+  }
+
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.CATALOGUE_WRITE)
+  @Post('catalogue/import/apercu')
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(FileInterceptor('fichier', LIMITES_IMPORT_STOCK))
+  @ApiBearerAuth()
+  @ApiConsumes('multipart/form-data')
+  @ApiBody(CORPS_IMPORT_STOCK)
+  @ApiOperation({
+    summary: "Aperçu de l'import Excel du catalogue",
+    description:
+      'Analyse le classeur (champ multipart `fichier`, .xlsx, 2 Mo et 1000 lignes max) sans rien écrire. Un médicament déjà au catalogue (nom comparé sans casse, accents ni espaces superflus) est rejeté. Renvoie { totalLignes, acceptees, rejetees, lignes[] }.',
+  })
+  apercuImportCatalogue(@UploadedFile() fichier?: FichierImport) {
+    return this.catalogueImportService.apercuImportCatalogue(fichier);
+  }
+
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.CATALOGUE_WRITE)
+  @Post('catalogue/import')
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(FileInterceptor('fichier', LIMITES_IMPORT_STOCK))
+  @ApiBearerAuth()
+  @ApiConsumes('multipart/form-data')
+  @ApiBody(CORPS_IMPORT_STOCK)
+  @ApiOperation({
+    summary: 'Importer des médicaments au catalogue depuis un fichier Excel',
+    description:
+      "Refait l'analyse de l'aperçu puis crée les médicaments acceptés en une transaction. Un médicament existant n'est jamais modifié. Renvoie le rapport + importees.",
+  })
+  importerCatalogue(
+    @Req() req: RequestWithUser,
+    @UploadedFile() fichier?: FichierImport,
+  ) {
+    return this.catalogueImportService.importerCatalogue(
+      fichier,
+      req.user.userId,
+    );
   }
 
   @UseGuards(AuthGuard, PermissionsGuard)

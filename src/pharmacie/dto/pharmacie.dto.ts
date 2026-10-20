@@ -153,15 +153,45 @@ export interface LigneImportStock {
   notes?: string;
 }
 
-/** Rapport renvoyé par l'aperçu et par l'import. */
-export interface RapportImportStock {
+/** Rapport renvoyé par l'aperçu et par l'import (stock ou catalogue). */
+export interface RapportImport<L> {
   totalLignes: number;
   acceptees: number;
   rejetees: number;
-  lignes: LigneImportStock[];
+  lignes: L[];
 }
+
+/** Rapport renvoyé par l'aperçu et par l'import du stock. */
+export type RapportImportStock = RapportImport<LigneImportStock>;
 
 /** Rapport de l'import, avec le nombre de lignes réellement écrites. */
 export interface ResultatImportStock extends RapportImportStock {
+  importees: number;
+}
+
+// Import Excel du catalogue des médicaments
+
+/** Résultat de l'analyse d'une ligne du classeur du catalogue. */
+export interface LigneImportCatalogue {
+  /** Numéro de la ligne dans Excel (la ligne 1 contient les titres). */
+  ligne: number;
+  /** Nom du médicament tel qu'écrit dans le fichier. */
+  nom: string;
+  statut: 'acceptee' | 'rejetee';
+  /** Raison du rejet, lisible par un administrateur non technicien. */
+  raison?: string;
+  nomGenerique?: string;
+  /** Catégorie retenue (orthographe du catalogue si elle existe déjà). */
+  categorie?: string;
+  description?: string;
+  ordonnanceRequise?: boolean;
+  formes?: string[];
+}
+
+/** Rapport renvoyé par l'aperçu et par l'import du catalogue. */
+export type RapportImportCatalogue = RapportImport<LigneImportCatalogue>;
+
+/** Rapport de l'import du catalogue, avec le nombre de médicaments créés. */
+export interface ResultatImportCatalogue extends RapportImportCatalogue {
   importees: number;
 }

@@ -17,27 +17,40 @@ import {
   LigneImportStock,
   RapportImportStock,
 } from './dto/pharmacie.dto';
-import { CellValue, Workbook } from 'exceljs';
+import { Workbook } from 'exceljs';
+import {
+  ColonnesImport,
+  lireLignesImport,
+  normaliserNom,
+  ouvrirFeuilleImport,
+  ValeurImport,
+} from './import-excel';
 
 import { NotificationsService } from 'src/notifications/notifications.service';
 
-/** Type MIME d'un classeur Excel .xlsx. */
-export const MIME_XLSX =
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-// Certains navigateurs envoient un type générique pour un .xlsx
-const MIMES_IMPORT_ACCEPTES = [
-  MIME_XLSX,
-  'application/octet-stream',
-  'application/zip',
-  '',
-];
-const TAILLE_MAX_IMPORT = 2 * 1024 * 1024;
-const LIGNES_MAX_IMPORT = 1000;
+export { MIME_XLSX } from './import-excel';
+
 const NOTES_MAX_IMPORT = 500;
 const SEUIL_STOCK_BAS = 10;
 
-type ValeurImport = string | number | boolean | Date | null;
 type ColonneImport = 'nom' | 'quantite' | 'prix' | 'date' | 'notes';
+
+/** Colonnes de la feuille « Stock ». */
+const COLONNES_IMPORT_STOCK: ColonnesImport<ColonneImport> = {
+  toutes: ['nom', 'quantite', 'prix', 'date', 'notes'],
+  reconnaitre: (titre) => {
+    if (titre === 'medicament') return 'nom';
+    if (titre === 'quantite') return 'quantite';
+    if (titre.startsWith('prix')) return 'prix';
+    if (titre.startsWith('date')) return 'date';
+    if (titre.startsWith('note')) return 'notes';
+    return undefined;
+  },
+  obligatoires: [
+    ['nom', 'Médicament'],
+    ['quantite', 'Quantité'],
+  ],
+};
 
 @Injectable()
 export class PharmacieService {
@@ -599,97 +612,8 @@ export class PharmacieService {
   private async analyserImportStock(
     fichier?: FichierImport,
   ): Promise<RapportImportStock> {
-    if (!fichier || !fichier.buffer) {
-      throw new BadRequestException('Choisissez un fichier Excel à importer.');
-    }
-    if (fichier.size > TAILLE_MAX_IMPORT) {
-      throw new BadRequestException(
-        'Le fichier dépasse 2 Mo. Gardez seulement vos médicaments dans la feuille « Stock », puis réessayez.',
-      );
-    }
-    const extensionValide = /\.xlsx$/i.test(fichier.originalname ?? '');
-    const typeValide = MIMES_IMPORT_ACCEPTES.includes(fichier.mimetype ?? '');
-    if (!extensionValide || !typeValide) {
-      throw new BadRequestException(
-        "Le fichier doit être un classeur Excel (.xlsx). Téléchargez le modèle pour partir d'un fichier valide.",
-      );
-    }
-
-    const workbook = new Workbook();
-    try {
-      // Le type Buffer déclaré par exceljs diffère de celui de Node
-      await workbook.xlsx.load(fichier.buffer as unknown as ArrayBuffer);
-    } catch {
-      throw new BadRequestException(
-        "Ce fichier Excel n'a pas pu être ouvert. Enregistrez-le à nouveau au format .xlsx, ou partez du modèle à télécharger.",
-      );
-    }
-
-    const feuille = workbook.getWorksheet('Stock') ?? workbook.worksheets[0];
-    if (!feuille) {
-      throw new BadRequestException(
-        'Le fichier ne contient aucun médicament. Remplissez une ligne par médicament sous les titres, puis réessayez.',
-      );
-    }
-
-    // Repérage des colonnes en ligne 1 (sans accents, casse ni espaces)
-    const colonnes: Partial<Record<ColonneImport, number>> = {};
-    feuille.getRow(1).eachCell((cell, numero) => {
-      const valeur = this.valeurCellule(cell.value);
-      const titre = this.normaliserNom(
-        valeur === null ? '' : String(valeur),
-      ).replace(/\s/g, '');
-      let colonne: ColonneImport | undefined;
-      if (titre === 'medicament') colonne = 'nom';
-      else if (titre === 'quantite') colonne = 'quantite';
-      else if (titre.startsWith('prix')) colonne = 'prix';
-      else if (titre.startsWith('date')) colonne = 'date';
-      else if (titre.startsWith('note')) colonne = 'notes';
-      if (colonne && colonnes[colonne] === undefined)
-        colonnes[colonne] = numero;
-    });
-
-    const manquantes: string[] = [];
-    if (colonnes.nom === undefined) manquantes.push('« Médicament »');
-    if (colonnes.quantite === undefined) manquantes.push('« Quantité »');
-    if (manquantes.length > 0) {
-      throw new BadRequestException(
-        manquantes.length === 1
-          ? `La colonne ${manquantes[0]} est introuvable dans la première ligne du fichier. Ajoutez-la, ou partez du modèle à télécharger.`
-          : `Les colonnes ${manquantes.join(' et ')} sont introuvables dans la première ligne du fichier. Ajoutez-les, ou partez du modèle à télécharger.`,
-      );
-    }
-
-    // Lecture des lignes de données, lignes vides ignorées
-    const brutes: {
-      numero: number;
-      valeurs: Record<ColonneImport, ValeurImport>;
-    }[] = [];
-    feuille.eachRow((row, numero) => {
-      if (numero === 1) return;
-      const lire = (col?: number): ValeurImport =>
-        col === undefined ? null : this.valeurCellule(row.getCell(col).value);
-      const valeurs: Record<ColonneImport, ValeurImport> = {
-        nom: lire(colonnes.nom),
-        quantite: lire(colonnes.quantite),
-        prix: lire(colonnes.prix),
-        date: lire(colonnes.date),
-        notes: lire(colonnes.notes),
-      };
-      if (Object.values(valeurs).every((v) => v === null)) return;
-      brutes.push({ numero, valeurs });
-    });
-
-    if (brutes.length === 0) {
-      throw new BadRequestException(
-        'Le fichier ne contient aucun médicament. Remplissez une ligne par médicament sous les titres, puis réessayez.',
-      );
-    }
-    if (brutes.length > LIGNES_MAX_IMPORT) {
-      throw new BadRequestException(
-        `Le fichier contient ${brutes.length} lignes, le maximum est de ${LIGNES_MAX_IMPORT}. Répartissez vos médicaments dans plusieurs fichiers.`,
-      );
-    }
+    const feuille = await ouvrirFeuilleImport(fichier, 'Stock');
+    const brutes = lireLignesImport(feuille, COLONNES_IMPORT_STOCK);
 
     // Catalogue chargé une seule fois, indexé par nom et nom générique normalisés
     const { data: catalogue } = await this.getMedicaments();
@@ -697,10 +621,10 @@ export class PharmacieService {
     const parGenerique = new Map<string, { id: string; nom: string }[]>();
     for (const med of catalogue) {
       const entree = { id: med.id, nom: med.nom };
-      const cleNom = this.normaliserNom(med.nom);
+      const cleNom = normaliserNom(med.nom);
       parNom.set(cleNom, [...(parNom.get(cleNom) ?? []), entree]);
       if (med.nomGenerique) {
-        const cleGen = this.normaliserNom(med.nomGenerique);
+        const cleGen = normaliserNom(med.nomGenerique);
         if (cleGen) {
           parGenerique.set(cleGen, [
             ...(parGenerique.get(cleGen) ?? []),
@@ -719,7 +643,7 @@ export class PharmacieService {
       if (!nom) {
         raisons.push('Indiquez le nom du médicament.');
       } else {
-        const cle = this.normaliserNom(nom);
+        const cle = normaliserNom(nom);
         const candidats = parNom.get(cle) ?? parGenerique.get(cle) ?? [];
         if (candidats.length === 0) {
           raisons.push('Médicament absent du catalogue.');
@@ -838,39 +762,6 @@ export class PharmacieService {
           ? '1 ligne à corriger'
           : `${rejetees} lignes à corriger`;
     return `${debut}, ${fin}.`;
-  }
-
-  /** Valeur simple d'une cellule Excel (formules, texte enrichi et liens déballés). */
-  private valeurCellule(valeur: CellValue): ValeurImport {
-    if (valeur === null || valeur === undefined) return null;
-    if (valeur instanceof Date) return valeur;
-    if (typeof valeur === 'string') {
-      const texte = valeur.trim();
-      return texte === '' ? null : texte;
-    }
-    if (typeof valeur === 'number' || typeof valeur === 'boolean') {
-      return valeur;
-    }
-    if ('richText' in valeur) {
-      return this.valeurCellule(valeur.richText.map((r) => r.text).join(''));
-    }
-    if ('result' in valeur) {
-      return this.valeurCellule(valeur.result as CellValue);
-    }
-    if ('text' in valeur) {
-      return this.valeurCellule(valeur.text as CellValue);
-    }
-    return null;
-  }
-
-  /** Minuscules, sans accents, espaces multiples réduits. */
-  private normaliserNom(texte: string): string {
-    return texte
-      .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
-      .toLowerCase()
-      .replace(/\s+/g, ' ')
-      .trim();
   }
 
   /** undefined si la cellule est vide, NaN si ce n'est pas un nombre. */
