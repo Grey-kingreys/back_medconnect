@@ -2,6 +2,7 @@ import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
+import { VersionMinimaleGuard } from './configuration-publique/version-minimale.guard';
 
 /**
  * Câblage global de l'AppModule (PLAN §2.3, §1.5).
@@ -15,8 +16,8 @@ import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
  * requis. Toute suppression de ces deux `APP_*` fait échouer ce test.
  */
 describe('AppModule — câblage global (audit + throttling)', () => {
-  const providers: Array<{ provide?: unknown; useClass?: unknown }> =
-    Reflect.getMetadata('providers', AppModule) ?? [];
+  const providers = (Reflect.getMetadata('providers', AppModule) ??
+    []) as Array<{ provide?: unknown; useClass?: unknown }>;
 
   const estDeclare = (token: unknown, classe: unknown) =>
     providers.some((p) => p?.provide === token && p?.useClass === classe);
@@ -27,5 +28,14 @@ describe('AppModule — câblage global (audit + throttling)', () => {
 
   it('enregistre UserThrottlerGuard comme APP_GUARD global (rate-limiting)', () => {
     expect(estDeclare(APP_GUARD, UserThrottlerGuard)).toBe(true);
+  });
+
+  it('enregistre VersionMinimaleGuard comme APP_GUARD global, avant UserThrottlerGuard', () => {
+    expect(estDeclare(APP_GUARD, VersionMinimaleGuard)).toBe(true);
+    const index = (classe: unknown) =>
+      providers.findIndex(
+        (p) => p?.provide === APP_GUARD && p?.useClass === classe,
+      );
+    expect(index(VersionMinimaleGuard)).toBeLessThan(index(UserThrottlerGuard));
   });
 });

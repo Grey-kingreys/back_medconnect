@@ -39,6 +39,7 @@ const LIBELLES: Record<number, string> = {
   404: 'Introuvable',
   409: 'Déjà existant',
   413: 'Document trop volumineux',
+  426: 'Mise à jour requise',
   429: 'Trop de tentatives',
   500: 'Erreur interne',
 };

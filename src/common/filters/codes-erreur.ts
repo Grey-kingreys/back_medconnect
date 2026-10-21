@@ -22,6 +22,8 @@ export const CODES_ERREUR = [
   'SOS_DEJA_ACTIF',
   // Changement de statut impossible depuis le statut actuel.
   'TRANSITION_INTERDITE',
+  // Version de l'application mobile sous la minimale de sa plateforme (426), mise à jour requise.
+  'VERSION_OBSOLETE',
 ] as const;
 
 export type CodeErreur = (typeof CODES_ERREUR)[number];

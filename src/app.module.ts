@@ -27,6 +27,8 @@ import { RbacModule } from './common/rbac/rbac.module';
 import { RolesModule } from './roles/roles.module';
 import { PrismaModule } from './common/prisma.module';
 import { DemoModule } from './demo/demo.module';
+import { ConfigurationPubliqueModule } from './configuration-publique/configuration-publique.module';
+import { VersionMinimaleGuard } from './configuration-publique/version-minimale.guard';
 import { validateEnv } from './config/env.validation';
 import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
@@ -121,12 +123,19 @@ import type { IncomingMessage } from 'http';
     StorageModule,
     QueueModule,
     ConsentModule,
+    ConfigurationPubliqueModule,
     // Mode démo : inerte si DEMO_MODE ne vaut pas `true` (routes en 404, aucune donnée).
     DemoModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
+    // Version minimale de l'application mobile (TB5) : avant le limiteur, une requête
+    // refusée en 426 n'entame pas le quota.
+    {
+      provide: APP_GUARD,
+      useClass: VersionMinimaleGuard,
+    },
     {
       provide: APP_GUARD,
       useClass: UserThrottlerGuard,
