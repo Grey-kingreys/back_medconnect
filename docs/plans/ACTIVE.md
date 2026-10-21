@@ -11,6 +11,7 @@ Détails: docs/plans/runs/2026-10-21-lot3/ (lot 3 du plan mobile côté back ; r
 | ID | Tâche | Tier | Statut | Tent. |
 |----|-------|------|--------|-------|
 | B6 | TB10b géolocalisation du SOS : precision, horodatagePosition, source ; position trop ancienne ou trop imprécise non utilisée ; position approximative signalée ; Idempotency-Key (tasks/B6-sos-position-idempotence.md) | spécifié | à faire | 0 |
+| B7 | Réalignement AuditLog de schema.prisma sur la migration 20260704 (onUpdate NoAction, 3 @@index), migrate diff vide, aucune migration (tasks/B7-realignement-auditlog.md) | mécanique | à faire | 0 |
 
 ## Faites (preuve = commit)
 

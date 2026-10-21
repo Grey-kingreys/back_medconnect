@@ -351,7 +351,7 @@ model Vaccination {
 model AuditLog {
   id          String   @id @default(uuid())
   userId      String?  // NULL si action système
-  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   action      String   // ex. "create", "update", "delete"
   entityType  String   // ex. "Consultation", "Ordonnance", "Vaccination", "ResultatAnalyse"
@@ -360,6 +360,10 @@ model AuditLog {
   metadata    Json?    // données contextuelles supplémentaires (ex. ancienne/nouvelle valeur)
 
   createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
 }
 
 enum AppointmentStatus {
