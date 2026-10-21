@@ -42,6 +42,7 @@ import {
   UpsertStockDto,
   UpdateStockQuantiteDto,
   FichierImport,
+  OptionsImportStockDto,
 } from './dto/pharmacie.dto';
 
 // Schéma Swagger du formulaire d'envoi du classeur (stock et catalogue)
@@ -50,6 +51,21 @@ const CORPS_IMPORT_STOCK = {
     type: 'object',
     required: ['fichier'],
     properties: { fichier: { type: 'string', format: 'binary' } },
+  },
+};
+// Formulaire d'import du stock : le classeur et la façon de compter (facultative)
+const CORPS_IMPORT_STOCK_MODE = {
+  schema: {
+    type: 'object',
+    required: ['fichier'],
+    properties: {
+      fichier: { type: 'string', format: 'binary' },
+      mode: {
+        type: 'string',
+        enum: ['inventaire', 'livraison'],
+        default: 'inventaire',
+      },
+    },
   },
 };
 // Plafond mémoire de réception ; la limite métier (2 Mo) est contrôlée par le service
@@ -342,21 +358,23 @@ export class PharmacieController {
   @ApiBearerAuth()
   @ApiParam({ name: 'structureId' })
   @ApiConsumes('multipart/form-data')
-  @ApiBody(CORPS_IMPORT_STOCK)
+  @ApiBody(CORPS_IMPORT_STOCK_MODE)
   @ApiOperation({
     summary: "Aperçu de l'import Excel du stock",
     description:
-      'Analyse le classeur (champ multipart `fichier`, .xlsx, 2 Mo et 1000 lignes max) sans rien écrire. Renvoie { totalLignes, acceptees, rejetees, lignes[] }.',
+      "Analyse le classeur (champ multipart `fichier`, .xlsx, 2 Mo et 1000 lignes max) sans rien écrire. Champ multipart facultatif `mode` : `inventaire` (défaut, la quantité du fichier remplace le stock) ou `livraison` (elle s'y ajoute) ; toute autre valeur : 400 VALIDATION sur le champ `mode`. Renvoie { totalLignes, acceptees, rejetees, mode, lignes[] }, chaque ligne acceptée portant quantiteAvant et quantiteApres.",
   })
   apercuImportStock(
     @Param('structureId') structureId: string,
     @Req() req: RequestWithUser,
+    @Body() options: OptionsImportStockDto,
     @UploadedFile() fichier?: FichierImport,
   ) {
     return this.pharmacieService.apercuImportStock(
       structureId,
       req.user.userId,
       fichier,
+      options.mode ?? 'inventaire',
     );
   }
 
@@ -368,21 +386,23 @@ export class PharmacieController {
   @ApiBearerAuth()
   @ApiParam({ name: 'structureId' })
   @ApiConsumes('multipart/form-data')
-  @ApiBody(CORPS_IMPORT_STOCK)
+  @ApiBody(CORPS_IMPORT_STOCK_MODE)
   @ApiOperation({
     summary: 'Importer le stock depuis un fichier Excel',
     description:
-      "Refait l'analyse de l'aperçu puis écrit les lignes acceptées en une transaction (la quantité remplace celle en stock). Renvoie le rapport + importees.",
+      "Refait l'analyse de l'aperçu puis, dans une transaction, relit le stock et écrit les lignes acceptées : en mode inventaire la quantité remplace celle en stock, en mode livraison elle s'y ajoute (incrément atomique). Une case vide (prix, date d'expiration, notes) conserve la valeur enregistrée. Renvoie le rapport + mode + importees.",
   })
   importerStock(
     @Param('structureId') structureId: string,
     @Req() req: RequestWithUser,
+    @Body() options: OptionsImportStockDto,
     @UploadedFile() fichier?: FichierImport,
   ) {
     return this.pharmacieService.importerStock(
       structureId,
       req.user.userId,
       fichier,
+      options.mode ?? 'inventaire',
     );
   }
 }

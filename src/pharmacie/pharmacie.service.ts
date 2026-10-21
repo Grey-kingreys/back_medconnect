@@ -16,6 +16,7 @@ import {
   FichierImport,
   LigneImportStock,
   RapportImportStock,
+  ModeImportStock,
 } from './dto/pharmacie.dto';
 import { Workbook } from 'exceljs';
 import {
@@ -32,6 +33,10 @@ export { MIME_XLSX } from './import-excel';
 
 const NOTES_MAX_IMPORT = 500;
 const SEUIL_STOCK_BAS = 10;
+/** Plus grande quantité enregistrable (colonne Int de PostgreSQL). */
+const QUANTITE_MAX = 2147483647;
+/** Transaction interactive de l'import : jusqu'à 1000 écritures successives. */
+const OPTIONS_TRANSACTION_IMPORT = { maxWait: 10_000, timeout: 60_000 };
 
 type ColonneImport = 'nom' | 'quantite' | 'prix' | 'date' | 'notes';
 
@@ -513,8 +518,12 @@ export class PharmacieService {
     [
       'Remplissez la feuille « Stock » : une ligne par médicament, à partir de la ligne 2. Ne modifiez pas les titres de la ligne 1.',
       "Écrivez le nom du médicament tel qu'il apparaît dans le catalogue MedConnecte (les majuscules et les accents ne comptent pas).",
-      'La quantité est un nombre entier, 0 ou plus. Elle remplace la quantité actuellement en stock pour ce médicament.',
-      "Le prix unitaire (en GNF), la date d'expiration (au format AAAA-MM-JJ, par exemple 2027-12-31) et les notes sont facultatifs.",
+      'La quantité est un nombre entier, 0 ou plus.',
+      "Au moment d'envoyer le fichier, choisissez « Inventaire » ou « Livraison ».",
+      'Inventaire : vous avez compté les boîtes présentes dans la pharmacie. La quantité du fichier remplace la quantité en stock. Exemple : 20 en stock et 50 dans le fichier, il y aura 50.',
+      "Livraison : vous venez de recevoir des médicaments. La quantité du fichier s'ajoute à la quantité en stock. Exemple : 20 en stock et 50 dans le fichier, il y aura 70. Un médicament qui n'est pas encore dans votre stock y est ajouté avec la quantité du fichier.",
+      "Avant d'enregistrer, l'aperçu affiche pour chaque médicament la quantité avant et après.",
+      "Le prix unitaire (en GNF), la date d'expiration (au format AAAA-MM-JJ, par exemple 2027-12-31) et les notes sont facultatifs. Une case laissée vide ne change pas ce qui est déjà enregistré.",
       "Un même fichier peut contenir jusqu'à 1000 médicaments. Remplacez la ligne d'exemple par vos propres médicaments.",
     ].forEach((texte) => aide.addRow([texte]));
 
@@ -526,62 +535,102 @@ export class PharmacieService {
     structureId: string,
     adminUserId: string,
     fichier?: FichierImport,
+    mode: ModeImportStock = 'inventaire',
   ) {
     await this.checkPharmacieAccess(structureId, adminUserId);
-    const rapport = await this.analyserImportStock(fichier);
+    const analyse = await this.analyserImportStock(fichier);
+    const enStock = await this.lireQuantitesEnStock(
+      this.prisma,
+      structureId,
+      analyse,
+    );
+    const rapport = this.calculerQuantitesImport(analyse, enStock, mode);
 
     return {
-      data: rapport,
+      data: { ...rapport, mode },
       message: this.messageImportStock(rapport, false),
       success: true,
     };
   }
 
-  /** Refait la même analyse puis écrit les lignes acceptées en une transaction. */
+  /**
+   * Refait l'analyse puis, dans une transaction, relit le stock, calcule les
+   * quantités et écrit les lignes acceptées.
+   */
   async importerStock(
     structureId: string,
     adminUserId: string,
     fichier?: FichierImport,
+    mode: ModeImportStock = 'inventaire',
   ) {
     await this.checkPharmacieAccess(structureId, adminUserId);
-    const rapport = await this.analyserImportStock(fichier);
-    const aEcrire = rapport.lignes.filter((l) => l.statut === 'acceptee');
+    const analyse = await this.analyserImportStock(fichier);
 
-    if (aEcrire.length > 0) {
-      // Même sémantique que upsertStock : la quantité remplace celle en stock
-      await this.prisma.$transaction(
-        aEcrire.map((l) => {
-          const quantite = l.quantite ?? 0;
-          const donnees = {
+    // Lecture du stock, calcul et écriture dans la même transaction
+    const rapport = await this.prisma.$transaction(async (tx) => {
+      const enStock = await this.lireQuantitesEnStock(tx, structureId, analyse);
+      const calcule = this.calculerQuantitesImport(analyse, enStock, mode);
+      const lignes: LigneImportStock[] = [];
+      for (const l of calcule.lignes) {
+        if (l.statut !== 'acceptee') {
+          lignes.push(l);
+          continue;
+        }
+        const quantite = l.quantite ?? 0;
+        // Case vide = undefined : Prisma garde la valeur enregistrée (date, prix, notes)
+        const date = l.dateExpiration ? new Date(l.dateExpiration) : undefined;
+        const notes = l.notes?.trim();
+        const ecrit = await tx.stockMedicament.upsert({
+          where: {
+            medicamentId_structureId: {
+              medicamentId: l.medicamentId as string,
+              structureId,
+            },
+          },
+          create: {
+            medicamentId: l.medicamentId as string,
+            structureId,
             quantite,
             prixUnitaire: l.prixUnitaire,
             disponible: quantite > 0,
-            dateExpiration: l.dateExpiration
-              ? new Date(l.dateExpiration)
-              : null,
-            notes: l.notes?.trim(),
-          };
-          return this.prisma.stockMedicament.upsert({
-            where: {
-              medicamentId_structureId: {
-                medicamentId: l.medicamentId as string,
-                structureId,
-              },
-            },
-            create: {
-              medicamentId: l.medicamentId as string,
-              structureId,
-              ...donnees,
-            },
-            update: donnees,
-          });
-        }),
-      );
-    }
+            dateExpiration: date ?? null,
+            notes,
+          },
+          update:
+            mode === 'livraison'
+              ? {
+                  quantite: { increment: quantite },
+                  prixUnitaire: l.prixUnitaire,
+                  dateExpiration: date,
+                  notes,
+                  ...(quantite > 0 ? { disponible: true } : {}),
+                }
+              : {
+                  quantite,
+                  prixUnitaire: l.prixUnitaire,
+                  disponible: quantite > 0,
+                  dateExpiration: date,
+                  notes,
+                },
+        });
+        // En livraison, avant et après viennent de la ligne écrite : un import simultané déjà ajouté est compté, jamais écrasé.
+        lignes.push(
+          mode === 'livraison'
+            ? {
+                ...l,
+                quantiteAvant: ecrit.quantite - quantite,
+                quantiteApres: ecrit.quantite,
+              }
+            : l,
+        );
+      }
+      return { ...calcule, lignes };
+    }, OPTIONS_TRANSACTION_IMPORT);
+    const aEcrire = rapport.lignes.filter((l) => l.statut === 'acceptee');
 
     // Une seule alerte groupée pour tout l'import
     const enAlerte = aEcrire.filter(
-      (l) => (l.quantite ?? 0) < SEUIL_STOCK_BAS,
+      (l) => (l.quantiteApres ?? 0) < SEUIL_STOCK_BAS,
     ).length;
     if (enAlerte > 0) {
       const staff = await this.prisma.user.findMany({
@@ -602,7 +651,7 @@ export class PharmacieService {
     }
 
     return {
-      data: { ...rapport, importees: aEcrire.length },
+      data: { ...rapport, mode, importees: aEcrire.length },
       message: this.messageImportStock(rapport, true),
       success: true,
     };
@@ -668,7 +717,7 @@ export class PharmacieService {
       } else if (
         !Number.isInteger(quantite) ||
         quantite < 0 ||
-        quantite > 2147483647
+        quantite > QUANTITE_MAX
       ) {
         raisons.push(
           'La quantité doit être un nombre entier, 0 ou plus (exemple : 25).',
@@ -731,6 +780,60 @@ export class PharmacieService {
       rejetees: lignes.length - acceptees,
       lignes,
     };
+  }
+
+  /**
+   * Calcule quantiteAvant et quantiteApres de chaque ligne acceptée selon le mode.
+   * En livraison, une ligne dont le total dépasserait QUANTITE_MAX devient rejetée.
+   * Renvoie un nouveau rapport (compteurs recalculés), sans modifier celui reçu.
+   */
+  private calculerQuantitesImport(
+    rapport: RapportImportStock,
+    enStock: Map<string, number>,
+    mode: ModeImportStock,
+  ): RapportImportStock {
+    const lignes = rapport.lignes.map((l): LigneImportStock => {
+      if (l.statut !== 'acceptee') return l;
+      const avant = enStock.get(l.medicamentId as string) ?? 0;
+      const quantite = l.quantite ?? 0;
+      const apres = mode === 'livraison' ? avant + quantite : quantite;
+      if (apres > QUANTITE_MAX) {
+        return {
+          ligne: l.ligne,
+          nom: l.nom,
+          statut: 'rejetee',
+          raison:
+            'Avec cette livraison, la quantité en stock deviendrait trop grande. Vérifiez la quantité.',
+        };
+      }
+      return { ...l, quantiteAvant: avant, quantiteApres: apres };
+    });
+
+    const acceptees = lignes.filter((l) => l.statut === 'acceptee').length;
+    return {
+      totalLignes: lignes.length,
+      acceptees,
+      rejetees: lignes.length - acceptees,
+      lignes,
+    };
+  }
+
+  /** Quantités en stock de la pharmacie pour les médicaments des lignes acceptées. */
+  private async lireQuantitesEnStock(
+    client: Pick<PrismaService, 'stockMedicament'>,
+    structureId: string,
+    rapport: RapportImportStock,
+  ): Promise<Map<string, number>> {
+    const ids = rapport.lignes
+      .filter((l) => l.statut === 'acceptee')
+      .map((l) => l.medicamentId as string);
+    if (ids.length === 0) return new Map();
+
+    const stocks = await client.stockMedicament.findMany({
+      where: { structureId, medicamentId: { in: ids } },
+      select: { medicamentId: true, quantite: true },
+    });
+    return new Map(stocks.map((s) => [s.medicamentId, s.quantite]));
   }
 
   /** Message de synthèse : « 12 lignes prêtes à être importées, 2 lignes à corriger. » */

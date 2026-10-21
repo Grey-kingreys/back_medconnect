@@ -6,6 +6,7 @@ import {
   IsNumber,
   IsArray,
   IsDateString,
+  IsIn,
   Min,
   Length,
 } from 'class-validator';
@@ -134,6 +135,23 @@ export interface FichierImport {
   originalname: string;
 }
 
+/** Façon de compter les quantités du fichier : remplacer le stock ou s'y ajouter. */
+export const MODES_IMPORT_STOCK = ['inventaire', 'livraison'] as const;
+export type ModeImportStock = (typeof MODES_IMPORT_STOCK)[number];
+
+/** Champs texte du formulaire d'import du stock (en plus du fichier). */
+export class OptionsImportStockDto {
+  @ApiPropertyOptional({
+    enum: MODES_IMPORT_STOCK,
+    default: 'inventaire',
+    description:
+      "inventaire : la quantité du fichier remplace la quantité en stock. livraison : elle s'y ajoute.",
+  })
+  @IsOptional()
+  @IsIn(MODES_IMPORT_STOCK)
+  mode?: ModeImportStock;
+}
+
 /** Résultat de l'analyse d'une ligne du classeur. */
 export interface LigneImportStock {
   /** Numéro de la ligne dans Excel (la ligne 1 contient les titres). */
@@ -151,6 +169,10 @@ export interface LigneImportStock {
   /** Date ISO 8601. */
   dateExpiration?: string;
   notes?: string;
+  /** Quantité en stock avant l'import (0 si le médicament n'y est pas), lignes acceptées seulement. */
+  quantiteAvant?: number;
+  /** Quantité en stock après l'import, selon le mode choisi, lignes acceptées seulement. */
+  quantiteApres?: number;
 }
 
 /** Rapport renvoyé par l'aperçu et par l'import (stock ou catalogue). */
