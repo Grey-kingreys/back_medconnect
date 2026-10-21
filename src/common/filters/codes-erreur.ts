@@ -26,6 +26,8 @@ export const CODES_ERREUR = [
   'VERSION_OBSOLETE',
   // Numéro de téléphone déjà porté par un autre compte (409).
   'TELEPHONE_DEJA_UTILISE',
+  // Envoi d'email momentanément impossible (503), réessayer plus tard.
+  'EMAIL_INDISPONIBLE',
 ] as const;
 
 export type CodeErreur = (typeof CODES_ERREUR)[number];

@@ -42,6 +42,7 @@ const LIBELLES: Record<number, string> = {
   426: 'Mise à jour requise',
   429: 'Trop de tentatives',
   500: 'Erreur interne',
+  503: 'Service indisponible',
 };
 
 // Champs d'une exception recopiés dans `donnees` (liste blanche ; TB10b ajoutera finDelaiAt).
@@ -119,15 +120,21 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     if (exception instanceof HttpException) {
       const statut = exception.getStatus();
-      if (statut >= 500) return this.erreurInterne(exception, request);
-
-      // Code machine facultatif porté par l'exception (catalogue codes-erreur.ts).
-      const resultat = this.corpsHttp(exception, statut);
       const reponseBrute = exception.getResponse();
       const code =
         typeof reponseBrute === 'object'
           ? (reponseBrute as { code?: unknown }).code
           : undefined;
+      // 503 voulue par le projet (code du catalogue) : message conservé.
+      if (statut === 503 && estCodeErreur(code)) {
+        const resultat503 = this.corpsHttp(exception, statut);
+        resultat503.code = code;
+        return resultat503;
+      }
+      if (statut >= 500) return this.erreurInterne(exception, request);
+
+      // Code machine facultatif porté par l'exception (catalogue codes-erreur.ts).
+      const resultat = this.corpsHttp(exception, statut);
       if (estCodeErreur(code)) resultat.code = code;
       else if (statut === 403) resultat.code = 'PERMISSION_REFUSEE';
 

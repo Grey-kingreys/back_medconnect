@@ -524,12 +524,17 @@ export class AuthService {
       },
     });
 
-    await this.emailService.sendPasswordResetEmail(
-      user.email,
-      user.nom,
-      user.prenom,
-      resetToken,
-    );
+    try {
+      await this.emailService.sendPasswordResetEmail(
+        user.email,
+        user.nom,
+        user.prenom,
+        resetToken,
+      );
+    } catch {
+      // Réponse identique dans tous les cas : ne révèle pas si le compte existe.
+      this.logger.error(`auth.reset_email_echec userId=${user.id}`);
+    }
 
     return genericResponse;
   }

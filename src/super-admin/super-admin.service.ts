@@ -4,6 +4,7 @@ import {
   ConflictException,
   NotFoundException,
   BadRequestException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import * as bcrypt from 'bcrypt';
@@ -104,13 +105,21 @@ export class SuperAdminService {
       );
     }
 
-    // Envoyer l'email d'invitation
-    await this.emailService.sendStructureInviteEmail(
-      structure.email,
-      structure.nom,
-      structure.type,
-      rawToken,
-    );
+    // Envoyer l'email d'invitation : un échec ne défait pas la création.
+    let invitationEnvoyee = true;
+    try {
+      await this.emailService.sendStructureInviteEmail(
+        structure.email,
+        structure.nom,
+        structure.type,
+        rawToken,
+      );
+    } catch {
+      invitationEnvoyee = false;
+      this.logger.error(
+        `superadmin.invitation_echec structureId=${structure.id}`,
+      );
+    }
 
     return {
       data: {
@@ -120,8 +129,11 @@ export class SuperAdminService {
         email: structure.email,
         isConfigured: structure.isConfigured,
         createdAt: structure.createdAt,
+        invitationEnvoyee,
       },
-      message: `Structure créée. Un email d'invitation a été envoyé à ${structure.email}.`,
+      message: invitationEnvoyee
+        ? `Structure créée. Un email d'invitation a été envoyé à ${structure.email}.`
+        : "Structure créée, mais l'email d'invitation n'a pas pu être envoyé. Utilisez « Renvoyer l'invitation ».",
       success: true,
     };
   }
@@ -154,12 +166,37 @@ export class SuperAdminService {
       },
     });
 
-    await this.emailService.sendStructureInviteEmail(
-      structure.email,
-      structure.nom,
-      structure.type,
-      rawToken,
-    );
+    try {
+      await this.emailService.sendStructureInviteEmail(
+        structure.email,
+        structure.nom,
+        structure.type,
+        rawToken,
+      );
+    } catch {
+      // Remet l'ancien jeton : l'invitation déjà envoyée reste valable.
+      try {
+        await this.prisma.structure.update({
+          where: { id: structureId },
+          data: {
+            inviteToken: structure.inviteToken,
+            inviteExpires: structure.inviteExpires,
+          },
+        });
+      } catch {
+        this.logger.error(
+          `superadmin.invitation_restauration_echec structureId=${structureId}`,
+        );
+      }
+      this.logger.error(
+        `superadmin.invitation_renvoi_echec structureId=${structureId}`,
+      );
+      throw new ServiceUnavailableException({
+        message:
+          "L'email d'invitation n'a pas pu être envoyé. Le service d'envoi d'emails est momentanément indisponible, réessayez dans quelques instants.",
+        code: 'EMAIL_INDISPONIBLE',
+      });
+    }
 
     return {
       data: null,

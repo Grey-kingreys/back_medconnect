@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
   PayloadTooLargeException,
+  ServiceUnavailableException,
   UnauthorizedException,
   ValidationPipe,
 } from '@nestjs/common';
@@ -298,6 +299,33 @@ describe('AllExceptionsFilter', () => {
     expect(String((logError.mock.calls[0] as unknown[])[0])).toContain(
       'POST /carnet/consultations',
     );
+  });
+
+  it("conserve le message et le code d'une 503 portant un code du catalogue", () => {
+    filtre.catch(
+      new ServiceUnavailableException({
+        message: 'Envoi impossible pour le moment.',
+        code: 'EMAIL_INDISPONIBLE',
+      }),
+      host,
+    );
+    expect(status).toHaveBeenCalledWith(503);
+    expect(corpsRenvoye()).toEqual({
+      statusCode: 503,
+      message: 'Envoi impossible pour le moment.',
+      error: 'Service indisponible',
+      code: 'EMAIL_INDISPONIBLE',
+    });
+  });
+
+  it('traite une 503 sans code comme une erreur interne', () => {
+    filtre.catch(new ServiceUnavailableException(), host);
+    expect(status).toHaveBeenCalledWith(500);
+    expect(corpsRenvoye()).toEqual({
+      statusCode: 500,
+      message: MESSAGES.indisponible,
+      error: 'Erreur interne',
+    });
   });
 
   it("n'écrit rien hors contexte HTTP", () => {

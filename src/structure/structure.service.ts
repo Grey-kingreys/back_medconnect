@@ -421,20 +421,28 @@ export class StructureService {
     );
 
     // Envoyer les identifiants par email
-    this.emailService
-      .sendMemberWelcomeEmail(
+    let invitationEnvoyee: boolean;
+    try {
+      invitationEnvoyee = await this.emailService.sendMemberWelcomeEmail(
         membre.email,
         membre.nom,
         membre.prenom,
         membre.role,
         structure.nom,
         tempPassword,
-      )
-      .catch((e) => this.logger.error("Email d'invitation membre échoué", e));
+      );
+    } catch {
+      invitationEnvoyee = false;
+    }
+    if (!invitationEnvoyee) {
+      this.logger.error(`structure.membre_email_echec membreId=${membre.id}`);
+    }
 
     return {
-      data: membre,
-      message: `Membre créé. Un email avec les identifiants a été envoyé à ${membre.email}.`,
+      data: { ...membre, invitationEnvoyee },
+      message: invitationEnvoyee
+        ? `Membre créé. Un email avec les identifiants a été envoyé à ${membre.email}.`
+        : "Membre créé, mais l'email contenant ses identifiants n'a pas pu être envoyé. Il pourra choisir son mot de passe avec « Mot de passe oublié » sur la page de connexion.",
       success: true,
     };
   }

@@ -235,7 +235,7 @@ export class EmailService {
     role: string,
     structureNom: string,
     temporaryPassword: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const roleLabel = this.getRoleLabel(role);
     try {
       await this.deliver({
@@ -259,11 +259,13 @@ export class EmailService {
         `,
         ),
       });
+      return true;
     } catch (error) {
       this.logger.error(
         `email.member_failed`,
         error instanceof Error ? error.stack : String(error),
       );
+      return false;
     }
   }
 

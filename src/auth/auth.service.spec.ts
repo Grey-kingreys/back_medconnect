@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -562,6 +563,19 @@ describe('AuthService', () => {
 
       expect(inactif).toEqual(inconnu);
       expect(emailService.sendPasswordResetEmail).not.toHaveBeenCalled();
+    });
+
+    it('renvoie la même réponse quand l envoi de l email échoue', async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      prisma.user.findUnique.mockResolvedValueOnce(null);
+      const inconnu = await service.forgotPassword({ email: 'x@example.com' });
+
+      prisma.user.findUnique.mockResolvedValueOnce(utilisateur());
+      emailService.sendPasswordResetEmail.mockRejectedValueOnce(new Error('x'));
+      const echec = await service.forgotPassword({ email: 'awa@example.com' });
+
+      expect(echec).toEqual(inconnu);
+      jest.restoreAllMocks();
     });
   });
 
