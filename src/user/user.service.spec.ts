@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access -- les calls des doublures jest.Mock sont typés any */
 import { UserService } from './user.service';
 
 /**
@@ -127,5 +128,99 @@ describe('UserService.toggleActive : sessions', () => {
     await service.toggleActive('u1');
     expect(sessions.reactiverCompte).toHaveBeenCalledWith('u1');
     expect(sessions.desactiverCompte).not.toHaveBeenCalled();
+  });
+});
+
+describe('UserService : téléphone unique (TB17)', () => {
+  let prisma: {
+    user: {
+      findUnique: jest.Mock;
+      findFirst: jest.Mock;
+      create: jest.Mock;
+      update: jest.Mock;
+    };
+  };
+  let service: UserService;
+
+  beforeEach(() => {
+    prisma = {
+      user: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({
+          id: 'u9',
+          email: 'nouveau@b.gn',
+          nom: 'Camara',
+          prenom: 'Fanta',
+          role: 'MEDECIN',
+          isActive: true,
+          createdAt: new Date(),
+        }),
+        update: jest.fn().mockResolvedValue({ id: 'u1' }),
+      },
+    };
+    const emailService = {
+      sendWelcomeEmail: jest.fn().mockResolvedValue(undefined),
+    };
+    const rolesService = {
+      resolveAssignableRoleId: jest.fn().mockResolvedValue(null),
+    };
+    service = new UserService(
+      prisma as never,
+      emailService as never,
+      {} as never, // encryption
+      rolesService as never,
+      {} as never, // storage
+      {} as never, // sessions
+    );
+  });
+
+  const dtoCreation = (telephone: string) =>
+    ({
+      nom: 'Camara',
+      prenom: 'Fanta',
+      email: 'nouveau@b.gn',
+      password: 'MotDePasse-de-test-3',
+      role: 'MEDECIN',
+      telephone,
+    }) as never;
+
+  it('createByAdmin : 409 si le numéro est déjà pris, aucun compte créé', async () => {
+    prisma.user.findFirst.mockResolvedValue({ id: 'autre' });
+
+    await expect(
+      service.createByAdmin(dtoCreation('622-98-87-76')),
+    ).rejects.toMatchObject({
+      status: 409,
+      response: {
+        message: 'Ce numéro est déjà utilisé par un autre compte.',
+        code: 'TELEPHONE_DEJA_UTILISE',
+      },
+    });
+    expect(prisma.user.create).not.toHaveBeenCalled();
+  });
+
+  it('createByAdmin : enregistre le numéro normalisé quand il est libre', async () => {
+    await service.createByAdmin(dtoCreation('622-98-87-76'));
+
+    const { data } = prisma.user.create.mock.calls[0][0] as {
+      data: { telephone: string };
+    };
+    expect(data.telephone).toBe('+224622988776');
+  });
+
+  it('update : exclut le compte lui-même du contrôle et normalise le numéro', async () => {
+    prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'a@b.gn' });
+
+    await service.update('u1', { telephone: '00224622988776' } as never);
+
+    const { where } = prisma.user.findFirst.mock.calls[0][0] as {
+      where: { id: { not: string } };
+    };
+    expect(where.id).toEqual({ not: 'u1' });
+    const { data } = prisma.user.update.mock.calls[0][0] as {
+      data: { telephone: string };
+    };
+    expect(data.telephone).toBe('+224622988776');
   });
 });

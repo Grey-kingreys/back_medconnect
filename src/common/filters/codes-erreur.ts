@@ -24,6 +24,8 @@ export const CODES_ERREUR = [
   'TRANSITION_INTERDITE',
   // Version de l'application mobile sous la minimale de sa plateforme (426), mise à jour requise.
   'VERSION_OBSOLETE',
+  // Numéro de téléphone déjà porté par un autre compte (409).
+  'TELEPHONE_DEJA_UTILISE',
 ] as const;
 
 export type CodeErreur = (typeof CODES_ERREUR)[number];

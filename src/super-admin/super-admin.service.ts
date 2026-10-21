@@ -10,6 +10,11 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { EmailService } from 'src/common/services/email.service';
 import { RolesService } from 'src/common/rbac/roles.service';
+import {
+  avecTelephoneUnique,
+  exigerTelephone,
+  verifierTelephoneLibre,
+} from 'src/common/telephone/telephone-unicite';
 import { CreateStructureDto, CreateSuperAdminDto } from './dto/super-admin.dto';
 
 @Injectable()
@@ -20,12 +25,23 @@ export class SuperAdminService {
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
     private readonly rolesService: RolesService,
-  ) { }
+  ) {}
 
   // ─── Créer une structure + envoyer l'invitation ───────────────
 
   async createStructure(dto: CreateStructureDto) {
-    const { nom, type, email, telephone, adresse, ville, latitude, longitude, horaires, estDeGarde } = dto;
+    const {
+      nom,
+      type,
+      email,
+      telephone,
+      adresse,
+      ville,
+      latitude,
+      longitude,
+      horaires,
+      estDeGarde,
+    } = dto;
 
     // 1. Vérifier si l'email est déjà utilisé par une structure
     const existingStructure = await this.prisma.structure.findUnique({
@@ -40,17 +56,23 @@ export class SuperAdminService {
       where: { email: email.toLowerCase() },
     });
     if (existingUser) {
-      throw new ConflictException('Un compte utilisateur avec cet email existe déjà');
+      throw new ConflictException(
+        'Un compte utilisateur avec cet email existe déjà',
+      );
     }
 
     // Générer le token d'invitation (72h)
     const rawToken = crypto.randomBytes(32).toString('hex');
-    const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const hashedToken = crypto
+      .createHash('sha256')
+      .update(rawToken)
+      .digest('hex');
     const tokenExpires = new Date(Date.now() + 72 * 60 * 60 * 1000);
 
     const structure = await this.prisma.structure.create({
       data: {
         nom: nom.trim(),
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Dette préexistante, backlog points 21 et 22
         type: type as any,
         email: email.toLowerCase(),
         telephone: telephone?.trim(),
@@ -70,10 +92,16 @@ export class SuperAdminService {
     // Seeder les rôles par défaut de la structure (Médecin/Accueil/Admin… selon le type).
     // Non bloquant : un échec de seed ne doit pas annuler la création de la structure.
     try {
-      await this.rolesService.seedStructureDefaultRoles(structure.id, structure.type);
+      await this.rolesService.seedStructureDefaultRoles(
+        structure.id,
+        structure.type,
+      );
     } catch (e) {
       // Le seeder de boot rattrapera cette structure au prochain démarrage.
-      this.logger.error(`Seed des rôles par défaut échoué pour la structure ${structure.id}`, e);
+      this.logger.error(
+        `Seed des rôles par défaut échoué pour la structure ${structure.id}`,
+        e,
+      );
     }
 
     // Envoyer l'email d'invitation
@@ -112,7 +140,10 @@ export class SuperAdminService {
     }
 
     const rawToken = crypto.randomBytes(32).toString('hex');
-    const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const hashedToken = crypto
+      .createHash('sha256')
+      .update(rawToken)
+      .digest('hex');
     const tokenExpires = new Date(Date.now() + 72 * 60 * 60 * 1000);
 
     await this.prisma.structure.update({
@@ -163,7 +194,11 @@ export class SuperAdminService {
       orderBy: { createdAt: 'desc' },
     });
 
-    return { data: structures, message: 'Structures récupérées', success: true };
+    return {
+      data: structures,
+      message: 'Structures récupérées',
+      success: true,
+    };
   }
 
   // ─── Détails d'une structure ──────────────────────────────────
@@ -173,7 +208,13 @@ export class SuperAdminService {
       where: { id: structureId },
       include: {
         admin: {
-          select: { id: true, nom: true, prenom: true, email: true, telephone: true },
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            email: true,
+            telephone: true,
+          },
         },
         membres: {
           select: {
@@ -228,28 +269,35 @@ export class SuperAdminService {
       throw new ConflictException('Un compte avec cet email existe déjà');
     }
 
+    const telephoneE164 = dto.telephone
+      ? exigerTelephone(dto.telephone)
+      : undefined;
+    if (telephoneE164) await verifierTelephoneLibre(this.prisma, telephoneE164);
+
     const hashed = await bcrypt.hash(dto.password, 12);
 
-    const user = await this.prisma.user.create({
-      data: {
-        nom: dto.nom.trim(),
-        prenom: dto.prenom.trim(),
-        email: dto.email.toLowerCase(),
-        password: hashed,
-        telephone: dto.telephone?.trim(),
-        role: 'SUPER_ADMIN',
-        isActive: true,
-      },
-      select: {
-        id: true,
-        email: true,
-        nom: true,
-        prenom: true,
-        role: true,
-        isActive: true,
-        createdAt: true,
-      },
-    });
+    const user = await avecTelephoneUnique(
+      this.prisma.user.create({
+        data: {
+          nom: dto.nom.trim(),
+          prenom: dto.prenom.trim(),
+          email: dto.email.toLowerCase(),
+          password: hashed,
+          telephone: telephoneE164,
+          role: 'SUPER_ADMIN',
+          isActive: true,
+        },
+        select: {
+          id: true,
+          email: true,
+          nom: true,
+          prenom: true,
+          role: true,
+          isActive: true,
+          createdAt: true,
+        },
+      }),
+    );
 
     this.emailService
       .sendWelcomeEmail(user.email, user.nom, user.prenom)
@@ -283,7 +331,9 @@ export class SuperAdminService {
 
   async deleteSuperAdmin(targetId: string, requesterId: string) {
     if (targetId === requesterId) {
-      throw new BadRequestException("Vous ne pouvez pas supprimer votre propre compte.");
+      throw new BadRequestException(
+        'Vous ne pouvez pas supprimer votre propre compte.',
+      );
     }
 
     const target = await this.prisma.user.findFirst({
@@ -291,12 +341,16 @@ export class SuperAdminService {
     });
 
     if (!target) {
-      throw new NotFoundException("Super Admin non trouvé.");
+      throw new NotFoundException('Super Admin non trouvé.');
     }
 
     await this.prisma.user.delete({ where: { id: targetId } });
 
-    return { data: null, message: 'Compte Super Admin supprimé avec succès', success: true };
+    return {
+      data: null,
+      message: 'Compte Super Admin supprimé avec succès',
+      success: true,
+    };
   }
 
   // ─── Stats globales ───────────────────────────────────────────
@@ -351,7 +405,9 @@ export class SuperAdminService {
       // 2. Supprimer l'admin de la structure (s'il n'est pas déjà dans les membres)
       if (structure.adminId) {
         // On vérifie s'il existe toujours (car deleteMany l'a peut-être déjà supprimé s'il avait structureId)
-        const adminExists = await tx.user.findUnique({ where: { id: structure.adminId } });
+        const adminExists = await tx.user.findUnique({
+          where: { id: structure.adminId },
+        });
         if (adminExists) {
           await tx.user.delete({ where: { id: structure.adminId } });
         }

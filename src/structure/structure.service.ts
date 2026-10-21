@@ -20,6 +20,11 @@ import { SessionClientType } from 'generated/prisma/enums';
 import { RolesService } from 'src/common/rbac/roles.service';
 import { StorageService } from 'src/storage/storage.service';
 import {
+  avecTelephoneUnique,
+  exigerTelephone,
+  verifierTelephoneLibre,
+} from 'src/common/telephone/telephone-unicite';
+import {
   SetupStructureDto,
   CreateMembreDto,
   UpdateStructureDto,
@@ -202,30 +207,35 @@ export class StructureService {
       );
     }
 
+    const telephoneAdmin = exigerTelephone(dto.telephone);
+    await verifierTelephoneLibre(this.prisma, telephoneAdmin);
+
     const hashedPassword = await bcrypt.hash(dto.password, 12);
 
     // Transaction : créer le compte admin + configurer la structure
     const result = await this.prisma.$transaction(async (tx) => {
       // 1. Créer le compte User (STRUCTURE_ADMIN)
-      const admin = await tx.user.create({
-        data: {
-          nom: dto.nom.trim(),
-          prenom: dto.prenom.trim(),
-          email: structure.email, // email de la structure = email du compte admin
-          password: hashedPassword,
-          telephone: dto.telephone.trim(),
-          role: 'STRUCTURE_ADMIN',
-          isActive: true,
-          structureId: structure.id,
-        },
-        select: {
-          id: true,
-          nom: true,
-          prenom: true,
-          email: true,
-          role: true,
-        },
-      });
+      const admin = await avecTelephoneUnique(
+        tx.user.create({
+          data: {
+            nom: dto.nom.trim(),
+            prenom: dto.prenom.trim(),
+            email: structure.email, // email de la structure = email du compte admin
+            password: hashedPassword,
+            telephone: telephoneAdmin,
+            role: 'STRUCTURE_ADMIN',
+            isActive: true,
+            structureId: structure.id,
+          },
+          select: {
+            id: true,
+            nom: true,
+            prenom: true,
+            email: true,
+            role: true,
+          },
+        }),
+      );
 
       // 2. Configurer la structure
       const updatedStructure = await tx.structure.update({
@@ -372,36 +382,43 @@ export class StructureService {
       this.logger.error('Résolution appRole membre échouée', e);
     }
 
+    const telephoneE164 = dto.telephone
+      ? exigerTelephone(dto.telephone)
+      : undefined;
+    if (telephoneE164) await verifierTelephoneLibre(this.prisma, telephoneE164);
+
     // Générer un mot de passe temporaire
     const tempPassword = generateTempPassword();
     const hashedPassword = await bcrypt.hash(tempPassword, 12);
 
-    const membre = await this.prisma.user.create({
-      data: {
-        nom: dto.nom.trim(),
-        prenom: dto.prenom.trim(),
-        email: dto.email.toLowerCase(),
-        password: hashedPassword,
-        telephone: dto.telephone?.trim(),
-        role: dto.role as any,
-        appRoleId,
-        isActive: true,
-        structureId: structureId,
-        specialite:
-          dto.role === 'MEDECIN' ? (dto as any).specialite : undefined,
-      },
-      select: {
-        id: true,
-        nom: true,
-        prenom: true,
-        email: true,
-        telephone: true,
-        role: true,
-        specialite: true,
-        isActive: true,
-        createdAt: true,
-      },
-    });
+    const membre = await avecTelephoneUnique(
+      this.prisma.user.create({
+        data: {
+          nom: dto.nom.trim(),
+          prenom: dto.prenom.trim(),
+          email: dto.email.toLowerCase(),
+          password: hashedPassword,
+          telephone: telephoneE164,
+          role: dto.role as any,
+          appRoleId,
+          isActive: true,
+          structureId: structureId,
+          specialite:
+            dto.role === 'MEDECIN' ? (dto as any).specialite : undefined,
+        },
+        select: {
+          id: true,
+          nom: true,
+          prenom: true,
+          email: true,
+          telephone: true,
+          role: true,
+          specialite: true,
+          isActive: true,
+          createdAt: true,
+        },
+      }),
+    );
 
     // Envoyer les identifiants par email
     this.emailService

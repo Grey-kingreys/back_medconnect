@@ -1,6 +1,7 @@
 generator client {
   provider = "prisma-client"
   output   = "../generated/prisma"
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
@@ -73,6 +74,9 @@ model User {
   nom       String
   prenom    String
   telephone String?
+  // Forme E.164 de `telephone`, calculée par le trigger PostgreSQL
+  // "user_telephone_normalise" (TB17). Ne jamais l'écrire depuis l'application.
+  telephoneNormalise String?
   dateNaissance DateTime?
   taille    Int?     // Taille en cm
   poids     Float?   // Poids en kg
@@ -144,6 +148,9 @@ model User {
   // Photo de profil (avatar) — fichier R2 du bucket PUBLIC. SetNull si le fichier est supprimé.
   avatarFileId String?     @unique
   avatarFile   StoredFile? @relation("UserAvatar", fields: [avatarFileId], references: [id], onDelete: SetNull)
+
+  // Un numéro par compte (TB17) ; les comptes sans numéro restent possibles.
+  @@unique([telephoneNormalise], where: raw("\"telephoneNormalise\" IS NOT NULL"))
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

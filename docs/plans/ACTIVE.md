@@ -11,6 +11,7 @@ Détails: docs/plans/runs/2026-10-20-lot2/ (lot 2 du plan mobile côté back ; r
 | ID | Tâche | Tier | Statut | Tent. |
 |----|-------|------|--------|-------|
 | B4 | TB5 version minimale (garde 426 VERSION_OBSOLETE), GET /app/version, GET /app/config, numéro d'urgence centralisé (tasks/B4-version-configuration-publique.md) | spécifié | à faire | 0 |
+| B5 | TB17 un numéro de téléphone par compte : normalisation E.164 partagée, colonne dérivée + index unique partiel, script de doublons, 409 TELEPHONE_DEJA_UTILISE (tasks/B5-telephone-unique.md) | spécifié | à faire | 0 |
 
 ## Faites (preuve = commit)
 
@@ -27,6 +28,7 @@ Détails: docs/plans/runs/2026-10-20-lot2/ (lot 2 du plan mobile côté back ; r
 ## Dernières décisions (5 max, historique complet dans decisions.md)
 
 - D28 Module `src/configuration-publique/`, routes publiques `/app/version` et `/app/config` sans limiteur (révisable)
+- D40 Unicité du téléphone par colonne dérivée `telephoneNormalise` (trigger SQL) et index unique partiel ; D41 la migration ne change aucune valeur existante (révisable)
 - D29 Un seul numéro d'urgence (`NUMERO_URGENCE_MEDICALE`, défaut 15) en liste extensible, source `src/config/numeros-urgence.ts` (révisable)
 - D31 Garde 426 seulement si X-Client mobile, X-Plateforme android ou ios et X-App-Version lisible ; sinon la requête passe (révisable)
 - D33 Variables au format strict, refusées au démarrage si malformées ; absentes, défauts tolérants (révisable)

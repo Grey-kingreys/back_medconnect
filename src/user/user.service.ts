@@ -14,6 +14,11 @@ import { EmailService } from 'src/common/services/email.service';
 import { EncryptionService } from 'src/common/services/encryption.service';
 import { RolesService } from 'src/common/rbac/roles.service';
 import { StorageService } from 'src/storage/storage.service';
+import {
+  avecTelephoneUnique,
+  exigerTelephone,
+  verifierTelephoneLibre,
+} from 'src/common/telephone/telephone-unicite';
 import { SessionsService } from 'src/auth/sessions.service';
 import {
   CreateUserByAdminDto,
@@ -102,6 +107,9 @@ export class UserService {
       throw new ConflictException('Un utilisateur avec cet email existe déjà');
     }
 
+    const telephoneE164 = telephone ? exigerTelephone(telephone) : undefined;
+    if (telephoneE164) await verifierTelephoneLibre(this.prisma, telephoneE164);
+
     const hashedPassword = await bcrypt.hash(password, 12);
 
     // Rôle RBAC : résolu pour les rôles système (PATIENT/ADMIN). Pour un rôle de
@@ -116,28 +124,30 @@ export class UserService {
       this.logger.error('Résolution appRole (createByAdmin) échouée', e);
     }
 
-    const user = await this.prisma.user.create({
-      data: {
-        nom: nom.trim(),
-        prenom: prenom.trim(),
-        email: email.toLowerCase(),
-        password: hashedPassword,
-        telephone: telephone?.trim(),
-        role: role as any,
-        appRoleId,
-        isActive: true,
-        specialite: role === 'MEDECIN' ? (dto as any).specialite : undefined,
-      },
-      select: {
-        id: true,
-        email: true,
-        nom: true,
-        prenom: true,
-        role: true,
-        isActive: true,
-        createdAt: true,
-      },
-    });
+    const user = await avecTelephoneUnique(
+      this.prisma.user.create({
+        data: {
+          nom: nom.trim(),
+          prenom: prenom.trim(),
+          email: email.toLowerCase(),
+          password: hashedPassword,
+          telephone: telephoneE164,
+          role: role as any,
+          appRoleId,
+          isActive: true,
+          specialite: role === 'MEDECIN' ? (dto as any).specialite : undefined,
+        },
+        select: {
+          id: true,
+          email: true,
+          nom: true,
+          prenom: true,
+          role: true,
+          isActive: true,
+          createdAt: true,
+        },
+      }),
+    );
 
     this.emailService
       .sendWelcomeEmail(user.email, user.nom, user.prenom)
@@ -225,23 +235,31 @@ export class UserService {
     if (dto.prenom !== undefined) updateData.prenom = dto.prenom.trim();
     if (dto.email !== undefined) updateData.email = dto.email.toLowerCase();
     if (dto.role !== undefined) updateData.role = dto.role;
-    if (dto.telephone !== undefined)
-      updateData.telephone = dto.telephone.trim();
+    if (dto.telephone === null) {
+      // null retire le numéro (D45).
+      updateData.telephone = null;
+    } else if (dto.telephone !== undefined) {
+      const telephoneE164 = exigerTelephone(dto.telephone);
+      await verifierTelephoneLibre(this.prisma, telephoneE164, userId);
+      updateData.telephone = telephoneE164;
+    }
 
-    const updated = await this.prisma.user.update({
-      where: { id: userId },
-      data: updateData,
-      select: {
-        id: true,
-        email: true,
-        nom: true,
-        prenom: true,
-        telephone: true,
-        role: true,
-        isActive: true,
-        updatedAt: true,
-      },
-    });
+    const updated = await avecTelephoneUnique(
+      this.prisma.user.update({
+        where: { id: userId },
+        data: updateData,
+        select: {
+          id: true,
+          email: true,
+          nom: true,
+          prenom: true,
+          telephone: true,
+          role: true,
+          isActive: true,
+          updatedAt: true,
+        },
+      }),
+    );
 
     return {
       data: updated,

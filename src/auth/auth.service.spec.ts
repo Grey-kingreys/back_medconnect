@@ -1,10 +1,12 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call -- les calls des doublures jest.Mock sont typés any */
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Prisma } from 'generated/prisma/client';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { AuthService } from './auth.service';
@@ -826,6 +828,141 @@ describe('AuthService', () => {
       expect(out.success).toBe(true);
       expect(emailService.sendPasswordResetEmail).not.toHaveBeenCalled();
       expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('TB17 : un numéro par compte', () => {
+    const dto = (telephone?: string) => ({
+      nom: 'Barry',
+      prenom: 'Mamadou',
+      email: 'mamadou@example.com',
+      password: 'MotDePasse-de-test-2',
+      ...(telephone === undefined ? {} : { telephone }),
+    });
+    const MESSAGE_409 = {
+      message: 'Ce numéro est déjà utilisé par un autre compte.',
+      code: 'TELEPHONE_DEJA_UTILISE',
+    };
+    const creeCompte = () => ({
+      id: 'u2',
+      email: 'mamadou@example.com',
+      nom: 'Barry',
+      prenom: 'Mamadou',
+      role: 'PATIENT',
+      createdAt: new Date(),
+    });
+
+    beforeEach(() => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.user.findFirst.mockResolvedValue(null);
+      prisma.user.create.mockResolvedValue(creeCompte());
+    });
+
+    it('inscription : enregistre le numéro normalisé après contrôle', async () => {
+      await service.register(dto('622 98 87 76') as never, res as never, WEB);
+
+      expect(prisma.user.findFirst.mock.calls[0][0].where).toEqual({
+        telephoneNormalise: '+224622988776',
+      });
+      expect(prisma.user.create.mock.calls[0][0].data.telephone).toBe(
+        '+224622988776',
+      );
+    });
+
+    it("inscription : refuse un numéro déjà pris, quel qu'en soit le format", async () => {
+      prisma.user.findFirst.mockImplementation(
+        (arg: { where: { telephoneNormalise?: string } }) =>
+          Promise.resolve(
+            arg.where.telephoneNormalise === '+224622988776'
+              ? { id: 'u-existant' }
+              : null,
+          ),
+      );
+
+      for (const saisie of ['00224-622-98-87-76', '622988776']) {
+        const erreur: unknown = await service
+          .register(dto(saisie) as never, res as never, WEB)
+          .catch((e: unknown) => e);
+
+        expect(erreur).toBeInstanceOf(ConflictException);
+        expect((erreur as ConflictException).getResponse()).toEqual(
+          MESSAGE_409,
+        );
+      }
+      expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('inscription sans numéro : aucun contrôle', async () => {
+      await service.register(dto() as never, res as never, WEB);
+
+      expect(prisma.user.findFirst).not.toHaveBeenCalled();
+      expect(
+        prisma.user.create.mock.calls[0][0].data.telephone,
+      ).toBeUndefined();
+    });
+
+    it('inscription : refuse un numéro invalide', async () => {
+      const erreur: unknown = await service
+        .register(dto('12345') as never, res as never, WEB)
+        .catch((e: unknown) => e);
+
+      expect(erreur).toBeInstanceOf(BadRequestException);
+      expect((erreur as BadRequestException).getResponse()).toMatchObject({
+        code: 'VALIDATION',
+      });
+      expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('inscription : traduit une course sur l’index unique en 409', async () => {
+      prisma.user.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError(
+          'Unique constraint failed on the fields: (`"telephoneNormalise"`)',
+          { code: 'P2002', clientVersion: '7.0.0' },
+        ),
+      );
+
+      const erreur: unknown = await service
+        .register(dto('622 98 87 76') as never, res as never, WEB)
+        .catch((e: unknown) => e);
+
+      expect(erreur).toBeInstanceOf(ConflictException);
+      expect((erreur as ConflictException).getResponse()).toEqual(MESSAGE_409);
+    });
+
+    it('editProfile : normalise le numéro et exclut le compte lui-même', async () => {
+      prisma.user.findUnique.mockResolvedValue(utilisateur());
+
+      await service.editProfile('u1', { telephone: '+224 622 98 87 76' });
+
+      expect(prisma.user.findFirst.mock.calls[0][0].where).toEqual({
+        telephoneNormalise: '+224622988776',
+        id: { not: 'u1' },
+      });
+      expect(prisma.user.update.mock.calls[0][0].data.telephone).toBe(
+        '+224622988776',
+      );
+    });
+
+    it('editProfile : 409 si un autre compte porte le numéro', async () => {
+      prisma.user.findUnique.mockResolvedValue(utilisateur());
+      prisma.user.findFirst.mockResolvedValue({ id: 'u2' });
+
+      const erreur: unknown = await service
+        .editProfile('u1', { telephone: '+224 622 98 87 76' })
+        .catch((e: unknown) => e);
+
+      expect(erreur).toBeInstanceOf(ConflictException);
+      expect((erreur as ConflictException).getResponse()).toEqual(MESSAGE_409);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('editProfile : null retire le numéro sans contrôle', async () => {
+      prisma.user.findUnique.mockResolvedValue(utilisateur());
+
+      await service.editProfile('u1', { telephone: null } as never);
+
+      expect(prisma.user.findFirst).not.toHaveBeenCalled();
+      expect(prisma.user.update.mock.calls[0][0].data.telephone).toBeNull();
     });
   });
 });

@@ -13,6 +13,11 @@ import { Response } from 'express';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { PrismaService } from 'src/common/services/prisma.service';
+import {
+  avecTelephoneUnique,
+  exigerTelephone,
+  verifierTelephoneLibre,
+} from 'src/common/telephone/telephone-unicite';
 import { EmailService } from 'src/common/services/email.service';
 import { RolesService } from 'src/common/rbac/roles.service';
 import { PermissionsService } from 'src/common/rbac/permissions.service';
@@ -244,33 +249,38 @@ export class AuthService {
       throw new ConflictException('Un compte avec cet email existe déjà');
     }
 
+    const telephoneE164 = telephone ? exigerTelephone(telephone) : undefined;
+    if (telephoneE164) await verifierTelephoneLibre(this.prisma, telephoneE164);
+
     const hashedPassword = await this.hashPassword(password);
 
     const appRoleId = await this.resolveAppRoleId('PATIENT', null);
 
-    const user = await this.prisma.user.create({
-      data: {
-        nom: nom.trim(),
-        prenom: prenom.trim(),
-        email: email.toLowerCase(),
-        password: hashedPassword,
-        telephone: telephone?.trim(),
-        dateNaissance: dateNaissance ? new Date(dateNaissance) : undefined,
-        taille: taille ?? undefined,
-        poids: poids ?? undefined,
-        role: 'PATIENT',
-        appRoleId: appRoleId ?? undefined,
-        isActive: true,
-      },
-      select: {
-        id: true,
-        email: true,
-        nom: true,
-        prenom: true,
-        role: true,
-        createdAt: true,
-      },
-    });
+    const user = await avecTelephoneUnique(
+      this.prisma.user.create({
+        data: {
+          nom: nom.trim(),
+          prenom: prenom.trim(),
+          email: email.toLowerCase(),
+          password: hashedPassword,
+          telephone: telephoneE164,
+          dateNaissance: dateNaissance ? new Date(dateNaissance) : undefined,
+          taille: taille ?? undefined,
+          poids: poids ?? undefined,
+          role: 'PATIENT',
+          appRoleId: appRoleId ?? undefined,
+          isActive: true,
+        },
+        select: {
+          id: true,
+          email: true,
+          nom: true,
+          prenom: true,
+          role: true,
+          createdAt: true,
+        },
+      }),
+    );
 
     const jetons = await this.emettreJetons(
       { id: user.id, role: user.role, structureId: null },
@@ -383,8 +393,14 @@ export class AuthService {
     if (dto.nom !== undefined) updateData.nom = dto.nom.trim();
     if (dto.prenom !== undefined) updateData.prenom = dto.prenom.trim();
     if (dto.email !== undefined) updateData.email = dto.email.toLowerCase();
-    if (dto.telephone !== undefined)
-      updateData.telephone = dto.telephone.trim();
+    if (dto.telephone === null) {
+      // null retire le numéro (D45).
+      updateData.telephone = null;
+    } else if (dto.telephone !== undefined) {
+      const telephoneE164 = exigerTelephone(dto.telephone);
+      await verifierTelephoneLibre(this.prisma, telephoneE164, userId);
+      updateData.telephone = telephoneE164;
+    }
     if (dto.dateNaissance !== undefined)
       updateData.dateNaissance = new Date(dto.dateNaissance);
     if (dto.taille !== undefined) updateData.taille = dto.taille;
@@ -403,22 +419,24 @@ export class AuthService {
       };
     }
 
-    const updatedUser = await this.prisma.user.update({
-      where: { id: userId },
-      data: updateData,
-      select: {
-        id: true,
-        nom: true,
-        prenom: true,
-        email: true,
-        telephone: true,
-        dateNaissance: true,
-        taille: true,
-        poids: true,
-        role: true,
-        updatedAt: true,
-      },
-    });
+    const updatedUser = await avecTelephoneUnique(
+      this.prisma.user.update({
+        where: { id: userId },
+        data: updateData,
+        select: {
+          id: true,
+          nom: true,
+          prenom: true,
+          email: true,
+          telephone: true,
+          dateNaissance: true,
+          taille: true,
+          poids: true,
+          role: true,
+          updatedAt: true,
+        },
+      }),
+    );
 
     return {
       data: updatedUser,

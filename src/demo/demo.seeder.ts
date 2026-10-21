@@ -6,6 +6,7 @@ import { PrismaService } from 'src/common/services/prisma.service';
 import { EncryptionService } from 'src/common/services/encryption.service';
 import { RolesService } from 'src/common/rbac/roles.service';
 import { PermissionsService } from 'src/common/rbac/permissions.service';
+import { normaliserTelephone } from 'src/common/telephone/telephone';
 import {
   estModeDemoActif,
   estResetDemoDemande,
@@ -337,7 +338,7 @@ export class DemoSeeder implements OnApplicationBootstrap {
       password: hashes[i],
       nom: c.nom,
       prenom: c.prenom,
-      telephone: c.telephone,
+      telephone: normaliserTelephone(c.telephone),
       role: c.role,
       isActive: true,
       specialite: c.specialite ?? null,
