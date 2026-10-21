@@ -512,6 +512,13 @@ enum UrgenceStatus {
   ANNULE
 }
 
+// Origine de la position envoyée avec une alerte SOS (TB10b).
+enum SourcePositionUrgence {
+  gps
+  reseau
+  inconnue
+}
+
 model Urgence {
   id        String   @id @default(uuid())
   patientId String
@@ -520,6 +527,18 @@ model Urgence {
   latitude  Float?
   longitude Float?
   message   String?
+
+  // Qualité de la position (TB10b) : rayon d'incertitude en mètres, heure de la mesure
+  // côté téléphone, origine. Toujours enregistrées, même si la position n'a pas servi.
+  precisionMetres    Float?
+  horodatagePosition DateTime?
+  sourcePosition     SourcePositionUrgence?
+
+  // Idempotence (TB10b, D59) : clé envoyée par le client dans Idempotency-Key, et bilan
+  // de diffusion renvoyé tel quel à un rejeu. Jamais renvoyés par les routes SOS (D61).
+  cleIdempotence String?
+  bilanDiffusion Json?
+
   status    UrgenceStatus @default(LANCE)
 
   // Prise en charge : structure qui intervient (SetNull si elle est supprimée,
@@ -538,6 +557,8 @@ model Urgence {
 
   // Lecture de la dernière alerte d'un patient (anti-relance)
   @@index([patientId, createdAt])
+  // Un rejeu (même patient, même clé) retrouve l'alerte d'origine ; NULL n'est jamais en conflit.
+  @@unique([patientId, cleIdempotence])
 }
 
 // ====== STOCKAGE OBJETS (Cloudflare R2) ======

@@ -19,7 +19,7 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Expose, Exclude, Type, Transform } from 'class-transformer';
 import { AppointmentStatus } from 'generated/prisma/client';
-import { UrgenceStatus } from 'generated/prisma/enums';
+import { UrgenceStatus, SourcePositionUrgence } from 'generated/prisma/enums';
 
 // ─── Profil Médical ───────────────────────────────────────────────────────────
 
@@ -417,6 +417,43 @@ export class CreateUrgenceDto {
   @IsOptional()
   @IsNumber()
   longitude?: number;
+
+  @ApiPropertyOptional({
+    example: 25,
+    minimum: 0,
+    description:
+      "Rayon d'incertitude de la position, en mètres. Au-delà de 2 000 m, la position n'est pas utilisée pour choisir les établissements prévenus ; au-delà de 500 m, elle leur est signalée comme approximative.",
+  })
+  @IsOptional()
+  @IsNumber(
+    { allowNaN: false, allowInfinity: false },
+    { message: 'La précision de la position doit être un nombre de mètres.' },
+  )
+  @Min(0, { message: 'La précision de la position ne peut pas être négative.' })
+  precision?: number;
+
+  @ApiPropertyOptional({
+    example: '2026-10-21T14:03:12.000Z',
+    description:
+      "Heure de la mesure de la position sur le téléphone (ISO 8601). Une position de plus de 15 minutes n'est pas utilisée pour choisir les établissements prévenus.",
+  })
+  @IsOptional()
+  @IsDateString(
+    { strict: true },
+    { message: "L'heure de la position n'est pas valide." },
+  )
+  horodatagePosition?: string;
+
+  @ApiPropertyOptional({
+    enum: SourcePositionUrgence,
+    example: SourcePositionUrgence.gps,
+    description: 'Origine de la position : gps, reseau ou inconnue.',
+  })
+  @IsOptional()
+  @IsEnum(SourcePositionUrgence, {
+    message: "L'origine de la position n'est pas valide.",
+  })
+  source?: SourcePositionUrgence;
 
   @ApiPropertyOptional({ example: 'Accident domestique, besoin de secours' })
   @IsOptional()

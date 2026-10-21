@@ -39,6 +39,21 @@ import {
   UrgenceStatus,
   Prisma,
 } from 'generated/prisma/client';
+import {
+  evaluerPositionSos,
+  avertissementPositionApproximative,
+  phrasePositionApproximative,
+  messagePositionNonUtilisee,
+} from './sos-position';
+import {
+  SOS_IDEMPOTENCE_HEURES,
+  MESSAGE_SOS_DIFFUSION_EN_COURS,
+  lireCleIdempotence,
+  estBilanSos,
+  estConflitCleIdempotence,
+  donneesUrgencePubliques,
+  type BilanSos,
+} from './sos-idempotence';
 import type {
   ProfilMedical,
   Consultation,
@@ -1293,6 +1308,7 @@ export class CarnetSanteService {
       },
       orderBy: { createdAt: 'desc' },
       include: { structurePriseEnCharge: { select: { id: true, nom: true } } },
+      omit: { cleIdempotence: true, bilanDiffusion: true },
     });
   }
 
@@ -1306,6 +1322,8 @@ export class CarnetSanteService {
       delaiArriveeMinutes: number | null;
       latitude?: number | null;
       longitude?: number | null;
+      precisionMetres?: number | null;
+      horodatagePosition?: Date | null;
     },
     maintenant: Date,
   ) {
@@ -1324,10 +1342,9 @@ export class CarnetSanteService {
       if (finDelaiAt > maintenant) peutRelancerA = finDelaiAt;
     } else if (
       urgence.status === 'LANCE' &&
-      // Sans position, l'alerte n'a été diffusée à aucun établissement : le patient
-      // doit pouvoir relancer tout de suite (après avoir activé la localisation).
-      urgence.latitude != null &&
-      urgence.longitude != null
+      // Sans position utilisable (absente, trop ancienne ou trop imprécise), l'alerte n'a
+      // été diffusée à aucun établissement : le patient peut relancer tout de suite (D56).
+      evaluerPositionSos(urgence, urgence.createdAt).utilisable
     ) {
       const finAntiDoublon = new Date(
         urgence.createdAt.getTime() + SOS_ANTI_DOUBLON_MINUTES * 60_000,
@@ -1391,7 +1408,71 @@ export class CarnetSanteService {
     }
   }
 
-  async createUrgence(userId: string, dto: CreateUrgenceDto) {
+  /** Réponse à un rejeu (même patient, même clé) : même alerte, aucune nouvelle diffusion. */
+  private reponseRejeuSos(
+    urgence: Record<string, unknown> & { id: string; bilanDiffusion?: unknown },
+  ): {
+    success: boolean;
+    data: Record<string, unknown> &
+      Partial<Omit<BilanSos, 'message'>> & {
+        rejeu: boolean;
+        diffusionEnCours?: boolean;
+      };
+    message: string;
+  } {
+    const donnees = donneesUrgencePubliques(urgence);
+    if (estBilanSos(urgence.bilanDiffusion)) {
+      const { message, ...bilan } = urgence.bilanDiffusion;
+      this.logger.log(`sos.rejeu urgenceId=${urgence.id}`);
+      return {
+        success: true,
+        data: { ...donnees, ...bilan, rejeu: true },
+        message,
+      };
+    }
+    this.logger.log(`sos.rejeu urgenceId=${urgence.id} diffusionEnCours=true`);
+    return {
+      success: true,
+      data: { ...donnees, rejeu: true, diffusionEnCours: true },
+      message: MESSAGE_SOS_DIFFUSION_EN_COURS,
+    };
+  }
+
+  async createUrgence(
+    userId: string,
+    dto: CreateUrgenceDto,
+    enTeteIdempotence?: string,
+  ) {
+    const cleIdempotence = lireCleIdempotence(enTeteIdempotence);
+    if (
+      enTeteIdempotence !== undefined &&
+      enTeteIdempotence.trim() !== '' &&
+      !cleIdempotence
+    ) {
+      this.logger.warn('sos.cle_idempotence_ignoree format invalide');
+    }
+    if (cleIdempotence) {
+      const existante = await this.prisma.urgence.findUnique({
+        where: {
+          patientId_cleIdempotence: { patientId: userId, cleIdempotence },
+        },
+      });
+      if (existante) {
+        const limite = Date.now() - SOS_IDEMPOTENCE_HEURES * 3_600_000;
+        if (existante.createdAt.getTime() >= limite) {
+          return this.reponseRejeuSos(existante);
+        }
+        // Clé réutilisée après 24 h : elle est retirée de l'ancienne alerte, la nouvelle la reprend.
+        await this.prisma.urgence.update({
+          where: { id: existante.id },
+          data: { cleIdempotence: null },
+        });
+        this.logger.log(
+          `sos.cle_idempotence_expiree urgenceId=${existante.id}`,
+        );
+      }
+    }
+
     // Anti-relance : pas de nouvelle alerte tant que les secours sont attendus ou que
     // la précédente vient juste d'être envoyée. L'ancienne alerte n'est jamais modifiée.
     const derniere = await this.derniereUrgenceActive(userId);
@@ -1424,26 +1505,81 @@ export class CarnetSanteService {
       }
     }
 
-    const urgence = await this.prisma.urgence.create({
-      data: {
-        patientId: userId,
-        latitude: dto.latitude,
-        longitude: dto.longitude,
-        message: dto.message,
-        status: 'LANCE',
-      },
+    let urgence: Prisma.UrgenceGetPayload<{
       include: {
         patient: {
           select: {
-            nom: true,
-            prenom: true,
-            telephone: true,
-            email: true,
-            profilMedical: true,
+            nom: true;
+            prenom: true;
+            telephone: true;
+            email: true;
+            profilMedical: true;
+          };
+        };
+      };
+    }>;
+    try {
+      urgence = await this.prisma.urgence.create({
+        data: {
+          patientId: userId,
+          latitude: dto.latitude,
+          longitude: dto.longitude,
+          message: dto.message,
+          precisionMetres: dto.precision ?? undefined,
+          horodatagePosition: dto.horodatagePosition
+            ? new Date(dto.horodatagePosition)
+            : undefined,
+          sourcePosition: dto.source ?? undefined,
+          cleIdempotence: cleIdempotence ?? undefined,
+          status: 'LANCE',
+        },
+        include: {
+          patient: {
+            select: {
+              nom: true,
+              prenom: true,
+              telephone: true,
+              email: true,
+              profilMedical: true,
+            },
           },
         },
+      });
+    } catch (erreur) {
+      if (cleIdempotence && estConflitCleIdempotence(erreur)) {
+        const trouvee = await this.prisma.urgence.findUnique({
+          where: {
+            patientId_cleIdempotence: { patientId: userId, cleIdempotence },
+          },
+        });
+        if (trouvee) {
+          this.logger.log(`sos.rejeu_concurrent urgenceId=${trouvee.id}`);
+          return this.reponseRejeuSos(trouvee);
+        }
+      }
+      throw erreur;
+    }
+
+    const evaluation = evaluerPositionSos(
+      {
+        latitude: dto.latitude,
+        longitude: dto.longitude,
+        precisionMetres: dto.precision,
+        horodatagePosition: dto.horodatagePosition
+          ? new Date(dto.horodatagePosition)
+          : null,
       },
-    });
+      urgence.createdAt,
+    );
+    if (evaluation.horodatageIgnore) {
+      this.logger.warn(`sos.horodatage_futur urgenceId=${urgence.id}`);
+    }
+    const positionUtilisee = evaluation.utilisable;
+    const positionApproximative = evaluation.qualite === 'approximative';
+    const avertissementPosition =
+      positionApproximative && evaluation.precisionMetres !== null
+        ? avertissementPositionApproximative(evaluation.precisionMetres)
+        : null;
 
     const contactEmail = urgence.patient.profilMedical?.contactEmail;
     const contactNom = urgence.patient.profilMedical?.contactNom || 'Proche';
@@ -1471,7 +1607,7 @@ export class CarnetSanteService {
           contactNom,
           patientNom: urgence.patient.nom,
           patientPrenom: urgence.patient.prenom,
-          location: hasLocation
+          location: positionUtilisee
             ? { lat: dto.latitude!, lng: dto.longitude! }
             : undefined,
           message: dto.message,
@@ -1481,7 +1617,7 @@ export class CarnetSanteService {
 
     // 2. SMS d'urgence (Nimba) → file asynchrone.
     if (contactTel && !envoisExternesBloques) {
-      const locationStr = hasLocation
+      const locationStr = positionUtilisee
         ? `Position: https://www.google.com/maps?q=${dto.latitude},${dto.longitude}`
         : undefined;
       await this.enfilerSansBloquer('sms', urgence.id, () =>
@@ -1499,7 +1635,7 @@ export class CarnetSanteService {
     //    l'alerte ni la fiche d'urgence du patient.
     let structuresAlertees = 0;
     let soignantsAlertes = 0;
-    if (hasLocation) {
+    if (positionUtilisee) {
       const sortedStructures = await this.structuresLesPlusProches(
         dto.latitude!,
         dto.longitude!,
@@ -1511,6 +1647,10 @@ export class CarnetSanteService {
         patientName: `${urgence.patient.prenom} ${urgence.patient.nom}`,
         latitude: dto.latitude,
         longitude: dto.longitude,
+        qualitePosition: evaluation.qualite,
+        precisionMetres: evaluation.precisionMetres,
+        positionApproximative,
+        avertissementPosition,
         message: dto.message,
         createdAt: urgence.createdAt,
         // Fiche d'urgence réduite, jamais le profil médical complet.
@@ -1551,7 +1691,7 @@ export class CarnetSanteService {
         await this.notificationsService.createManyNotifications(soignants, {
           type: 'SOS_ALERTE',
           titre: 'Alerte SOS à proximité',
-          message: `URGENCE : Un patient (${alertData.patientName}) a besoin d'aide à proximité.`,
+          message: `URGENCE : Un patient (${alertData.patientName}) a besoin d'aide à proximité.${avertissementPosition ? ` ${avertissementPosition}.` : ''}`,
           lien: '/dashboard',
         });
       }
@@ -1559,7 +1699,7 @@ export class CarnetSanteService {
 
     // Ni les coordonnées GPS du patient ni son identité ne sont journalisées (audit #8).
     this.logger.log(
-      `sos.diffusion urgenceId=${urgence.id} position=${hasLocation} structures=${structuresAlertees} soignants=${soignantsAlertes}`,
+      `sos.diffusion urgenceId=${urgence.id} position=${hasLocation} qualitePosition=${evaluation.qualite} structures=${structuresAlertees} soignants=${soignantsAlertes}`,
     );
 
     // Le patient doit savoir exactement qui a été prévenu : jamais de faux succès.
@@ -1576,7 +1716,16 @@ export class CarnetSanteService {
     if (structuresAlertees > 0) {
       message =
         `Alerte envoyée à ${structuresAlertees} établissement${structuresAlertees > 1 ? 's' : ''} de santé proche${structuresAlertees > 1 ? 's' : ''}.` +
-        `${proche} Restez calme, un soignant va prendre en charge votre alerte.`;
+        `${proche}` +
+        (positionApproximative && evaluation.precisionMetres !== null
+          ? phrasePositionApproximative(evaluation.precisionMetres)
+          : '') +
+        ' Restez calme, un soignant va prendre en charge votre alerte.';
+    } else if (
+      evaluation.qualite === 'trop_ancienne' ||
+      evaluation.qualite === 'trop_imprecise'
+    ) {
+      message = messagePositionNonUtilisee(evaluation.qualite, proche);
     } else if (!hasLocation) {
       message =
         "Votre position n'a pas pu être obtenue : aucun établissement de santé n'a été alerté." +
@@ -1594,20 +1743,38 @@ export class CarnetSanteService {
       message,
     });
 
+    const bilan: BilanSos = {
+      structuresAlertees,
+      soignantsAlertes,
+      procheAlerte,
+      positionTransmise: hasLocation,
+      positionUtilisee,
+      qualitePosition: evaluation.qualite,
+      precisionMetres: evaluation.precisionMetres,
+      message,
+    };
+    if (cleIdempotence) {
+      try {
+        await this.prisma.urgence.update({
+          where: { id: urgence.id },
+          data: { bilanDiffusion: bilan as unknown as Prisma.InputJsonValue },
+        });
+      } catch (e) {
+        this.logger.error(
+          `sos.bilan_non_enregistre urgenceId=${urgence.id} : ${(e as Error).message}`,
+        );
+      }
+    }
     // Pas de profil médical (chiffré) dans la réponse : le patient n'en a pas besoin ici.
-    const urgenceSansPatient = Object.fromEntries(
-      Object.entries(urgence).filter(([cle]) => cle !== 'patient'),
-    );
+    const { message: messageBilan, ...champsBilan } = bilan;
     return {
       success: true,
       data: {
-        ...urgenceSansPatient,
-        structuresAlertees,
-        soignantsAlertes,
-        procheAlerte,
-        positionTransmise: hasLocation,
+        ...donneesUrgencePubliques(urgence),
+        ...champsBilan,
+        rejeu: false,
       },
-      message,
+      message: messageBilan,
     };
   }
 
@@ -1653,6 +1820,7 @@ export class CarnetSanteService {
       },
       // Seuls les champs utiles : ne jamais renvoyer l'objet utilisateur complet du patient.
       include: { patient: { select: { id: true, nom: true, prenom: true } } },
+      omit: { cleIdempotence: true, bilanDiffusion: true },
     });
 
     // Notification Patient
@@ -1724,6 +1892,7 @@ export class CarnetSanteService {
         },
       },
       orderBy: { createdAt: 'desc' },
+      omit: { cleIdempotence: true, bilanDiffusion: true },
     });
 
     return {
@@ -1744,6 +1913,7 @@ export class CarnetSanteService {
     const urgence = await this.prisma.urgence.update({
       where: { id },
       data: { status: status },
+      omit: { cleIdempotence: true, bilanDiffusion: true },
     });
     return {
       data: urgence,

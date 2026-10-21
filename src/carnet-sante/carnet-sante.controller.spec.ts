@@ -40,6 +40,20 @@ describe('CarnetSanteController : SOS réservé aux patients', () => {
       { user: { userId: 'u1', role: 'PATIENT' } } as never,
       dto as never,
     );
-    expect(service.createUrgence).toHaveBeenCalledWith('u1', dto);
+    expect(service.createUrgence).toHaveBeenCalledWith('u1', dto, undefined);
+  });
+
+  it("transmet l'en-tête Idempotency-Key", async () => {
+    const dto = {};
+    await controller.createUrgence(
+      { user: { userId: 'u1', role: 'PATIENT' } } as never,
+      dto as never,
+      'cle-essai-0001',
+    );
+    expect(service.createUrgence).toHaveBeenCalledWith(
+      'u1',
+      dto,
+      'cle-essai-0001',
+    );
   });
 });

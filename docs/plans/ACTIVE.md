@@ -3,20 +3,21 @@
 Index du run orchestré en cours. 150 lignes max. Protocole : docs/ORCHESTRATOR.md, section 9.
 Reprise : lire ce fichier, puis seulement le fichier de la prochaine tâche.
 
-Run: 2026-10-20-lot2 | Branche: orch/lot2-back | Parallélisme: 1 (tâches séquentielles, arbre principal) | Audience: mixte par surface (API dev ; messages d'erreur, emails, SMS et notifications non-dev)
-Détails: docs/plans/runs/2026-10-20-lot2/ (lot 2 du plan mobile côté back ; rapports des sous-agents dans rapports/ ; décisions dans decisions.md, numérotation continuée depuis le lot 1). Run précédent : docs/plans/runs/2026-10-20-lot1/ (B1, B2, B3 faits, B3 = 9b73836 ; à archiver)
+Run: 2026-10-21-lot3 | Branche: orch/lot3-back | Parallélisme: 1 (tâches séquentielles, arbre principal) | Audience: mixte par surface (API dev ; messages d'erreur, emails, SMS et notifications non-dev)
+Détails: docs/plans/runs/2026-10-21-lot3/ (lot 3 du plan mobile côté back ; rapports des sous-agents dans rapports/ ; décisions dans decisions.md, numérotation continuée depuis le lot 2). Runs précédents à archiver : docs/plans/runs/2026-10-20-lot1/ (B1 à B3), docs/plans/runs/2026-10-20-lot2/ (B4 = f605421, B5 = a8c245c)
 
 ## À faire et en cours
 
 | ID | Tâche | Tier | Statut | Tent. |
 |----|-------|------|--------|-------|
-| B4 | TB5 version minimale (garde 426 VERSION_OBSOLETE), GET /app/version, GET /app/config, numéro d'urgence centralisé (tasks/B4-version-configuration-publique.md) | spécifié | à faire | 0 |
-| B5 | TB17 un numéro de téléphone par compte : normalisation E.164 partagée, colonne dérivée + index unique partiel, script de doublons, 409 TELEPHONE_DEJA_UTILISE (tasks/B5-telephone-unique.md) | spécifié | à faire | 0 |
+| B6 | TB10b géolocalisation du SOS : precision, horodatagePosition, source ; position trop ancienne ou trop imprécise non utilisée ; position approximative signalée ; Idempotency-Key (tasks/B6-sos-position-idempotence.md) | spécifié | à faire | 0 |
 
 ## Faites (preuve = commit)
 
 | ID | Tâche | Commit |
 |----|-------|--------|
+| B4 | TB5 version minimale, /app/version, /app/config (lot 2) | f605421 |
+| B5 | TB17 un numéro de téléphone par compte (lot 2) | a8c245c |
 
 ## Questions parquées
 
@@ -27,9 +28,8 @@ Détails: docs/plans/runs/2026-10-20-lot2/ (lot 2 du plan mobile côté back ; r
 
 ## Dernières décisions (5 max, historique complet dans decisions.md)
 
-- D28 Module `src/configuration-publique/`, routes publiques `/app/version` et `/app/config` sans limiteur (révisable)
-- D40 Unicité du téléphone par colonne dérivée `telephoneNormalise` (trigger SQL) et index unique partiel ; D41 la migration ne change aucune valeur existante (révisable)
-- D29 Un seul numéro d'urgence (`NUMERO_URGENCE_MEDICALE`, défaut 15) en liste extensible, source `src/config/numeros-urgence.ts` (révisable)
-- D31 Garde 426 seulement si X-Client mobile, X-Plateforme android ou ios et X-App-Version lisible ; sinon la requête passe (révisable)
-- D33 Variables au format strict, refusées au démarrage si malformées ; absentes, défauts tolérants (révisable)
-- D35 X-Api-Version non traité dans B4 (révisable)
+- D52 Position SOS de plus de 15 min ou de précision > 2 000 m enregistrée mais non utilisée ; 500 à 2 000 m utilisée et signalée (user)
+- D54 Horodatage en avance de plus de 5 min ignoré, la position est jugée sur sa précision (révisable)
+- D56 Position inutilisable : pas de lien de position au proche, relance immédiate possible (révisable)
+- D59 Idempotence SOS par colonne unique (patientId, cleIdempotence) et bilan JSONB, sans Redis (révisable)
+- D61 cleIdempotence et bilanDiffusion exclus de toutes les réponses SOS (révisable)
