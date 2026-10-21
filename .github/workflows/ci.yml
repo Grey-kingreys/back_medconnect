@@ -7,9 +7,9 @@ name: CI
 
 on:
   push:
-    branches: [master, 'orch/**']
+    branches: [master, dev, 'orch/**']
   pull_request:
-    branches: [master]
+    branches: [master, dev]
 
 # Une nouvelle exécution sur la même branche annule la précédente, devenue obsolète
 concurrency:
