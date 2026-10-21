@@ -21,6 +21,7 @@ import {
 import { EmailService } from 'src/common/services/email.service';
 import { RolesService } from 'src/common/rbac/roles.service';
 import { PermissionsService } from 'src/common/rbac/permissions.service';
+import { typeStructureEffectif } from 'src/common/rbac/permissions-type-structure';
 import { LoginThrottleService } from './login-throttle.service';
 import {
   SessionsService,
@@ -331,6 +332,7 @@ export class AuthService {
         structure: {
           select: { id: true, nom: true, type: true },
         },
+        administeredStructure: { select: { type: true } },
         createdAt: true,
         updatedAt: true,
       },
@@ -347,12 +349,16 @@ export class AuthService {
     // URL publique de l'avatar (bucket public R2 servi via R2_PUBLIC_URL), null si aucun.
     // Résolu inline (pas d'injection de StorageService : StorageModule importe déjà
     // AuthModule → éviterait un cycle de dépendances).
-    const { avatarFile, ...rest } = user;
+    const { avatarFile, administeredStructure, ...rest } = user;
+    const structureType = typeStructureEffectif({
+      structure: rest.structure,
+      administeredStructure,
+    });
     const base = (process.env.R2_PUBLIC_URL || '').replace(/\/+$/, '');
     const avatarUrl = avatarFile ? `${base}/${avatarFile.key}` : null;
 
     return {
-      data: { ...rest, avatarUrl, permissions },
+      data: { ...rest, avatarUrl, structureType, permissions },
       message: 'Profil récupéré',
       success: true,
     };
