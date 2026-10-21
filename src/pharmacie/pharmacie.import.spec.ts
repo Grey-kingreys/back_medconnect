@@ -12,6 +12,8 @@ type OperationUpsert = {
   update: Record<string, unknown>;
 };
 
+type FonctionTransaction = (tx: unknown) => Promise<unknown>;
+
 /**
  * Tests de l'import Excel du stock (aperçu et import) : classeur construit en
  * mémoire avec exceljs, Prisma et les notifications simulés (aucune infra).
@@ -28,8 +30,12 @@ describe('PharmacieService, import Excel du stock', () => {
   ];
 
   let prisma: Record<string, unknown>;
-  let upsert: jest.Mock<OperationUpsert, [OperationUpsert]>;
-  let transaction: jest.Mock<Promise<unknown[]>, [OperationUpsert[]]>;
+  let upsert: jest.Mock<Promise<{ quantite: number }>, [OperationUpsert]>;
+  let findMany: jest.Mock;
+  let transaction: jest.Mock<Promise<unknown>, [FonctionTransaction, unknown?]>;
+  /** Stock vu par l'écriture (upsert) et stock vu par la lecture (findMany). */
+  let stockSimule: Map<string, number>;
+  let stockLu: Map<string, number>;
   let notifications: { createManyNotifications: jest.Mock };
   let service: PharmacieService;
 
@@ -52,11 +58,41 @@ describe('PharmacieService, import Excel du stock', () => {
     };
   }
 
+  /** Pose une quantité en stock, vue à la lecture comme à l'écriture. */
+  function poserStock(medicamentId: string, quantite: number) {
+    stockSimule.set(medicamentId, quantite);
+    stockLu.set(medicamentId, quantite);
+  }
+
   beforeEach(() => {
-    upsert = jest.fn((args: OperationUpsert) => args);
-    transaction = jest.fn((operations: OperationUpsert[]) =>
-      Promise.resolve(operations),
+    stockSimule = new Map();
+    stockLu = new Map();
+    findMany = jest.fn(() =>
+      Promise.resolve(
+        [...stockLu].map(([medicamentId, quantite]) => ({
+          medicamentId,
+          quantite,
+        })),
+      ),
     );
+    upsert = jest.fn((args: OperationUpsert) => {
+      const id = args.where.medicamentId_structureId.medicamentId;
+      const update = args.update.quantite;
+      let quantite: number;
+      if (!stockSimule.has(id)) {
+        quantite = args.create.quantite as number;
+      } else if (typeof update === 'number') {
+        quantite = update;
+      } else {
+        quantite =
+          (stockSimule.get(id) as number) +
+          (update as { increment: number }).increment;
+      }
+      stockSimule.set(id, quantite);
+      return Promise.resolve({ quantite });
+    });
+    const stockMedicament = { findMany, upsert };
+    transaction = jest.fn((fn: FonctionTransaction) => fn({ stockMedicament }));
     prisma = {
       user: {
         findUnique: jest.fn().mockResolvedValue({
@@ -72,6 +108,7 @@ describe('PharmacieService, import Excel du stock', () => {
           .mockResolvedValue({ id: STRUCTURE_ID, type: 'PHARMACIE' }),
       },
       medicament: {
+        findFirst: jest.fn().mockResolvedValue({ nom: 'Amoxicilline 500 mg' }),
         findMany: jest.fn().mockResolvedValue([
           {
             id: 'med-para',
@@ -86,7 +123,7 @@ describe('PharmacieService, import Excel du stock', () => {
           },
         ]),
       },
-      stockMedicament: { upsert },
+      stockMedicament,
       $transaction: transaction,
     };
     notifications = { createManyNotifications: jest.fn() };
@@ -237,9 +274,12 @@ describe('PharmacieService, import Excel du stock', () => {
     );
 
     expect(transaction).toHaveBeenCalledTimes(1);
-    const operations = transaction.mock.calls[0][0];
+    expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
+      maxWait: 10_000,
+      timeout: 60_000,
+    });
+    const operations = upsert.mock.calls.map(([args]) => args);
     expect(operations).toHaveLength(2);
-    expect(upsert).toHaveBeenCalledTimes(2);
     expect(
       operations.map((op) => op.where.medicamentId_structureId.medicamentId),
     ).toEqual(['med-para', 'med-amox']);
@@ -254,7 +294,9 @@ describe('PharmacieService, import Excel du stock', () => {
       },
       update: { quantite: 0, disponible: false },
     });
+    expect(operations[1].update.dateExpiration).toBeUndefined();
 
+    expect(data.mode).toBe('inventaire');
     expect(data.importees).toBe(2);
     expect(data.acceptees).toBe(2);
     expect(data.rejetees).toBe(3);
@@ -271,5 +313,242 @@ describe('PharmacieService, import Excel du stock', () => {
         message: expect.stringContaining('2 médicaments') as string,
       }),
     );
+  });
+
+  it('conserve la date, le prix et les notes enregistrés quand les cases sont vides', async () => {
+    poserStock('med-para', 30);
+    const fichier = await construireFichier([['Paracétamol 500 mg', 40]]);
+
+    const { data } = await service.importerStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+    );
+
+    const { update } = upsert.mock.calls[0][0];
+    expect(update.quantite).toBe(40);
+    expect(update.dateExpiration).toBeUndefined();
+    expect(update.prixUnitaire).toBeUndefined();
+    expect(update.notes).toBeUndefined();
+    expect(data.lignes[0]).toMatchObject({
+      statut: 'acceptee',
+      quantiteAvant: 30,
+      quantiteApres: 40,
+    });
+  });
+
+  it("aperçu : le mode inventaire est le mode par défaut et n'écrit rien", async () => {
+    poserStock('med-para', 30);
+    const fichier = await construireFichier([
+      ['Paracétamol 500 mg', 40],
+      ['Amoxicilline 500 mg', 5],
+    ]);
+
+    const { data } = await service.apercuImportStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+    );
+
+    expect(data.mode).toBe('inventaire');
+    expect(data.lignes[0]).toMatchObject({
+      quantiteAvant: 30,
+      quantiteApres: 40,
+    });
+    expect(data.lignes[1]).toMatchObject({
+      quantiteAvant: 0,
+      quantiteApres: 5,
+    });
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        structureId: STRUCTURE_ID,
+        medicamentId: { in: ['med-para', 'med-amox'] },
+      },
+      select: { medicamentId: true, quantite: true },
+    });
+    expect(transaction).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("aperçu en mode livraison : la quantité du fichier s'ajoute au stock", async () => {
+    poserStock('med-para', 30);
+    const fichier = await construireFichier([
+      ['Paracétamol 500 mg', 40],
+      ['Amoxicilline 500 mg', 5],
+    ]);
+
+    const { data } = await service.apercuImportStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+      'livraison',
+    );
+
+    expect(data.mode).toBe('livraison');
+    expect(data.lignes[0]).toMatchObject({
+      quantiteAvant: 30,
+      quantiteApres: 70,
+    });
+    expect(data.lignes[1]).toMatchObject({
+      quantiteAvant: 0,
+      quantiteApres: 5,
+    });
+  });
+
+  it('import en mode livraison : incrément, création des absents, une seule alerte', async () => {
+    poserStock('med-para', 30);
+    const fichier = await construireFichier([
+      ['Paracétamol 500 mg', 40],
+      ['Amoxicilline 500 mg', 5],
+    ]);
+
+    const { data } = await service.importerStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+      'livraison',
+    );
+
+    const [premier, second] = upsert.mock.calls.map(([args]) => args);
+    expect(premier.update.quantite).toEqual({ increment: 40 });
+    expect(premier.update.disponible).toBe(true);
+    expect(second.create.quantite).toBe(5);
+    expect(data.lignes[0]).toMatchObject({
+      quantiteAvant: 30,
+      quantiteApres: 70,
+    });
+    expect(data.lignes[1]).toMatchObject({
+      quantiteAvant: 0,
+      quantiteApres: 5,
+    });
+    expect(notifications.createManyNotifications).toHaveBeenCalledTimes(1);
+    expect(notifications.createManyNotifications).toHaveBeenCalledWith(
+      [USER_ID],
+      expect.objectContaining({
+        message: expect.stringContaining('1 médicament') as string,
+      }),
+    );
+  });
+
+  it("livraison de 0 : le stock ne bouge pas et la disponibilité n'est pas touchée", async () => {
+    poserStock('med-para', 30);
+    const fichier = await construireFichier([['Paracétamol 500 mg', 0]]);
+
+    const { data } = await service.importerStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+      'livraison',
+    );
+
+    const { update } = upsert.mock.calls[0][0];
+    expect(update.quantite).toEqual({ increment: 0 });
+    expect(update).not.toHaveProperty('disponible');
+    expect(data.lignes[0]).toMatchObject({
+      quantiteAvant: 30,
+      quantiteApres: 30,
+    });
+  });
+
+  it("livraison : l'incrément résiste à un import simultané", async () => {
+    poserStock('med-para', 30);
+    // Un autre import a déjà ajouté 20 entre la lecture et l'écriture
+    stockSimule.set('med-para', 50);
+    const fichier = await construireFichier([['Paracétamol 500 mg', 40]]);
+
+    const { data } = await service.importerStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+      'livraison',
+    );
+
+    expect(upsert.mock.calls[0][0].update.quantite).toEqual({ increment: 40 });
+    expect(data.lignes[0]).toMatchObject({
+      quantiteAvant: 50,
+      quantiteApres: 90,
+    });
+  });
+
+  it('livraison : refuse une ligne dont le total dépasserait la borne entière', async () => {
+    poserStock('med-para', 2147483600);
+    const fichier = await construireFichier([['Paracétamol 500 mg', 100]]);
+    const raison =
+      'Avec cette livraison, la quantité en stock deviendrait trop grande. Vérifiez la quantité.';
+
+    const { data: apercu } = await service.apercuImportStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+      'livraison',
+    );
+    expect(apercu.lignes[0]).toMatchObject({ statut: 'rejetee', raison });
+
+    const { data } = await service.importerStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+      'livraison',
+    );
+    expect(data.lignes[0]).toMatchObject({ statut: 'rejetee', raison });
+    expect(upsert).not.toHaveBeenCalled();
+    expect(data.importees).toBe(0);
+
+    const { data: inventaire } = await service.apercuImportStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+      'inventaire',
+    );
+    expect(inventaire.lignes[0]).toMatchObject({
+      statut: 'acceptee',
+      quantiteApres: 100,
+    });
+  });
+
+  it("l'alerte de stock bas se calcule sur la quantité après l'import", async () => {
+    poserStock('med-para', 5);
+    const fichier = await construireFichier([['Paracétamol 500 mg', 10]]);
+
+    await service.importerStock(STRUCTURE_ID, USER_ID, fichier, 'livraison');
+    expect(notifications.createManyNotifications).not.toHaveBeenCalled();
+
+    await service.importerStock(STRUCTURE_ID, USER_ID, fichier, 'inventaire');
+    expect(notifications.createManyNotifications).not.toHaveBeenCalled();
+
+    poserStock('med-amox', 2);
+    const fichierAmox = await construireFichier([['Amoxicilline 500 mg', 3]]);
+    await service.importerStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichierAmox,
+      'livraison',
+    );
+    expect(notifications.createManyNotifications).toHaveBeenCalledTimes(1);
+    expect(notifications.createManyNotifications).toHaveBeenCalledWith(
+      [USER_ID],
+      expect.objectContaining({
+        message: expect.stringContaining('1 médicament') as string,
+      }),
+    );
+  });
+
+  it("le modèle téléchargeable explique l'inventaire et la livraison", async () => {
+    const buffer = await service.getModeleImportStock(STRUCTURE_ID, USER_ID);
+    const classeur = new Workbook();
+    await classeur.xlsx.load(buffer as unknown as ArrayBuffer);
+    const aide = classeur.getWorksheet("Mode d'emploi");
+    if (!aide) throw new Error("Feuille « Mode d'emploi » absente");
+
+    const textes: string[] = [];
+    aide.eachRow((ligne) => textes.push(ligne.getCell(1).text));
+    expect(textes).toHaveLength(9);
+    expect(textes.some((t) => t.startsWith('Inventaire :'))).toBe(true);
+    expect(textes.some((t) => t.startsWith('Livraison :'))).toBe(true);
+    expect(
+      textes[7].endsWith(
+        'Une case laissée vide ne change pas ce qui est déjà enregistré.',
+      ),
+    ).toBe(true);
   });
 });
