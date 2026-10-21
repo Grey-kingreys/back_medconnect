@@ -17,6 +17,7 @@ describe('DemoController et DemoService', () => {
   let authService: { connexionDemo: jest.Mock };
   let controller: DemoController;
   const res = { cookie: jest.fn() };
+  const req = { headers: {} };
 
   beforeEach(() => {
     prisma = { user: { findMany: jest.fn().mockResolvedValue([]) } };
@@ -49,7 +50,7 @@ describe('DemoController et DemoService', () => {
           NotFoundException,
         );
         expect(() =>
-          controller.connexion({ userId: ID_DEMO }, res as never),
+          controller.connexion({ userId: ID_DEMO }, res as never, req as never),
         ).toThrow(NotFoundException);
 
         expect(prisma.user.findMany).not.toHaveBeenCalled();
@@ -147,9 +148,15 @@ describe('DemoController et DemoService', () => {
     });
 
     it('délègue la connexion à AuthService.connexionDemo', async () => {
-      const out = await controller.connexion({ userId: ID_DEMO }, res as never);
+      const out = await controller.connexion(
+        { userId: ID_DEMO },
+        res as never,
+        req as never,
+      );
 
-      expect(authService.connexionDemo).toHaveBeenCalledWith(ID_DEMO, res);
+      expect(authService.connexionDemo).toHaveBeenCalledWith(ID_DEMO, res, {
+        type: 'WEB',
+      });
       expect(out).toEqual({
         success: true,
         data: {},
@@ -161,7 +168,7 @@ describe('DemoController et DemoService', () => {
       authService.connexionDemo.mockRejectedValue(new ForbiddenException());
 
       await expect(
-        controller.connexion({ userId: ID_DEMO }, res as never),
+        controller.connexion({ userId: ID_DEMO }, res as never, req as never),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
   });

@@ -4,6 +4,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
+import { numeroUrgenceMedicale } from '../../config/numeros-urgence';
 
 @Injectable()
 export class AiService {
@@ -82,8 +83,7 @@ export class AiService {
       );
       return {
         tag: 'erreur',
-        reponse:
-          "Une erreur est survenue lors de la récupération des instructions de secours. En cas d'urgence vitale, appelez immédiatement le 15 ou les secours locaux.",
+        reponse: `Une erreur est survenue lors de la récupération des instructions de secours. En cas d'urgence vitale, appelez immédiatement le ${numeroUrgenceMedicale(this.configService)} ou les secours locaux.`,
         similarite: 0,
         certain: false,
       };

@@ -13,6 +13,7 @@ import { PrismaService } from 'src/common/services/prisma.service';
 import { SmsService } from 'src/common/services/sms.service';
 import { REDIS_CLIENT } from 'src/common/redis/redis.module';
 import { estCompteDemo, estModeDemoActif } from 'src/demo/demo-mode';
+import { normaliserTelephone } from 'src/common/telephone/telephone';
 
 /**
  * Consentement d'accès assisté par l'accueil (rôle « Accueil »).
@@ -63,15 +64,15 @@ export class ConsentService {
     return out;
   }
 
-  /** Variantes probables d'un même numéro (formats guinéens) pour le rapprochement. */
+  /** Formes enregistrées possibles d'un même numéro, pour les saisies antérieures à TB17. */
   private phoneCandidates(phone: string): string[] {
-    const digits = phone.replace(/\D/g, '');
-    const local9 = digits.slice(-9);
+    const saisi = phone.trim();
+    const e164 = normaliserTelephone(phone);
+    if (!e164) return saisi ? [saisi] : [];
+    const local9 = e164.slice(4);
     return Array.from(
       new Set(
-        [phone.trim(), digits, local9, `224${local9}`, `+224${local9}`].filter(
-          Boolean,
-        ),
+        [e164, local9, `224${local9}`, `00224${local9}`, saisi].filter(Boolean),
       ),
     );
   }
@@ -121,10 +122,14 @@ export class ConsentService {
   // ─── Flux 2 : OTP par SMS (déclenché par l'accueil) ───────────────
 
   async requestOtp(telephone: string, structureId: string) {
+    const e164 = normaliserTelephone(telephone);
     const patient = await this.prisma.user.findFirst({
       where: {
-        telephone: { in: this.phoneCandidates(telephone) },
         role: 'PATIENT',
+        OR: [
+          ...(e164 ? [{ telephoneNormalise: e164 }] : []),
+          { telephone: { in: this.phoneCandidates(telephone) } },
+        ],
       },
       select: {
         id: true,

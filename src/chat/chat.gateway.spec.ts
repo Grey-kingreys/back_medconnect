@@ -14,6 +14,8 @@ describe('ChatGateway : contrôle des participants', () => {
     saveMessage: jest.Mock;
   };
   let notifications: { createNotification: jest.Mock };
+  let revocation: { verifier: jest.Mock; enregistrerDiffuseur: jest.Mock };
+  let jwt: { verify: jest.Mock };
   let gateway: ChatGateway;
   let emit: jest.Mock;
   let to: jest.Mock;
@@ -35,14 +37,119 @@ describe('ChatGateway : contrôle des participants', () => {
       }),
     };
     notifications = { createNotification: jest.fn().mockResolvedValue({}) };
+    revocation = {
+      verifier: jest.fn().mockResolvedValue(null),
+      enregistrerDiffuseur: jest.fn(),
+    };
+    jwt = { verify: jest.fn() };
     gateway = new ChatGateway(
       chatService as never,
-      {} as never,
+      jwt as never,
       notifications as never,
+      revocation as never,
     );
     emit = jest.fn();
     to = jest.fn().mockReturnValue({ emit });
     gateway.server = { to } as never;
+  });
+
+  describe('révocation des sessions', () => {
+    const socketConnexion = () => ({
+      handshake: { auth: { token: 'jeton' }, headers: {} },
+      data: {} as Record<string, unknown>,
+      id: 'sock1',
+      join: jest.fn(),
+      emit: jest.fn(),
+      disconnect: jest.fn(),
+    });
+
+    it('connexion avec session révoquée : événement puis déconnexion, sans salle', async () => {
+      jwt.verify.mockReturnValue({ userId: 'u1', sid: 's1' });
+      revocation.verifier.mockResolvedValue('SESSION_REVOQUEE');
+      const s = socketConnexion();
+
+      await gateway.handleConnection(s as never);
+
+      expect(s.emit).toHaveBeenCalledWith('sessionRevoquee', {
+        code: 'SESSION_REVOQUEE',
+        message: 'Vous avez été déconnecté. Reconnectez-vous pour continuer.',
+      });
+      expect(s.disconnect).toHaveBeenCalledWith(true);
+      expect(s.join).not.toHaveBeenCalled();
+      expect(s.data.userId).toBeUndefined();
+    });
+
+    it('connexion valide : rejoint la salle utilisateur et la salle de session', async () => {
+      jwt.verify.mockReturnValue({ userId: 'u1', sid: 's1' });
+      const s = socketConnexion();
+
+      await gateway.handleConnection(s as never);
+
+      expect(s.join).toHaveBeenCalledWith('utilisateur:u1');
+      expect(s.join).toHaveBeenCalledWith('session:s1');
+      expect(s.data).toMatchObject({ userId: 'u1', sid: 's1' });
+      expect(s.disconnect).not.toHaveBeenCalled();
+    });
+
+    it('diffuserRevocation : prévient les salles puis coupe après 1 s', () => {
+      jest.useFakeTimers();
+      const emitSalles = jest.fn();
+      const disconnectSockets = jest.fn();
+      const toSalles = jest.fn().mockReturnValue({ emit: emitSalles });
+      const inSalles = jest.fn().mockReturnValue({ disconnectSockets });
+      gateway.server = { to: toSalles, in: inSalles } as never;
+
+      gateway.diffuserRevocation({
+        userId: 'u1',
+        sessionIds: ['a', 'b'],
+        code: 'SESSION_REVOQUEE',
+      });
+
+      expect(toSalles).toHaveBeenCalledWith(['session:a', 'session:b']);
+      expect(emitSalles).toHaveBeenCalledWith('sessionRevoquee', {
+        code: 'SESSION_REVOQUEE',
+        message: 'Vous avez été déconnecté. Reconnectez-vous pour continuer.',
+      });
+      expect(disconnectSockets).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(1000);
+      expect(inSalles).toHaveBeenCalledWith(['session:a', 'session:b']);
+      expect(disconnectSockets).toHaveBeenCalledWith(true);
+      jest.useRealTimers();
+    });
+
+    it('diffuserRevocation : la salle utilisateur seulement pour COMPTE_DESACTIVE', () => {
+      jest.useFakeTimers();
+      const toSalles = jest.fn().mockReturnValue({ emit: jest.fn() });
+      gateway.server = {
+        to: toSalles,
+        in: jest.fn().mockReturnValue({ disconnectSockets: jest.fn() }),
+      } as never;
+
+      gateway.diffuserRevocation({
+        userId: 'u1',
+        sessionIds: [],
+        code: 'COMPTE_DESACTIVE',
+      });
+
+      expect(toSalles).toHaveBeenCalledWith(['utilisateur:u1']);
+      jest.useRealTimers();
+    });
+
+    it('diffuserRevocation : aucune salle, rien à diffuser', () => {
+      const toSalles = jest.fn();
+      gateway.server = { to: toSalles } as never;
+      gateway.diffuserRevocation({
+        userId: 'u1',
+        sessionIds: [],
+        code: 'SESSION_REVOQUEE',
+      });
+      expect(toSalles).not.toHaveBeenCalled();
+    });
+
+    it('onModuleInit : enregistre le diffuseur', () => {
+      gateway.onModuleInit();
+      expect(revocation.enregistrerDiffuseur).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('joinConversation : un non participant ne rejoint pas la room', async () => {

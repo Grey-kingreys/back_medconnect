@@ -120,4 +120,90 @@ describe('validateEnv', () => {
       },
     );
   });
+
+  describe('SESSIONS_MULTI_APPAREILS', () => {
+    const valeurInitiale = process.env.SESSIONS_MULTI_APPAREILS;
+    afterEach(() => {
+      if (valeurInitiale === undefined)
+        delete process.env.SESSIONS_MULTI_APPAREILS;
+      else process.env.SESSIONS_MULTI_APPAREILS = valeurInitiale;
+    });
+
+    it('variable absente : défaut true', () => {
+      const config = validateEnv(configMinimale());
+      expect(config.SESSIONS_MULTI_APPAREILS).toBe('true');
+    });
+
+    it('refuse au démarrage la valeur « peut-etre »', () => {
+      expect(() =>
+        validateEnv({
+          ...configMinimale(),
+          SESSIONS_MULTI_APPAREILS: 'peut-etre',
+        }),
+      ).toThrow(/SESSIONS_MULTI_APPAREILS/);
+    });
+
+    it('accepte « FALSE »', () => {
+      expect(() =>
+        validateEnv({ ...configMinimale(), SESSIONS_MULTI_APPAREILS: 'FALSE' }),
+      ).not.toThrow();
+    });
+  });
+
+  describe('Application mobile et configuration publique (TB5)', () => {
+    const cles = [
+      'APP_VERSION_MINIMALE_ANDROID',
+      'APP_VERSION_RECOMMANDEE_ANDROID',
+      'APP_URL_TELECHARGEMENT_ANDROID',
+      'APP_VERSION_MINIMALE_IOS',
+      'APP_VERSION_RECOMMANDEE_IOS',
+      'APP_URL_TELECHARGEMENT_IOS',
+      'NUMERO_URGENCE_MEDICALE',
+      'VERSION_CGU',
+      'VERSION_POLITIQUE_CONFIDENTIALITE',
+      'FONCTION_ESPACE_SOIGNANT',
+      'FONCTION_ANNULATION_SOS',
+      'FONCTION_BOUTON_DEMO',
+    ];
+    const initiales = Object.fromEntries(
+      cles.map((cle) => [cle, process.env[cle]]),
+    );
+    afterEach(() => {
+      for (const cle of cles) {
+        if (initiales[cle] === undefined) delete process.env[cle];
+        else process.env[cle] = initiales[cle];
+      }
+    });
+
+    it('variables absentes : défauts appliqués, URL sans défaut', () => {
+      const config = validateEnv(configMinimale());
+      expect(config.APP_VERSION_MINIMALE_ANDROID).toBe('0.0.0');
+      expect(config.NUMERO_URGENCE_MEDICALE).toBe('15');
+      expect(config.VERSION_CGU).toBe('1.0');
+      expect(config.FONCTION_ANNULATION_SOS).toBe('false');
+      expect(config.APP_URL_TELECHARGEMENT_IOS).toBeUndefined();
+    });
+
+    it.each([
+      ['APP_VERSION_MINIMALE_IOS', '1.2'],
+      ['APP_URL_TELECHARGEMENT_ANDROID', 'play.google.com/x'],
+      ['NUMERO_URGENCE_MEDICALE', '15 ou 18'],
+      ['VERSION_CGU', 'version une'],
+      ['FONCTION_BOUTON_DEMO', 'oui'],
+    ])('refuse au démarrage %s = « %s »', (nom, valeur) => {
+      expect(() => validateEnv({ ...configMinimale(), [nom]: valeur })).toThrow(
+        new RegExp(nom),
+      );
+    });
+
+    it.each([
+      ['APP_VERSION_RECOMMANDEE_ANDROID', '1.4.0'],
+      ['NUMERO_URGENCE_MEDICALE', '+224117'],
+      ['FONCTION_ESPACE_SOIGNANT', 'TRUE'],
+    ])('accepte %s = « %s »', (nom, valeur) => {
+      expect(() =>
+        validateEnv({ ...configMinimale(), [nom]: valeur }),
+      ).not.toThrow();
+    });
+  });
 });

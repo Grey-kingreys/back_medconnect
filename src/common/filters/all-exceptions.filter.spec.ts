@@ -1,15 +1,24 @@
 import {
   ArgumentsHost,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Logger,
   NotFoundException,
   PayloadTooLargeException,
+  ServiceUnavailableException,
   UnauthorizedException,
+  ValidationPipe,
 } from '@nestjs/common';
 import { ThrottlerException } from '@nestjs/throttler';
 import { Prisma } from 'generated/prisma/client';
+import { UpdateRendezVousStatusDto } from 'src/carnet-sante/dto/carnet-sante.dto';
 import { AllExceptionsFilter, MESSAGES } from './all-exceptions.filter';
+import { ChangePasswordDto } from 'src/auth/dto/auth.dto';
+import {
+  fabriquerErreurValidation,
+  MESSAGES_REGLES,
+} from './erreur-validation';
 
 /**
  * Tests unitaires du filtre global : ArgumentsHost et Response simulés.
@@ -56,7 +65,239 @@ describe('AllExceptionsFilter', () => {
       statusCode: 403,
       message,
       error: 'Accès refusé',
+      code: 'PERMISSION_REFUSEE',
     });
+  });
+
+  it('attribue PERMISSION_REFUSEE à un 403 anglais par défaut', () => {
+    filtre.catch(new ForbiddenException(), host);
+    expect(corpsRenvoye().code).toBe('PERMISSION_REFUSEE');
+  });
+
+  it("conserve le code d'un 403 qui en porte un", () => {
+    filtre.catch(
+      new ForbiddenException({
+        message: 'Message projet',
+        code: 'SOS_ROLE_INTERDIT',
+      }),
+      host,
+    );
+    expect(corpsRenvoye().code).toBe('SOS_ROLE_INTERDIT');
+  });
+
+  it('recopie peutRelancerA dans donnees et ignore les autres clés', () => {
+    filtre.catch(
+      new ConflictException({
+        message: 'Message projet',
+        code: 'SOS_DEJA_ACTIF',
+        peutRelancerA: '2026-10-20T10:00:00.000Z',
+        autre: 'x',
+      }),
+      host,
+    );
+    expect(corpsRenvoye()).toEqual({
+      statusCode: 409,
+      message: 'Message projet',
+      error: 'Déjà existant',
+      code: 'SOS_DEJA_ACTIF',
+      donnees: { peutRelancerA: '2026-10-20T10:00:00.000Z' },
+    });
+  });
+
+  it("n'ajoute pas donnees sans clé autorisée", () => {
+    filtre.catch(
+      new ConflictException({ message: 'Message projet', autre: 'x' }),
+      host,
+    );
+    expect(corpsRenvoye()).not.toHaveProperty('donnees');
+  });
+
+  it('ignore champs si le code n’est pas VALIDATION', () => {
+    filtre.catch(
+      new BadRequestException({
+        message: 'Message projet',
+        champs: [{ champ: 'a', contraintes: ['b'] }],
+      }),
+      host,
+    );
+    expect(corpsRenvoye()).not.toHaveProperty('champs');
+  });
+
+  it('assainit champs : ni valeur ni élément invalide', () => {
+    filtre.catch(
+      new BadRequestException({
+        message: ['x'],
+        code: 'VALIDATION',
+        champs: [{ champ: 'a', contraintes: ['b', 3], valeur: 'SECRET' }, 'x'],
+      }),
+      host,
+    );
+    expect(corpsRenvoye().champs).toEqual([{ champ: 'a', contraintes: ['b'] }]);
+  });
+
+  describe('avec le vrai ValidationPipe', () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      exceptionFactory: fabriquerErreurValidation,
+    });
+    const rejet = () =>
+      pipe
+        .transform(
+          { status: 'PIRATE', intrus: 'SECRET-789' },
+          { type: 'body', metatype: UpdateRendezVousStatusDto },
+        )
+        .then(
+          () => {
+            throw new Error('Le pipe aurait dû rejeter la saisie.');
+          },
+          (e: unknown) => e,
+        );
+
+    const verifier = (corps: Record<string, unknown>) => {
+      expect(corps.statusCode).toBe(400);
+      expect(corps.message).toBe(MESSAGES.validation);
+      expect(corps.code).toBe('VALIDATION');
+      expect(corps.champs).toEqual(
+        expect.arrayContaining([
+          { champ: 'status', contraintes: ['isEnum'] },
+          { champ: 'intrus', contraintes: ['whitelistValidation'] },
+        ]),
+      );
+      const sansDetails = { ...corps };
+      delete sansDetails.details;
+      const texte = JSON.stringify(sansDetails);
+      expect(texte).not.toContain('PIRATE');
+      expect(texte).not.toContain('SECRET-789');
+    };
+
+    it('renvoie code et champs, sans la valeur saisie', async () => {
+      filtre.catch(await rejet(), host);
+      verifier(corpsRenvoye());
+      expect(corpsRenvoye()).toHaveProperty('details');
+    });
+
+    it('renvoie code et champs en production, sans details', async () => {
+      const ancien = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      try {
+        filtre.catch(await rejet(), host);
+        verifier(corpsRenvoye());
+        expect(corpsRenvoye()).not.toHaveProperty('details');
+      } finally {
+        process.env.NODE_ENV = ancien;
+      }
+    });
+  });
+
+  describe('règle lisible du nouveau mot de passe', () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      exceptionFactory: fabriquerErreurValidation,
+    });
+    const rejeter = (corps: Record<string, unknown>) =>
+      pipe.transform(corps, { type: 'body', metatype: ChangePasswordDto }).then(
+        () => {
+          throw new Error('Le pipe aurait dû rejeter la saisie.');
+        },
+        (e: unknown) => e,
+      );
+
+    it('un seul champ fautif : la règle remplace le message générique', async () => {
+      const ancien = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      try {
+        filtre.catch(
+          await rejeter({
+            currentPassword: 'Ancien-mdp-1',
+            newPassword: 'court',
+          }),
+          host,
+        );
+        const corps = corpsRenvoye();
+        const regle = MESSAGES_REGLES.get('newPassword');
+        expect(corps.statusCode).toBe(400);
+        expect(corps.code).toBe('VALIDATION');
+        expect(corps.champs).toEqual([
+          {
+            champ: 'newPassword',
+            contraintes: expect.arrayContaining([
+              'isLength',
+              'matches',
+            ]) as unknown,
+            message: regle,
+          },
+        ]);
+        expect(corps.message).toBe(regle);
+        expect(corps).not.toHaveProperty('details');
+        const texte = JSON.stringify(corps);
+        expect(texte).not.toContain('court');
+        expect(texte).not.toContain('Ancien-mdp-1');
+      } finally {
+        process.env.NODE_ENV = ancien;
+      }
+    });
+
+    it('deux champs fautifs : message générique, règle gardée dans le champ', async () => {
+      filtre.catch(
+        await rejeter({ currentPassword: '', newPassword: 'court' }),
+        host,
+      );
+      const corps = corpsRenvoye();
+      expect(corps.message).toBe(MESSAGES.validation);
+      expect(corps.champs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            champ: 'newPassword',
+            message: MESSAGES_REGLES.get('newPassword'),
+          }),
+        ]),
+      );
+    });
+  });
+
+  it("assainit les champs : garde message seulement s'il est une chaîne", () => {
+    filtre.catch(
+      new BadRequestException({
+        message: ['x'],
+        code: 'VALIDATION',
+        champs: [
+          { champ: 'a', contraintes: ['b'], message: 'Règle' },
+          { champ: 'c', contraintes: [], message: 3 },
+        ],
+      }),
+      host,
+    );
+    const corps = corpsRenvoye();
+    expect(corps.champs).toEqual([
+      { champ: 'a', contraintes: ['b'], message: 'Règle' },
+      { champ: 'c', contraintes: [] },
+    ]);
+    expect(corps.message).toBe(MESSAGES.validation);
+  });
+
+  it('conserve le message et le code du mot de passe actuel incorrect (400)', () => {
+    filtre.catch(
+      new BadRequestException({
+        message: 'Le mot de passe actuel est incorrect.',
+        code: 'MOT_DE_PASSE_ACTUEL_INCORRECT',
+      }),
+      host,
+    );
+    expect(corpsRenvoye()).toEqual({
+      statusCode: 400,
+      message: 'Le mot de passe actuel est incorrect.',
+      error: 'Saisie invalide',
+      code: 'MOT_DE_PASSE_ACTUEL_INCORRECT',
+    });
+  });
+
+  it("n'ajoute aucun code par défaut à une 401", () => {
+    filtre.catch(new UnauthorizedException('Lien expiré'), host);
+    expect(corpsRenvoye()).not.toHaveProperty('code');
   });
 
   it('remplace les erreurs de validation en tableau et garde le détail hors production', () => {
@@ -106,6 +347,35 @@ describe('AllExceptionsFilter', () => {
     expect(corpsRenvoye().message).toBe(MESSAGES.connexion);
   });
 
+  it('ajoute le code machine du catalogue au corps', () => {
+    filtre.catch(
+      new UnauthorizedException({
+        message: 'Message projet',
+        code: 'REFRESH_REUTILISE',
+      }),
+      host,
+    );
+    expect(corpsRenvoye()).toEqual({
+      statusCode: 401,
+      message: 'Message projet',
+      error: 'Connexion expirée',
+      code: 'REFRESH_REUTILISE',
+    });
+  });
+
+  it("n'ajoute pas un code hors catalogue", () => {
+    filtre.catch(
+      new UnauthorizedException({ message: 'Message projet', code: 'INCONNU' }),
+      host,
+    );
+    expect(corpsRenvoye()).not.toHaveProperty('code');
+  });
+
+  it("n'ajoute pas de code pour un message texte simple", () => {
+    filtre.catch(new UnauthorizedException('Message projet'), host);
+    expect(corpsRenvoye()).not.toHaveProperty('code');
+  });
+
   it('traduit le 413', () => {
     filtre.catch(new PayloadTooLargeException(), host);
     expect(status).toHaveBeenCalledWith(413);
@@ -142,6 +412,33 @@ describe('AllExceptionsFilter', () => {
     expect(String((logError.mock.calls[0] as unknown[])[0])).toContain(
       'POST /carnet/consultations',
     );
+  });
+
+  it("conserve le message et le code d'une 503 portant un code du catalogue", () => {
+    filtre.catch(
+      new ServiceUnavailableException({
+        message: 'Envoi impossible pour le moment.',
+        code: 'EMAIL_INDISPONIBLE',
+      }),
+      host,
+    );
+    expect(status).toHaveBeenCalledWith(503);
+    expect(corpsRenvoye()).toEqual({
+      statusCode: 503,
+      message: 'Envoi impossible pour le moment.',
+      error: 'Service indisponible',
+      code: 'EMAIL_INDISPONIBLE',
+    });
+  });
+
+  it('traite une 503 sans code comme une erreur interne', () => {
+    filtre.catch(new ServiceUnavailableException(), host);
+    expect(status).toHaveBeenCalledWith(500);
+    expect(corpsRenvoye()).toEqual({
+      statusCode: 500,
+      message: MESSAGES.indisponible,
+      error: 'Erreur interne',
+    });
   });
 
   it("n'écrit rien hors contexte HTTP", () => {

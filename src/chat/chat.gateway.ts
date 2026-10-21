@@ -7,10 +7,19 @@ import {
   OnGatewayConnection,
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
+import type { OnModuleInit } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { ChatService } from './chat.service';
 import { JwtService } from '@nestjs/jwt';
 import { NotificationsService } from '../notifications/notifications.service';
+import {
+  RevocationService,
+  type EvenementRevocation,
+} from '../auth/revocation.service';
+import {
+  DELAI_DECONNEXION_SOCKET_MS,
+  messagePourCode,
+} from '../auth/sessions.constants';
 
 const ACCES_REFUSE = "Vous n'avez pas accès à cette conversation.";
 
@@ -21,7 +30,9 @@ const ACCES_REFUSE = "Vous n'avez pas accès à cette conversation.";
     credentials: true,
   },
 })
-export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class ChatGateway
+  implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit
+{
   @WebSocketServer()
   server: Server;
 
@@ -31,9 +42,31 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly chatService: ChatService,
     private readonly jwtService: JwtService,
     private readonly notificationsService: NotificationsService,
+    private readonly revocation: RevocationService,
   ) {}
 
-  handleConnection(client: Socket) {
+  onModuleInit() {
+    this.revocation.enregistrerDiffuseur((evt) => this.diffuserRevocation(evt));
+  }
+
+  /** Prévient les appareils concernés (salles de session, et d'utilisateur si compte désactivé) puis les déconnecte. */
+  diffuserRevocation(evt: EvenementRevocation): void {
+    const salles = evt.sessionIds.map((id) => `session:${id}`);
+    if (evt.code === 'COMPTE_DESACTIVE')
+      salles.push(`utilisateur:${evt.userId}`);
+    if (salles.length === 0) return;
+    this.server.to(salles).emit('sessionRevoquee', {
+      code: evt.code,
+      message: messagePourCode(evt.code),
+    });
+    const t = setTimeout(
+      () => this.server.in(salles).disconnectSockets(true),
+      DELAI_DECONNEXION_SOCKET_MS,
+    );
+    t.unref?.();
+  }
+
+  async handleConnection(client: Socket) {
     try {
       const auth = client.handshake.auth as { token?: string };
       const authHeader: string | undefined =
@@ -48,11 +81,30 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
 
       // Secret centralisé (validé au boot, cf. config/env.validation.ts) — plus de fallback en dur.
-      const decoded = this.jwtService.verify<{ userId: string }>(token, {
-        secret: process.env.JWT_SECRET,
-      });
+      const decoded = this.jwtService.verify<{ userId: string; sid?: string }>(
+        token,
+        { secret: process.env.JWT_SECRET },
+      );
       const userId = decoded.userId;
-      (client.data as { userId?: string }).userId = userId;
+
+      const code = await this.revocation.verifier({
+        userId,
+        sid: decoded.sid,
+      });
+      if (code) {
+        client.emit('sessionRevoquee', {
+          code,
+          message: messagePourCode(code),
+        });
+        client.disconnect(true);
+        return;
+      }
+
+      const donnees = client.data as { userId?: string; sid?: string };
+      donnees.userId = userId;
+      if (decoded.sid) donnees.sid = decoded.sid;
+      void client.join(`utilisateur:${userId}`);
+      if (decoded.sid) void client.join(`session:${decoded.sid}`);
 
       if (!this.userSockets.has(userId)) {
         this.userSockets.set(userId, new Set());
