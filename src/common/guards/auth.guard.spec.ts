@@ -1,4 +1,5 @@
 import { UnauthorizedException } from '@nestjs/common';
+import { TokenExpiredError } from '@nestjs/jwt';
 import { MESSAGES_SESSION } from 'src/auth/sessions.constants';
 import { AuthGuard } from './auth.guard';
 
@@ -64,11 +65,27 @@ describe('AuthGuard', () => {
     jwt.verifyAsync.mockRejectedValue(new Error('signature'));
     const e = await attraper(garde.canActivate(contexte('Bearer jeton').ctx));
     expect(e.message).toBe('Token invalide ou expiré.');
+    expect(e.getResponse()).toMatchObject({ code: 'JETON_INVALIDE' });
     expect(revocation.verifier).not.toHaveBeenCalled();
   });
 
-  it('jeton absent : message inchangé', async () => {
+  it('jeton expiré : code JETON_EXPIRE, sans contrôle de révocation', async () => {
+    jwt.verifyAsync.mockRejectedValue(
+      new TokenExpiredError('jwt expired', new Date()),
+    );
+    const e = await attraper(garde.canActivate(contexte('Bearer jeton').ctx));
+    expect(e).toBeInstanceOf(UnauthorizedException);
+    expect(e.getStatus()).toBe(401);
+    expect(e.getResponse()).toMatchObject({
+      code: 'JETON_EXPIRE',
+      message: 'Token invalide ou expiré.',
+    });
+    expect(revocation.verifier).not.toHaveBeenCalled();
+  });
+
+  it('jeton absent : message inchangé et code JETON_ABSENT', async () => {
     const e = await attraper(garde.canActivate(contexte().ctx));
     expect(e.message).toBe('Token manquant. Veuillez vous connecter.');
+    expect(e.getResponse()).toMatchObject({ code: 'JETON_ABSENT' });
   });
 });

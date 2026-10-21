@@ -11,6 +11,7 @@ import { Prisma } from 'generated/prisma/client';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { AuthService } from './auth.service';
+import { MESSAGES_SESSION } from './sessions.constants';
 
 /**
  * Tests unitaires de AuthService (comportement actuel).
@@ -652,6 +653,59 @@ describe('AuthService', () => {
         data: { appareilsDeconnectes: 0 },
         message: 'Mot de passe modifié avec succès',
         success: true,
+      });
+    });
+  });
+
+  describe('changePassword : erreurs', () => {
+    const dto = {
+      currentPassword: 'Mauvais-mdp-1',
+      newPassword: 'Nouveau-mdp-1',
+    };
+
+    it("mot de passe actuel faux : 400 avec code, rien n'est modifié", async () => {
+      prisma.user.findUnique.mockResolvedValue(utilisateur());
+
+      const e: unknown = await service
+        .changePassword('u1', dto, 'sid-1')
+        .catch((err: unknown) => err);
+
+      expect(e).toBeInstanceOf(BadRequestException);
+      expect((e as BadRequestException).getResponse()).toMatchObject({
+        code: 'MOT_DE_PASSE_ACTUEL_INCORRECT',
+        message: 'Le mot de passe actuel est incorrect.',
+      });
+      expect(prisma.user.update).not.toHaveBeenCalled();
+      expect(sessions.revoquerAutres).not.toHaveBeenCalled();
+    });
+
+    it('utilisateur inactif : 401 COMPTE_DESACTIVE', async () => {
+      prisma.user.findUnique.mockResolvedValue(
+        utilisateur({ isActive: false }),
+      );
+
+      const e: unknown = await service
+        .changePassword('u1', dto, 'sid-1')
+        .catch((err: unknown) => err);
+
+      expect(e).toBeInstanceOf(UnauthorizedException);
+      expect((e as UnauthorizedException).getResponse()).toMatchObject({
+        code: 'COMPTE_DESACTIVE',
+        message: MESSAGES_SESSION.compteDesactive,
+      });
+    });
+
+    it('editProfile sans utilisateur : 401 COMPTE_DESACTIVE', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+
+      const e: unknown = await service
+        .editProfile('u1', {})
+        .catch((err: unknown) => err);
+
+      expect(e).toBeInstanceOf(UnauthorizedException);
+      expect((e as UnauthorizedException).getResponse()).toMatchObject({
+        code: 'COMPTE_DESACTIVE',
+        message: MESSAGES_SESSION.compteDesactive,
       });
     });
   });

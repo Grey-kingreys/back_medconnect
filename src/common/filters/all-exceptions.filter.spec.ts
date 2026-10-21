@@ -14,7 +14,11 @@ import { ThrottlerException } from '@nestjs/throttler';
 import { Prisma } from 'generated/prisma/client';
 import { UpdateRendezVousStatusDto } from 'src/carnet-sante/dto/carnet-sante.dto';
 import { AllExceptionsFilter, MESSAGES } from './all-exceptions.filter';
-import { fabriquerErreurValidation } from './erreur-validation';
+import { ChangePasswordDto } from 'src/auth/dto/auth.dto';
+import {
+  fabriquerErreurValidation,
+  MESSAGES_REGLES,
+} from './erreur-validation';
 
 /**
  * Tests unitaires du filtre global : ArgumentsHost et Response simulés.
@@ -185,6 +189,115 @@ describe('AllExceptionsFilter', () => {
         process.env.NODE_ENV = ancien;
       }
     });
+  });
+
+  describe('règle lisible du nouveau mot de passe', () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      exceptionFactory: fabriquerErreurValidation,
+    });
+    const rejeter = (corps: Record<string, unknown>) =>
+      pipe.transform(corps, { type: 'body', metatype: ChangePasswordDto }).then(
+        () => {
+          throw new Error('Le pipe aurait dû rejeter la saisie.');
+        },
+        (e: unknown) => e,
+      );
+
+    it('un seul champ fautif : la règle remplace le message générique', async () => {
+      const ancien = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      try {
+        filtre.catch(
+          await rejeter({
+            currentPassword: 'Ancien-mdp-1',
+            newPassword: 'court',
+          }),
+          host,
+        );
+        const corps = corpsRenvoye();
+        const regle = MESSAGES_REGLES.get('newPassword');
+        expect(corps.statusCode).toBe(400);
+        expect(corps.code).toBe('VALIDATION');
+        expect(corps.champs).toEqual([
+          {
+            champ: 'newPassword',
+            contraintes: expect.arrayContaining([
+              'isLength',
+              'matches',
+            ]) as unknown,
+            message: regle,
+          },
+        ]);
+        expect(corps.message).toBe(regle);
+        expect(corps).not.toHaveProperty('details');
+        const texte = JSON.stringify(corps);
+        expect(texte).not.toContain('court');
+        expect(texte).not.toContain('Ancien-mdp-1');
+      } finally {
+        process.env.NODE_ENV = ancien;
+      }
+    });
+
+    it('deux champs fautifs : message générique, règle gardée dans le champ', async () => {
+      filtre.catch(
+        await rejeter({ currentPassword: '', newPassword: 'court' }),
+        host,
+      );
+      const corps = corpsRenvoye();
+      expect(corps.message).toBe(MESSAGES.validation);
+      expect(corps.champs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            champ: 'newPassword',
+            message: MESSAGES_REGLES.get('newPassword'),
+          }),
+        ]),
+      );
+    });
+  });
+
+  it("assainit les champs : garde message seulement s'il est une chaîne", () => {
+    filtre.catch(
+      new BadRequestException({
+        message: ['x'],
+        code: 'VALIDATION',
+        champs: [
+          { champ: 'a', contraintes: ['b'], message: 'Règle' },
+          { champ: 'c', contraintes: [], message: 3 },
+        ],
+      }),
+      host,
+    );
+    const corps = corpsRenvoye();
+    expect(corps.champs).toEqual([
+      { champ: 'a', contraintes: ['b'], message: 'Règle' },
+      { champ: 'c', contraintes: [] },
+    ]);
+    expect(corps.message).toBe(MESSAGES.validation);
+  });
+
+  it('conserve le message et le code du mot de passe actuel incorrect (400)', () => {
+    filtre.catch(
+      new BadRequestException({
+        message: 'Le mot de passe actuel est incorrect.',
+        code: 'MOT_DE_PASSE_ACTUEL_INCORRECT',
+      }),
+      host,
+    );
+    expect(corpsRenvoye()).toEqual({
+      statusCode: 400,
+      message: 'Le mot de passe actuel est incorrect.',
+      error: 'Saisie invalide',
+      code: 'MOT_DE_PASSE_ACTUEL_INCORRECT',
+    });
+  });
+
+  it("n'ajoute aucun code par défaut à une 401", () => {
+    filtre.catch(new UnauthorizedException('Lien expiré'), host);
+    expect(corpsRenvoye()).not.toHaveProperty('code');
   });
 
   it('remplace les erreurs de validation en tableau et garde le détail hors production', () => {

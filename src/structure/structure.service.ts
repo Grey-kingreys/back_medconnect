@@ -169,7 +169,7 @@ export class StructureService {
     });
 
     if (!structure) {
-      throw new UnauthorizedException('Structure introuvable ou inactive');
+      throw new NotFoundException('Structure introuvable ou inactive');
     }
 
     const { logoFile, ...rest } = structure;

@@ -28,6 +28,14 @@ export const CODES_ERREUR = [
   'TELEPHONE_DEJA_UTILISE',
   // Envoi d'email momentanément impossible (503), réessayer plus tard.
   'EMAIL_INDISPONIBLE',
+  // Jeton d'accès absent (401) : le client peut tenter un rafraîchissement.
+  'JETON_ABSENT',
+  // Jeton d'accès expiré (401) : le client rafraîchit puis rejoue la requête.
+  'JETON_EXPIRE',
+  // Jeton d'accès illisible ou mal signé (401) : le client peut tenter un rafraîchissement.
+  'JETON_INVALIDE',
+  // Mot de passe actuel incorrect lors d'un changement de mot de passe (400), la session reste valide.
+  'MOT_DE_PASSE_ACTUEL_INCORRECT',
 ] as const;
 
 export type CodeErreur = (typeof CODES_ERREUR)[number];

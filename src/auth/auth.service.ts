@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   Logger,
   UnauthorizedException,
@@ -369,7 +370,10 @@ export class AuthService {
   async editProfile(userId: string, dto: UpdateProfileDto) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || !user.isActive) {
-      throw new UnauthorizedException('Utilisateur non trouvé ou inactif');
+      throw new UnauthorizedException({
+        message: MESSAGES_SESSION.compteDesactive,
+        code: 'COMPTE_DESACTIVE',
+      });
     }
 
     // Un compte démo garde son email : c'est lui qui le signe comme compte démo.
@@ -456,7 +460,10 @@ export class AuthService {
   async changePassword(userId: string, dto: ChangePasswordDto, sid?: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || !user.isActive) {
-      throw new UnauthorizedException('Utilisateur non trouvé ou inactif');
+      throw new UnauthorizedException({
+        message: MESSAGES_SESSION.compteDesactive,
+        code: 'COMPTE_DESACTIVE',
+      });
     }
 
     // Un compte démo reste sans mot de passe connu : il ne s'ouvre que par la connexion démo.
@@ -468,7 +475,11 @@ export class AuthService {
 
     const isValid = await bcrypt.compare(dto.currentPassword, user.password);
     if (!isValid) {
-      throw new UnauthorizedException('Le mot de passe actuel est incorrect');
+      // 400 et non 401 : la session est valide, seul le champ saisi est faux (le front rafraîchit sur 401).
+      throw new BadRequestException({
+        message: 'Le mot de passe actuel est incorrect.',
+        code: 'MOT_DE_PASSE_ACTUEL_INCORRECT',
+      });
     }
 
     const hashed = await this.hashPassword(dto.newPassword);

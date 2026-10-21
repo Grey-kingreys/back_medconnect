@@ -4,7 +4,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
+import { JwtService, TokenExpiredError } from '@nestjs/jwt';
 import { Request } from 'express';
 import { RevocationService } from 'src/auth/revocation.service';
 import { messagePourCode } from 'src/auth/sessions.constants';
@@ -28,9 +28,10 @@ export class AuthGuard implements CanActivate {
     const token = this.extractTokenFromHeader(request);
 
     if (!token) {
-      throw new UnauthorizedException(
-        'Token manquant. Veuillez vous connecter.',
-      );
+      throw new UnauthorizedException({
+        message: 'Token manquant. Veuillez vous connecter.',
+        code: 'JETON_ABSENT',
+      });
     }
 
     let payload: ChargeJeton;
@@ -38,8 +39,12 @@ export class AuthGuard implements CanActivate {
       payload = await this.jwtService.verifyAsync<ChargeJeton>(token, {
         secret: process.env.JWT_SECRET,
       });
-    } catch {
-      throw new UnauthorizedException('Token invalide ou expiré.');
+    } catch (e) {
+      throw new UnauthorizedException({
+        message: 'Token invalide ou expiré.',
+        code:
+          e instanceof TokenExpiredError ? 'JETON_EXPIRE' : 'JETON_INVALIDE',
+      });
     }
 
     // Hors du try : l'exception de révocation ne doit pas être remplacée par « Token invalide ».

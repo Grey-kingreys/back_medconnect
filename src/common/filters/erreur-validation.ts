@@ -7,7 +7,17 @@ import { BadRequestException, type ValidationError } from '@nestjs/common';
 export interface ChampFautif {
   champ: string;
   contraintes: string[];
+  /** Règle lisible, texte constant du code (jamais la saisie), seulement pour les champs de MESSAGES_REGLES. */
+  message?: string;
 }
+
+/** Message lisible de la règle d'un champ, choisi par le nom du champ (texte constant). */
+export const MESSAGES_REGLES: ReadonlyMap<string, string> = new Map([
+  [
+    'newPassword',
+    'Le nouveau mot de passe doit contenir de 8 à 50 caractères, dont au moins une majuscule, une minuscule et un chiffre.',
+  ],
+]);
 
 export function champsFautifs(
   erreurs: ValidationError[],
@@ -17,10 +27,13 @@ export function champsFautifs(
   for (const erreur of erreurs) {
     const chemin = parent ? `${parent}.${erreur.property}` : erreur.property;
     if (erreur.constraints && Object.keys(erreur.constraints).length > 0) {
-      resultat.push({
-        champ: chemin,
-        contraintes: Object.keys(erreur.constraints),
-      });
+      const contraintes = Object.keys(erreur.constraints);
+      const message = MESSAGES_REGLES.get(erreur.property);
+      resultat.push(
+        message === undefined
+          ? { champ: chemin, contraintes }
+          : { champ: chemin, contraintes, message },
+      );
     }
     resultat.push(...champsFautifs(erreur.children ?? [], chemin));
   }

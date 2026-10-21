@@ -142,6 +142,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
         const brut = reponseBrute as Record<string, unknown>;
         if (resultat.code === 'VALIDATION' && Array.isArray(brut.champs)) {
           resultat.champs = assainirChamps(brut.champs);
+          // Un seul champ fautif portant sa règle lisible : elle remplace le message générique.
+          const [seul] = resultat.champs;
+          if (resultat.champs.length === 1 && seul.message) {
+            resultat.message = seul.message;
+          }
         }
         for (const cle of DONNEES_AUTORISEES) {
           const valeur = brut[cle];
@@ -221,22 +226,25 @@ function corps(statusCode: number, message: string): CorpsErreur {
   };
 }
 
-// Ne garde que `champ` et `contraintes` : aucune autre clé, donc jamais de valeur.
+// Ne garde que `champ`, `contraintes` et la règle lisible `message` : aucune autre clé, donc jamais de valeur.
 function assainirChamps(brut: unknown[]): ChampFautif[] {
   const resultat: ChampFautif[] = [];
   for (const element of brut) {
     if (typeof element !== 'object' || element === null) continue;
-    const { champ, contraintes } = element as {
+    const { champ, contraintes, message } = element as {
       champ?: unknown;
       contraintes?: unknown;
+      message?: unknown;
     };
     if (typeof champ !== 'string' || !Array.isArray(contraintes)) continue;
-    resultat.push({
+    const entree: ChampFautif = {
       champ,
       contraintes: contraintes.filter(
         (c): c is string => typeof c === 'string',
       ),
-    });
+    };
+    if (typeof message === 'string') entree.message = message;
+    resultat.push(entree);
   }
   return resultat;
 }

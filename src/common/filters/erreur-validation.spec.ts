@@ -1,5 +1,9 @@
 import { BadRequestException, type ValidationError } from '@nestjs/common';
-import { champsFautifs, fabriquerErreurValidation } from './erreur-validation';
+import {
+  champsFautifs,
+  fabriquerErreurValidation,
+  MESSAGES_REGLES,
+} from './erreur-validation';
 
 describe('erreur-validation', () => {
   const erreurs = [
@@ -49,5 +53,25 @@ describe('erreur-validation', () => {
     const texte = JSON.stringify(erreur.getResponse());
     expect(texte).not.toContain('SECRET-123');
     expect(texte).not.toContain('SECRET-456');
+  });
+
+  it('ajoute la règle lisible du champ newPassword, sans fuite de valeur', () => {
+    const mdp = [
+      {
+        property: 'newPassword',
+        value: 'SECRET-mdp',
+        constraints: { isLength: 'a', matches: 'b' },
+        children: [],
+      },
+    ] as unknown as ValidationError[];
+    expect(champsFautifs(mdp)).toEqual([
+      {
+        champ: 'newPassword',
+        contraintes: ['isLength', 'matches'],
+        message: MESSAGES_REGLES.get('newPassword'),
+      },
+    ]);
+    const texte = JSON.stringify(fabriquerErreurValidation(mdp).getResponse());
+    expect(texte).not.toContain('SECRET-mdp');
   });
 });
