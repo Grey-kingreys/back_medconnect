@@ -36,7 +36,7 @@ import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
-import type { IncomingMessage } from 'http';
+import { optionsPinoHttp } from './common/journalisation/journalisation-http';
 
 @Module({
   imports: [
@@ -47,48 +47,8 @@ import type { IncomingMessage } from 'http';
       validate: validateEnv,
       envFilePath: [`.env.${process.env.NODE_ENV || 'development'}`, '.env'],
     }),
-    // Logs structurés (JSON en prod, lisibles en dev). Remplace LoggerMiddleware :
-    // pino-http journalise déjà chaque requête (méthode, route, statut, durée).
-    // ⚠️ `redact` masque les données sensibles — toute nouvelle donnée de santé
-    //    ou de localisation exposée dans un log doit être ajoutée à cette liste.
-    LoggerModule.forRoot({
-      pinoHttp: {
-        // `||` et non `??` : une variable déclarée mais vide (fréquent quand on colle
-        // un bloc d'env dans une UI) doit retomber sur le défaut. Avec `??`, Pino
-        // recevait level:'' et refusait de démarrer.
-        level:
-          process.env.LOG_LEVEL ||
-          (process.env.NODE_ENV === 'production' ? 'info' : 'debug'),
-        transport:
-          process.env.NODE_ENV === 'production'
-            ? undefined
-            : {
-                target: 'pino-pretty',
-                options: { singleLine: true, translateTime: 'SYS:HH:MM:ss' },
-              },
-        redact: {
-          paths: [
-            'req.headers.authorization',
-            'req.headers.cookie',
-            'res.headers["set-cookie"]',
-            'req.body.password',
-            'req.body.motDePasse',
-            'req.body.symptomes',
-            'req.body.latitude',
-            'req.body.longitude',
-          ],
-          censor: '[masqué]',
-        },
-        // Rattache l'auteur de la requête à chaque ligne de log (traçabilité).
-        customProps: (
-          req: IncomingMessage & { user?: { userId?: string } },
-        ) => ({
-          userId: req.user?.userId,
-        }),
-        // Le health check (GET /) est appelé en boucle par Docker : ne pas le journaliser.
-        autoLogging: { ignore: (req: IncomingMessage) => req.url === '/' },
-      },
-    }),
+    // Logs structurés (JSON en prod, lisibles en dev) ; configuration et minimisation dans src/common/journalisation/journalisation-http.ts.
+    LoggerModule.forRoot({ pinoHttp: optionsPinoHttp() }),
     // Palier par défaut : ~120 req/min/utilisateur (trafic dashboard normal).
     // Les paliers stricts (auth) et lourds (IA, SOS, upload) sont appliqués par route
     // via @Throttle(...). Compté par utilisateur (jeton lu par UserThrottlerGuard), sinon par IP.

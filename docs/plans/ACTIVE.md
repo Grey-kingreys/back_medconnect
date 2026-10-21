@@ -10,12 +10,13 @@ Détails: docs/plans/runs/2026-10-21-lot4/ (lot 4 côté back, robustesse vue su
 
 | ID | Tâche | Tier | Statut | Tent. |
 |----|-------|------|--------|-------|
-| B8 | Redis en rediss:// pour BullMQ ; échec d'email sans 500 ni état à moitié créé (structure 201 invitationEnvoyee, renvoi 503 EMAIL_INDISPONIBLE, membre, mot de passe oublié) (tasks/B8-redis-tls-echec-email.md) | spécifié | à faire | 0 |
+| B9 | Journaux HTTP minimisés : ni en-têtes ni IP, URL sans query, niveau par statut, sondage en debug (tasks/B9-journaux-http-minimises.md) | spécifié | à faire | 0 |
 
 ## Faites (preuve = commit)
 
 | ID | Tâche | Commit |
 |----|-------|--------|
+| B8 | Redis en rediss:// pour BullMQ ; échec d'email sans 500 ni état à moitié créé | e97f91e |
 | B6 | TB10b qualité de position et idempotence du SOS (lot 3) | 05e6b5b |
 | B7 | Réalignement AuditLog sur la migration 20260704 (lot 3) | 3a28867 |
 
@@ -29,8 +30,8 @@ Détails: docs/plans/runs/2026-10-21-lot4/ (lot 4 côté back, robustesse vue su
 
 ## Dernières décisions (5 max, historique complet dans decisions.md)
 
-- D68 Structure créée malgré l'échec de l'invitation : 201, invitationEnvoyee false, message de renvoi (user)
-- D69 Renvoi d'invitation en échec : 503 EMAIL_INDISPONIBLE, ancien jeton remis en base (user, révisable)
-- D70 Le filtre global laisse passer une 503 portant un code du catalogue (révisable)
-- D71 Création de membre : envoi attendu, invitationEnvoyee, message honnête en échec (révisable)
-- D72 Mot de passe oublié : échec d'email journalisé, réponse générique au lieu d'un 500 (révisable)
+- D75 Configuration pino-http dans optionsPinoHttp() (src/common/journalisation/), fonctions pures testées (révisable)
+- D76 Journal de requête réduit à id, méthode, URL sans query, statut, durée, userId ; redact gardé (user)
+- D77 Niveaux : 5xx error, 4xx warn, GET / et GET /notifications réussis en debug, reste info (user)
+- D78 Sonde de santé GET / toujours ignorée par autoLogging (révisable)
+- D79 Sérialiseur err et journaux applicatifs inchangés (révisable)
