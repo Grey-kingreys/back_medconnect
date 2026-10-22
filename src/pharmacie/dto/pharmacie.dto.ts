@@ -160,7 +160,7 @@ export class OptionsImportStockDto {
 
 /** Résultat de l'analyse d'une ligne du classeur. */
 export interface LigneImportStock {
-  /** Numéro de la ligne dans Excel (la ligne 1 contient les titres). */
+  /** Numéro de la ligne dans Excel (sous la ligne des titres). */
   ligne: number;
   /** Nom du médicament tel qu'écrit dans le fichier. */
   nom: string;
@@ -181,12 +181,24 @@ export interface LigneImportStock {
   quantiteApres?: number;
 }
 
+/** Colonnes du fichier telles que l'import les a comprises, montrées dans l'aperçu. */
+export interface ColonnesLuesImport {
+  /** Numéro de la ligne des titres dans Excel (1 le plus souvent). */
+  ligneTitres: number;
+  /** Titres reconnus, dans l'ordre du fichier, avec la colonne de la plateforme. */
+  reconnues: { titre: string; colonne: string }[];
+  /** Titres non reconnus (ou en double), dont le contenu n'est pas importé. */
+  ignorees: string[];
+}
+
 /** Rapport renvoyé par l'aperçu et par l'import (stock ou catalogue). */
 export interface RapportImport<L> {
   totalLignes: number;
   acceptees: number;
   rejetees: number;
   lignes: L[];
+  /** Colonnes reconnues et ignorées, pour vérifier que le fichier a été bien compris. */
+  colonnes: ColonnesLuesImport;
 }
 
 /** Rapport renvoyé par l'aperçu et par l'import du stock. */
@@ -201,7 +213,7 @@ export interface ResultatImportStock extends RapportImportStock {
 
 /** Résultat de l'analyse d'une ligne du classeur du catalogue. */
 export interface LigneImportCatalogue {
-  /** Numéro de la ligne dans Excel (la ligne 1 contient les titres). */
+  /** Numéro de la ligne dans Excel (sous la ligne des titres). */
   ligne: number;
   /** Nom du médicament tel qu'écrit dans le fichier. */
   nom: string;

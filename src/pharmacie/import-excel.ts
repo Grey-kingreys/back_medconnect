@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { CellValue, Workbook, Worksheet } from 'exceljs';
-import { FichierImport } from './dto/pharmacie.dto';
+import { ColonnesLuesImport, FichierImport } from './dto/pharmacie.dto';
 
 /**
  * Briques communes aux imports Excel de la pharmacie (stock et catalogue) :
@@ -20,6 +20,8 @@ const MIMES_IMPORT_ACCEPTES = [
 ];
 export const TAILLE_MAX_IMPORT = 2 * 1024 * 1024;
 export const LIGNES_MAX_IMPORT = 1000;
+/** Les titres sont cherchés dans les premières lignes (logo ou nom de la pharmacie au-dessus). */
+export const LIGNES_MAX_RECHERCHE_TITRES = 10;
 
 const MESSAGE_FICHIER_VIDE =
   'Le fichier ne contient aucun médicament. Remplissez une ligne par médicament sous les titres, puis réessayez.';
@@ -29,7 +31,7 @@ export type ValeurImport = string | number | boolean | Date | null;
 
 /** Ligne de données lue dans le classeur, avant validation métier. */
 export interface LigneBruteImport<C extends string> {
-  /** Numéro de la ligne dans Excel (la ligne 1 contient les titres). */
+  /** Numéro de la ligne dans Excel (sous la ligne des titres). */
   numero: number;
   valeurs: Record<C, ValeurImport>;
 }
@@ -38,10 +40,18 @@ export interface LigneBruteImport<C extends string> {
 export interface ColonnesImport<C extends string> {
   /** Toutes les colonnes lues, obligatoires ou non. */
   toutes: readonly C[];
-  /** Associe un titre normalisé (sans accents, casse ni espaces) à une colonne. */
+  /** Associe un titre normalisé (minuscules sans accents, lettres et chiffres seuls) à une colonne. */
   reconnaitre: (titre: string) => C | undefined;
   /** Colonnes obligatoires, dans l'ordre du message d'erreur, avec leur libellé. */
   obligatoires: readonly (readonly [C, string])[];
+  /** Libellé de chaque colonne, montré dans l'aperçu (« Désignation » lue comme « Médicament »). */
+  libelles: Readonly<Record<C, string>>;
+}
+
+/** Lignes lues et colonnes comprises. */
+export interface LectureImport<C extends string> {
+  brutes: LigneBruteImport<C>[];
+  colonnes: ColonnesLuesImport;
 }
 
 /** Minuscules, sans accents, espaces multiples réduits. */
@@ -52,6 +62,11 @@ export function normaliserNom(texte: string): string {
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/** Titre de colonne comparable : « Prix unitaire (GNF) » devient « prixunitairegnf ». */
+export function normaliserTitre(texte: string): string {
+  return normaliserNom(texte).replace(/[^a-z0-9]/g, '');
 }
 
 /** Valeur simple d'une cellule Excel (formules, texte enrichi et liens déballés). */
@@ -118,41 +133,78 @@ export async function ouvrirFeuilleImport(
   return feuille;
 }
 
+/** Titres lus dans une ligne : colonne reconnue (première occurrence) ou titre ignoré. */
+function lireTitres<C extends string>(
+  feuille: Worksheet,
+  numeroLigne: number,
+  definition: ColonnesImport<C>,
+): {
+  positions: Partial<Record<C, number>>;
+  reconnues: { titre: string; colonne: string }[];
+  ignorees: string[];
+} {
+  const positions: Partial<Record<C, number>> = {};
+  const reconnues: { titre: string; colonne: string }[] = [];
+  const ignorees: string[] = [];
+  feuille.getRow(numeroLigne).eachCell((cell, numero) => {
+    const valeur = valeurCellule(cell.value);
+    if (valeur === null) return;
+    const titre = String(valeur).trim();
+    const colonne = definition.reconnaitre(normaliserTitre(titre));
+    if (colonne && positions[colonne] === undefined) {
+      positions[colonne] = numero;
+      reconnues.push({ titre, colonne: definition.libelles[colonne] });
+    } else {
+      ignorees.push(titre);
+    }
+  });
+  return { positions, reconnues, ignorees };
+}
+
 /**
- * Repère les colonnes dans la ligne 1, vérifie les colonnes obligatoires puis
- * lit les lignes de données (lignes vides ignorées, 1000 lignes au plus).
+ * Repère la ligne des titres (la première, parmi les 10 premières, qui contient
+ * toutes les colonnes obligatoires), puis lit les lignes de données en dessous
+ * (lignes vides ignorées, 1000 lignes au plus).
  */
 export function lireLignesImport<C extends string>(
   feuille: Worksheet,
   definition: ColonnesImport<C>,
-): LigneBruteImport<C>[] {
-  // Repérage des colonnes en ligne 1 (sans accents, casse ni espaces)
-  const colonnes: Partial<Record<C, number>> = {};
-  feuille.getRow(1).eachCell((cell, numero) => {
-    const valeur = valeurCellule(cell.value);
-    const titre = normaliserNom(valeur === null ? '' : String(valeur)).replace(
-      /\s/g,
-      '',
-    );
-    const colonne = definition.reconnaitre(titre);
-    if (colonne && colonnes[colonne] === undefined) colonnes[colonne] = numero;
-  });
+): LectureImport<C> {
+  const derniere = Math.min(
+    LIGNES_MAX_RECHERCHE_TITRES,
+    Math.max(feuille.rowCount, 1),
+  );
+  // À défaut de ligne complète, la ligne qui reconnaît le plus d'obligatoires sert au message
+  let meilleure: { numero: number; manquantes: string[] } | undefined;
+  let trouvee:
+    | (ReturnType<typeof lireTitres<C>> & { numero: number })
+    | undefined;
+  for (let numero = 1; numero <= derniere && !trouvee; numero++) {
+    const titres = lireTitres(feuille, numero, definition);
+    const manquantes = definition.obligatoires
+      .filter(([colonne]) => titres.positions[colonne] === undefined)
+      .map(([, libelle]) => `« ${libelle} »`);
+    if (manquantes.length === 0) trouvee = { ...titres, numero };
+    else if (!meilleure || manquantes.length < meilleure.manquantes.length) {
+      meilleure = { numero, manquantes };
+    }
+  }
 
-  const manquantes = definition.obligatoires
-    .filter(([colonne]) => colonnes[colonne] === undefined)
-    .map(([, libelle]) => `« ${libelle} »`);
-  if (manquantes.length > 0) {
+  if (!trouvee) {
+    const manquantes = meilleure?.manquantes ?? [];
     throw new BadRequestException(
       manquantes.length === 1
-        ? `La colonne ${manquantes[0]} est introuvable dans la première ligne du fichier. Ajoutez-la, ou partez du modèle à télécharger.`
-        : `Les colonnes ${manquantes.join(' et ')} sont introuvables dans la première ligne du fichier. Ajoutez-les, ou partez du modèle à télécharger.`,
+        ? `La colonne ${manquantes[0]} est introuvable dans les titres du fichier. Ajoutez-la, ou partez du modèle à télécharger.`
+        : `Les colonnes ${manquantes.join(' et ')} sont introuvables dans les titres du fichier. Ajoutez-les, ou partez du modèle à télécharger.`,
     );
   }
+  const colonnes = trouvee.positions;
+  const ligneTitres = trouvee.numero;
 
   // Lecture des lignes de données, lignes vides ignorées
   const brutes: LigneBruteImport<C>[] = [];
   feuille.eachRow((row, numero) => {
-    if (numero === 1) return;
+    if (numero <= ligneTitres) return;
     const valeurs = {} as Record<C, ValeurImport>;
     for (const colonne of definition.toutes) {
       const col = colonnes[colonne];
@@ -171,5 +223,12 @@ export function lireLignesImport<C extends string>(
       `Le fichier contient ${brutes.length} lignes, le maximum est de ${LIGNES_MAX_IMPORT}. Répartissez vos médicaments dans plusieurs fichiers.`,
     );
   }
-  return brutes;
+  return {
+    brutes,
+    colonnes: {
+      ligneTitres: trouvee.numero,
+      reconnues: trouvee.reconnues,
+      ignorees: trouvee.ignorees,
+    },
+  };
 }
