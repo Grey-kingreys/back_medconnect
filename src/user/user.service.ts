@@ -26,6 +26,26 @@ import {
   ChangeUserPasswordDto,
 } from './dto/user.dto';
 
+type StructureResume = { id: string; nom: string; type: string };
+
+/**
+ * Structure de rattachement affichée (D202) : celle de User.structureId, sinon celle
+ * dont l'utilisateur est l'administrateur (Structure.adminId), sinon null.
+ */
+function avecStructureResolue<
+  T extends {
+    structure: StructureResume | null;
+    administeredStructure: StructureResume | null;
+  },
+>(
+  utilisateur: T,
+): Omit<T, 'structure' | 'administeredStructure'> & {
+  structure: StructureResume | null;
+} {
+  const { structure, administeredStructure, ...reste } = utilisateur;
+  return { ...reste, structure: structure ?? administeredStructure ?? null };
+}
+
 @Injectable()
 export class UserService {
   private readonly logger = new Logger(UserService.name);
@@ -174,13 +194,18 @@ export class UserService {
         isActive: true,
         structureId: true,
         structure: { select: { id: true, nom: true, type: true } },
+        administeredStructure: { select: { id: true, nom: true, type: true } },
         createdAt: true,
         updatedAt: true,
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    return { data: users, message: 'Utilisateurs récupérés', success: true };
+    return {
+      data: users.map(avecStructureResolue),
+      message: 'Utilisateurs récupérés',
+      success: true,
+    };
   }
 
   // ─── Récupérer un utilisateur par ID ─────────────────────────
@@ -198,6 +223,7 @@ export class UserService {
         isActive: true,
         structureId: true,
         structure: { select: { id: true, nom: true, type: true } },
+        administeredStructure: { select: { id: true, nom: true, type: true } },
         createdAt: true,
         updatedAt: true,
       },
@@ -209,7 +235,11 @@ export class UserService {
       );
     }
 
-    return { data: user, message: 'Utilisateur trouvé', success: true };
+    return {
+      data: avecStructureResolue(user),
+      message: 'Utilisateur trouvé',
+      success: true,
+    };
   }
 
   // ─── Mettre à jour un utilisateur ────────────────────────────
