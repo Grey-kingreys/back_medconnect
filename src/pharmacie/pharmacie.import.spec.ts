@@ -169,6 +169,79 @@ describe('PharmacieService, import Excel du stock', () => {
     expect(transaction).not.toHaveBeenCalled();
   });
 
+  it('reconnaît les titres courants des pharmacies et liste les colonnes ignorées', async () => {
+    const fichier = await construireFichier(
+      [['Paracétamol 500 mg', 'Sopharma', 30, 1200, '2027-06-30']],
+      ['Désignation', 'Fournisseur', 'Qté', 'P.U. (GNF)', 'Péremption'],
+    );
+
+    const { data } = await service.apercuImportStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+    );
+
+    expect(data.lignes[0]).toMatchObject({
+      statut: 'acceptee',
+      medicamentId: 'med-para',
+      quantite: 30,
+      prixUnitaire: 1200,
+      dateExpiration: '2027-06-30T00:00:00.000Z',
+    });
+    expect(data.colonnes).toEqual({
+      ligneTitres: 1,
+      reconnues: [
+        { titre: 'Désignation', colonne: 'Médicament' },
+        { titre: 'Qté', colonne: 'Quantité' },
+        { titre: 'P.U. (GNF)', colonne: 'Prix' },
+        { titre: 'Péremption', colonne: "Date d'expiration" },
+      ],
+      ignorees: ['Fournisseur'],
+    });
+  });
+
+  it('trouve les titres sous un en-tête (nom de la pharmacie, ligne vide)', async () => {
+    const workbook = new Workbook();
+    const feuille = workbook.addWorksheet('Stock');
+    feuille.addRow(['Pharmacie de Kaloum, inventaire du 22/10/2026']);
+    feuille.addRow([]);
+    feuille.addRow(['Produit', 'Quantité en stock']);
+    feuille.addRow(['Amoxicilline 500 mg', 15]);
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+
+    const { data } = await service.apercuImportStock(STRUCTURE_ID, USER_ID, {
+      buffer,
+      size: buffer.length,
+      mimetype: MIME_XLSX,
+      originalname: 'inventaire.xlsx',
+    });
+
+    expect(data.colonnes.ligneTitres).toBe(3);
+    expect(data.totalLignes).toBe(1);
+    expect(data.lignes[0]).toMatchObject({
+      ligne: 4,
+      statut: 'acceptee',
+      medicamentId: 'med-amox',
+      quantite: 15,
+    });
+  });
+
+  it('ne prend pas un seuil d’alerte pour la quantité en stock', async () => {
+    const fichier = await construireFichier(
+      [['Paracétamol 500 mg', 5, 40]],
+      ['Médicament', 'Quantité minimale', 'Stock'],
+    );
+
+    const { data } = await service.apercuImportStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+    );
+
+    expect(data.lignes[0]).toMatchObject({ statut: 'acceptee', quantite: 40 });
+    expect(data.colonnes.ignorees).toEqual(['Quantité minimale']);
+  });
+
   it('rejette un médicament absent du catalogue', async () => {
     const fichier = await construireFichier([['Doliprane inconnu', 10]]);
 
