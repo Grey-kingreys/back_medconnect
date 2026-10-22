@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access -- les calls des doublures jest.Mock sont typés any */
+import { NotFoundException } from '@nestjs/common';
 import { UserService } from './user.service';
 
 /**
@@ -222,5 +223,105 @@ describe('UserService : téléphone unique (TB17)', () => {
       data: { telephone: string };
     };
     expect(data.telephone).toBe('+224622988776');
+  });
+});
+
+describe('UserService : structure de rattachement (U1)', () => {
+  const S1 = { id: 's1', nom: 'Phamarcie la belle etoile', type: 'PHARMACIE' };
+  const S2 = { id: 's2', nom: 'Clinique Donka', type: 'CLINIQUE' };
+  let prisma: { user: { findMany: jest.Mock; findUnique: jest.Mock } };
+  let service: UserService;
+
+  beforeEach(() => {
+    prisma = { user: { findMany: jest.fn(), findUnique: jest.fn() } };
+    service = new UserService(
+      prisma as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+  });
+
+  it('getUsers : résout la structure (membre, administrée, aucune) sans exposer administeredStructure', async () => {
+    prisma.user.findMany.mockResolvedValue([
+      {
+        id: 'u1',
+        structureId: 's1',
+        structure: S1,
+        administeredStructure: null,
+      },
+      {
+        id: 'u2',
+        structureId: null,
+        structure: null,
+        administeredStructure: S2,
+      },
+      {
+        id: 'u3',
+        structureId: null,
+        structure: null,
+        administeredStructure: null,
+      },
+    ]);
+
+    const { data } = await service.getUsers();
+
+    expect(data.map((u) => u.structure)).toEqual([S1, S2, null]);
+    for (const ligne of data) {
+      expect(ligne).not.toHaveProperty('administeredStructure');
+    }
+    expect(data[1].structureId).toBeNull();
+  });
+
+  it('getUsers : sélectionne structure et administeredStructure', async () => {
+    prisma.user.findMany.mockResolvedValue([]);
+
+    await service.getUsers();
+
+    const { select } = prisma.user.findMany.mock.calls[0][0] as {
+      select: { structure: unknown; administeredStructure: unknown };
+    };
+    const attendu = { select: { id: true, nom: true, type: true } };
+    expect(select.administeredStructure).toEqual(attendu);
+    expect(select.structure).toEqual(attendu);
+  });
+
+  it('getUsers : priorité à la structure de membre sur la structure administrée', async () => {
+    prisma.user.findMany.mockResolvedValue([
+      {
+        id: 'u1',
+        structureId: 's1',
+        structure: S1,
+        administeredStructure: S2,
+      },
+    ]);
+
+    const { data } = await service.getUsers();
+
+    expect(data[0].structure).toEqual(S1);
+  });
+
+  it('getUser : administrateur rattaché seulement par adminId', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'u2',
+      structureId: null,
+      structure: null,
+      administeredStructure: S2,
+    });
+
+    const { data } = await service.getUser('u2');
+
+    expect(data.structure).toEqual(S2);
+    expect(data).not.toHaveProperty('administeredStructure');
+  });
+
+  it('getUser : 404 si l’utilisateur est introuvable', async () => {
+    prisma.user.findUnique.mockResolvedValue(null);
+
+    await expect(service.getUser('absent')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });
