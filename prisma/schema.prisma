@@ -194,6 +194,10 @@ model Structure {
   // Stock médicaments (pharmacies)
   medicaments StockMedicament[]
 
+  // Ventes au comptoir et compteur de numérotation (pharmacies)
+  ventes         Vente[]
+  compteursVente CompteurVente[]
+
   // Consultations effectuées dans cette structure
   consultations Consultation[]
 
@@ -435,7 +439,7 @@ model StockMedicament {
   structure     Structure  @relation(fields: [structureId], references: [id], onDelete: Cascade)
 
   quantite      Int        @default(0)
-  prixUnitaire  Float?     // en GNF
+  prixUnitaire  Int?       // en GNF, entier (lot 7, arrondi à la migration)
   disponible    Boolean    @default(true)
   dateExpiration DateTime?
   notes         String?
@@ -443,6 +447,62 @@ model StockMedicament {
   updatedAt DateTime @updatedAt
 
   @@unique([medicamentId, structureId])
+}
+
+enum StatutVente {
+  VALIDEE
+  ANNULEE
+}
+
+// Vente au comptoir d'une pharmacie (lot 7). Jamais supprimée, seulement annulée.
+// vendeurId, annuleeParId et les identifiants des lignes sont sans clé étrangère (D109) :
+// un membre, un stock ou un médicament supprimé ne bloque rien et le reçu reste lisible.
+model Vente {
+  id                 String      @id @default(uuid())
+  structureId        String
+  structure          Structure   @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  numero             String      // V-AAAA-NNNNNN, séquence par pharmacie et par année
+  vendeurId          String
+  vendeurNom         String      // copie « Prénom Nom » au moment de la vente
+  clientNom          String?
+  clientTelephone    String?
+  ordonnanceVerifiee Boolean     @default(false)
+  total              Int         // GNF, entier
+  statut             StatutVente @default(VALIDEE)
+  annuleeLe          DateTime?
+  annuleeParId       String?
+  motifAnnulation    String?
+  cleIdempotence     String?     // jamais renvoyée au client
+  lignes             LigneVente[]
+  createdAt          DateTime    @default(now())
+
+  @@unique([structureId, numero])
+  @@unique([structureId, cleIdempotence])
+  @@index([structureId, createdAt])
+}
+
+model LigneVente {
+  id                String @id @default(uuid())
+  venteId           String
+  vente             Vente  @relation(fields: [venteId], references: [id], onDelete: Cascade)
+  medicamentId      String
+  stockMedicamentId String
+  nomMedicament     String // copie du nom au moment de la vente
+  prixUnitaire      Int    // copie du prix du stock, GNF
+  quantite          Int
+  sousTotal         Int
+
+  @@index([venteId])
+}
+
+// Compteur de numérotation des ventes, par pharmacie et par année (UTC = heure de Conakry).
+model CompteurVente {
+  structureId   String
+  structure     Structure @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  annee         Int
+  dernierNumero Int       @default(0)
+
+  @@id([structureId, annee])
 }
 
 // ====== SECURITE ET ACCES ======

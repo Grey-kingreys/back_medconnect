@@ -36,6 +36,20 @@ export const CODES_ERREUR = [
   'JETON_INVALIDE',
   // Mot de passe actuel incorrect lors d'un changement de mot de passe (400), la session reste valide.
   'MOT_DE_PASSE_ACTUEL_INCORRECT',
+  // Stock insuffisant pour au moins une ligne de la vente (409), lignes dans `details`.
+  'STOCK_INSUFFISANT',
+  // Médicament périmé dans la vente (400), lignes dans `details`.
+  'MEDICAMENT_EXPIRE',
+  // Médicament sans prix dans la vente (400), lignes dans `details`.
+  'PRIX_MANQUANT',
+  // Médicament sur ordonnance vendu sans confirmation de l'ordonnance (400), lignes dans `details`.
+  'ORDONNANCE_NON_CONFIRMEE',
+  // Ligne de stock absente de cette pharmacie (404), lignes dans `details`.
+  'STOCK_INTROUVABLE',
+  // Vente déjà annulée (409).
+  'VENTE_DEJA_ANNULEE',
+  // Vente d'un autre jour, annulation impossible (409).
+  'ANNULATION_HORS_DELAI',
 ] as const;
 
 export type CodeErreur = (typeof CODES_ERREUR)[number];

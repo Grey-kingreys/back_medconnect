@@ -35,6 +35,8 @@ const NOTES_MAX_IMPORT = 500;
 const SEUIL_STOCK_BAS = 10;
 /** Plus grande quantité enregistrable (colonne Int de PostgreSQL). */
 const QUANTITE_MAX = 2147483647;
+/** Plus grand prix enregistrable (colonne Int de PostgreSQL). */
+const PRIX_MAX = 2147483647;
 /** Transaction interactive de l'import : jusqu'à 1000 écritures successives. */
 const OPTIONS_TRANSACTION_IMPORT = { maxWait: 10_000, timeout: 60_000 };
 
@@ -381,27 +383,36 @@ export class PharmacieService {
   ) {
     await this.checkPharmacieAccess(structureId, adminUserId);
 
-    const stock = await this.prisma.stockMedicament.findFirst({
-      where: { id: stockId, structureId },
-    });
-    if (!stock) throw new NotFoundException('Stock non trouvé');
+    // Ligne verrouillée jusqu'à la fin de la transaction : deux ajustements simultanés
+    // s'appliquent l'un après l'autre, sans mise à jour perdue (D123).
+    const { ancienne, updated, newQuantite } = await this.prisma.$transaction(
+      async (tx) => {
+        const lignes = await tx.$queryRaw<
+          { quantite: number; notes: string | null }[]
+        >`SELECT "quantite", "notes" FROM "StockMedicament" WHERE "id" = ${stockId} AND "structureId" = ${structureId} FOR UPDATE`;
+        if (lignes.length === 0)
+          throw new NotFoundException('Stock non trouvé');
+        const { quantite: ancienne, notes } = lignes[0];
 
-    const newQuantite = Math.max(0, stock.quantite + dto.variation);
+        const newQuantite = Math.max(0, ancienne + dto.variation);
 
-    const updated = await this.prisma.stockMedicament.update({
-      where: { id: stockId },
-      data: {
-        quantite: newQuantite,
-        disponible: newQuantite > 0,
-        notes: dto.notes?.trim() || stock.notes,
+        const updated = await tx.stockMedicament.update({
+          where: { id: stockId },
+          data: {
+            quantite: newQuantite,
+            disponible: newQuantite > 0,
+            notes: dto.notes?.trim() || notes,
+          },
+          include: {
+            medicament: { select: { id: true, nom: true, categorie: true } },
+          },
+        });
+        return { ancienne, updated, newQuantite };
       },
-      include: {
-        medicament: { select: { id: true, nom: true, categorie: true } },
-      },
-    });
+    );
 
     // Alerte stock bas
-    if (newQuantite < 10 && stock.quantite >= 10) {
+    if (newQuantite < 10 && ancienne >= 10) {
       const staff = await this.prisma.user.findMany({
         where: { structureId, role: { in: ['PHARMACIEN', 'STRUCTURE_ADMIN'] } },
         select: { id: true },
@@ -724,7 +735,7 @@ export class PharmacieService {
         );
       }
 
-      const prixUnitaire = this.lireNombre(valeurs.prix);
+      let prixUnitaire = this.lireNombre(valeurs.prix);
       if (
         prixUnitaire !== undefined &&
         (!Number.isFinite(prixUnitaire) || prixUnitaire < 0)
@@ -732,6 +743,14 @@ export class PharmacieService {
         raisons.push(
           'Le prix unitaire doit être un nombre, 0 ou plus, sans texte (exemple : 35000).',
         );
+      } else if (prixUnitaire !== undefined) {
+        // Le prix du stock est un entier de francs guinéens (lot 7).
+        prixUnitaire = Math.round(prixUnitaire);
+        if (prixUnitaire > PRIX_MAX) {
+          raisons.push(
+            'Le prix unitaire est trop grand. Vérifiez le montant (exemple : 35000).',
+          );
+        }
       }
 
       const dateExpiration = this.lireDate(valeurs.date);

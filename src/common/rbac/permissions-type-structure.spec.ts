@@ -33,6 +33,9 @@ describe('Permissions selon le type de structure (B10)', () => {
         'stock:write',
         'catalogue:write',
         'catalogue:manage',
+        'vente:read',
+        'vente:write',
+        'vente:annuler',
         'structure:read',
         'structure:write',
         'membre:read',
@@ -63,6 +66,31 @@ describe('Permissions selon le type de structure (B10)', () => {
         expect(filtrerPermissionsSelonTypeStructure(entree, type)).toBe(entree);
       },
     );
+
+    it('2b. hôpital : les permissions de vente sont retirées, le reste est conservé', () => {
+      expect(
+        filtrerPermissionsSelonTypeStructure(
+          ['vente:read', 'carnet:read'],
+          'HOPITAL',
+        ),
+      ).toEqual(['carnet:read']);
+    });
+
+    it('2c. pharmacie : les trois permissions de vente sont conservées', () => {
+      const ventes = ['vente:read', 'vente:write', 'vente:annuler'];
+      expect(filtrerPermissionsSelonTypeStructure(ventes, 'PHARMACIE')).toEqual(
+        ventes,
+      );
+    });
+
+    it('2d. sans structure : les permissions de vente sont retirées', () => {
+      expect(
+        filtrerPermissionsSelonTypeStructure(
+          ['vente:read', 'vente:write', 'vente:annuler', 'carnet:read'],
+          null,
+        ),
+      ).toEqual(['carnet:read']);
+    });
 
     it('3. les rôles par défaut d une pharmacie ne perdent rien', () => {
       for (const i of [0, 1]) {
@@ -128,7 +156,7 @@ describe('Permissions selon le type de structure (B10)', () => {
       service = new PermissionsService(redis as never, prisma as never);
     });
 
-    it('5. pharmacie : permissions filtrées, cache v2, carnet refusé', async () => {
+    it('5. pharmacie : permissions filtrées, cache v3, carnet refusé', async () => {
       prisma.user.findUnique.mockResolvedValue(
         utilisateur({ structure: { type: 'PHARMACIE' } }),
       );
@@ -137,7 +165,7 @@ describe('Permissions selon le type de structure (B10)', () => {
         'structure:read',
       ]);
       expect(redis.set).toHaveBeenCalledWith(
-        'perms:v2:user:u1',
+        'perms:v3:user:u1',
         JSON.stringify(['stock:read', 'structure:read']),
         'EX',
         300,
