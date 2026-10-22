@@ -316,6 +316,8 @@ export const DEFAULT_STRUCTURE_ROLES: Record<string, DefaultRoleDef[]> = {
       description:
         'Gère les membres, les rôles et les informations de l’officine.',
       permissions: [
+        PERMISSIONS.STOCK_READ,
+        PERMISSIONS.STOCK_WRITE,
         PERMISSIONS.VENTE_READ,
         PERMISSIONS.VENTE_WRITE,
         PERMISSIONS.VENTE_ANNULER,
@@ -328,6 +330,19 @@ export const DEFAULT_STRUCTURE_ROLES: Record<string, DefaultRoleDef[]> = {
     },
   ],
 };
+
+/**
+ * Permissions toujours garanties au rôle « Administrateur de structure » d'une pharmacie,
+ * y compris pour les pharmacies existantes (complétées au démarrage par RolesService).
+ */
+export const PERMISSIONS_GARANTIES_ADMIN_PHARMACIE: readonly PermissionCode[] =
+  [
+    PERMISSIONS.STOCK_READ,
+    PERMISSIONS.STOCK_WRITE,
+    PERMISSIONS.VENTE_READ,
+    PERMISSIONS.VENTE_WRITE,
+    PERMISSIONS.VENTE_ANNULER,
+  ];
 
 // Clinique = mêmes rôles par défaut qu'un hôpital.
 DEFAULT_STRUCTURE_ROLES.CLINIQUE = DEFAULT_STRUCTURE_ROLES.HOPITAL;

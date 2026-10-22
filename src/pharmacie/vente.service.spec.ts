@@ -958,6 +958,58 @@ describe('VenteService (ventes en pharmacie)', () => {
     });
   });
 
+  it('reçu : détail et annulation renvoient la pharmacie complète', async () => {
+    ajouterStock('a', { quantite: 5 });
+    const attendu = {
+      id: S1,
+      nom: 'Pharmacie de Kaloum',
+      adresse: 'Avenue de la République',
+      ville: 'Conakry',
+      telephone: '+224 621 00 00 00',
+      logoUrl: 'https://cdn.test/logos/s1.png',
+    };
+    const vente = await vendre(lignes(['a', 1]));
+
+    const detail = await service.detailVente(S1, vente.data.id, 'u-vendeur');
+    expect(detail.data.pharmacie).toEqual(attendu);
+
+    const annulee = await service.annulerVente(
+      S1,
+      vente.data.id,
+      'u-admin',
+      { motif: 'Test de reçu' },
+      null,
+    );
+    expect(annulee.data.pharmacie).toEqual(attendu);
+  });
+
+  it('reçu sans logo : logoUrl null, champs absents null', async () => {
+    ajouterStock('z', { structureId: 's2' });
+    base.utilisateurs.set('u-s2', {
+      id: 'u-s2',
+      nom: 'N',
+      prenom: 'P',
+      structureId: 's2',
+    });
+
+    const vente = await service.creerVente(
+      's2',
+      'u-s2',
+      { lignes: lignes(['z', 1]) },
+      undefined,
+      null,
+    );
+
+    expect(vente.data.pharmacie).toEqual({
+      id: 's2',
+      nom: 'Autre pharmacie',
+      adresse: null,
+      ville: null,
+      telephone: null,
+      logoUrl: null,
+    });
+  });
+
   describe('13. liste du jour', () => {
     it('totalJour ne compte que les validées, nombre compte tout', async () => {
       ajouterStock('a', { quantite: 50, prixUnitaire: 1000 });

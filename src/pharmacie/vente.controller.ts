@@ -55,6 +55,11 @@ export class VenteController {
       'Clé unique par panier (8 à 128 caractères parmi lettres, chiffres, . _ : -), par exemple un UUID. Un renvoi avec la même clé dans les 24 h renvoie la même vente sans second retrait du stock. Clé mal formée : ignorée.',
   })
   @ApiResponse({
+    status: 201,
+    description:
+      'Vente enregistrée (ou rejouée avec rejeu: true). data : id, numero, statut, createdAt, total, ordonnanceVerifiee, clientNom, clientTelephone, vendeur { id, nom }, annuleeLe, annuleeParId, motifAnnulation, lignes [ { id, stockId, medicamentId, nomMedicament, prixUnitaire, quantite, sousTotal } ], pharmacie { id, nom, adresse, ville, telephone, logoUrl } (champs absents à null, logoUrl = URL publique du logo ou null).',
+  })
+  @ApiResponse({
     status: 400,
     description:
       'Corps invalide (VALIDATION), médicament périmé (MEDICAMENT_EXPIRE), sans prix (PRIX_MANQUANT) ou sur ordonnance non confirmée (ORDONNANCE_NON_CONFIRMEE). Lignes concernées dans details.',
@@ -110,6 +115,11 @@ export class VenteController {
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiParam({ name: 'venteId', description: 'Identifiant de la vente' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Même forme que la création, avec pharmacie { id, nom, adresse, ville, telephone, logoUrl } pour le reçu.',
+  })
   @ApiResponse({ status: 404, description: 'Vente introuvable.' })
   detailVente(
     @Req() req: RequestWithUser,
