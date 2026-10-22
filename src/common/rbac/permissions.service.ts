@@ -24,8 +24,8 @@ import {
 @Injectable()
 export class PermissionsService {
   private readonly logger = new Logger(PermissionsService.name);
-  // v2 : permissions filtrées selon le type de structure (B10) ; le changement de préfixe ignore les anciennes entrées au déploiement.
-  private readonly CACHE_PREFIX = 'perms:v2:user:';
+  // v3 : permissions de vente réservées aux pharmacies (B13) ; le changement de préfixe ignore les anciennes entrées au déploiement.
+  private readonly CACHE_PREFIX = 'perms:v3:user:';
   private readonly CACHE_TTL_S = 300; // 5 min
 
   constructor(

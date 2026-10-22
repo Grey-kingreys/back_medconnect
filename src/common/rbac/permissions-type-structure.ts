@@ -6,7 +6,8 @@
  * présente mais devient inopérante au calcul des permissions effectives.
  *
  * Liste blanche : toute nouvelle permission du catalogue est refusée aux pharmacies
- * tant qu'on ne l'ajoute pas ici.
+ * tant qu'on ne l'ajoute pas ici. Inversement, les permissions de vente sont retirées
+ * à tout autre type de structure.
  */
 import type { StructureType } from 'generated/prisma/enums';
 import { PERMISSIONS, type PermissionCode } from './permissions.constants';
@@ -17,6 +18,9 @@ export const PERMISSIONS_AUTORISEES_PHARMACIE: readonly PermissionCode[] = [
   PERMISSIONS.STOCK_WRITE,
   PERMISSIONS.CATALOGUE_WRITE,
   PERMISSIONS.CATALOGUE_MANAGE,
+  PERMISSIONS.VENTE_READ,
+  PERMISSIONS.VENTE_WRITE,
+  PERMISSIONS.VENTE_ANNULER,
   PERMISSIONS.STRUCTURE_READ,
   PERMISSIONS.STRUCTURE_WRITE,
   PERMISSIONS.MEMBRE_READ,
@@ -25,7 +29,15 @@ export const PERMISSIONS_AUTORISEES_PHARMACIE: readonly PermissionCode[] = [
   PERMISSIONS.CHAT_STRUCTURE,
 ];
 
+/** Permissions réservées aux pharmacies : retirées pour tout autre type de structure. */
+export const PERMISSIONS_RESERVEES_PHARMACIE: readonly PermissionCode[] = [
+  PERMISSIONS.VENTE_READ,
+  PERMISSIONS.VENTE_WRITE,
+  PERMISSIONS.VENTE_ANNULER,
+];
+
 const autorisees = new Set<string>(PERMISSIONS_AUTORISEES_PHARMACIE);
+const reservees = new Set<string>(PERMISSIONS_RESERVEES_PHARMACIE);
 
 /** Type de la structure de l'utilisateur : rattachement, à défaut structure administrée. */
 export function typeStructureEffectif(
@@ -40,7 +52,7 @@ export function typeStructureEffectif(
   return user?.structure?.type ?? user?.administeredStructure?.type ?? null;
 }
 
-/** Restreint les codes à la liste blanche pour une pharmacie ; inchangés sinon. */
+/** Liste blanche pour une pharmacie ; sinon retire seulement les permissions réservées aux pharmacies. */
 export function filtrerPermissionsSelonTypeStructure(
   codes: string[],
   type: StructureType | null,
@@ -48,5 +60,7 @@ export function filtrerPermissionsSelonTypeStructure(
   if (type === 'PHARMACIE') {
     return codes.filter((c) => autorisees.has(c));
   }
-  return codes;
+  // Même référence quand rien n'est retiré (comportement d'avant B13).
+  const restants = codes.filter((c) => !reservees.has(c));
+  return restants.length === codes.length ? codes : restants;
 }

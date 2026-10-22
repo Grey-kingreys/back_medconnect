@@ -533,6 +533,28 @@ describe('PharmacieService, import Excel du stock', () => {
     );
   });
 
+  it('arrondit un prix décimal à l entier et rejette un prix trop grand', async () => {
+    const fichier = await construireFichier([
+      ['Paracétamol 500 mg', 10, 1500.6],
+      ['Amoxicilline 500 mg', 10, 3000000000],
+    ]);
+
+    const { data } = await service.apercuImportStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+    );
+
+    expect(data.lignes[0]).toMatchObject({
+      statut: 'acceptee',
+      prixUnitaire: 1501,
+    });
+    expect(data.lignes[1].statut).toBe('rejetee');
+    expect(data.lignes[1].raison).toBe(
+      'Le prix unitaire est trop grand. Vérifiez le montant (exemple : 35000).',
+    );
+  });
+
   it("le modèle téléchargeable explique l'inventaire et la livraison", async () => {
     const buffer = await service.getModeleImportStock(STRUCTURE_ID, USER_ID);
     const classeur = new Workbook();

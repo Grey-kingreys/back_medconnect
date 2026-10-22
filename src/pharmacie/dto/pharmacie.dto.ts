@@ -4,10 +4,12 @@ import {
   IsString,
   IsBoolean,
   IsNumber,
+  IsInt,
   IsArray,
   IsDateString,
   IsIn,
   Min,
+  Max,
   Length,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -99,8 +101,12 @@ export class UpsertStockDto {
 
   @ApiPropertyOptional({ example: 35000, description: 'Prix en GNF' })
   @IsOptional()
-  @IsNumber()
+  @IsInt({
+    message:
+      'Le prix unitaire doit être un nombre entier de francs guinéens, sans décimales.',
+  })
   @Min(0)
+  @Max(2147483647)
   prixUnitaire?: number;
 
   @ApiPropertyOptional({ example: '2027-12-31' })
@@ -116,7 +122,7 @@ export class UpsertStockDto {
 
 export class UpdateStockQuantiteDto {
   @ApiProperty({ example: 10, description: 'Ajouter ou retirer (négatif)' })
-  @IsNumber()
+  @IsInt({ message: 'La variation doit être un nombre entier.' })
   variation: number;
 
   @ApiPropertyOptional({ example: 'Livraison du 26/04/2026' })

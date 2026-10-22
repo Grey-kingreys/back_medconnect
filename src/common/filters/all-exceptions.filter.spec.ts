@@ -104,6 +104,39 @@ describe('AllExceptionsFilter', () => {
     });
   });
 
+  it('recopie details assainis pour un code de vente et ignore les autres clés', () => {
+    filtre.catch(
+      new ConflictException({
+        message: 'Le stock ne suffit plus.',
+        code: 'STOCK_INSUFFISANT',
+        details: [
+          {
+            stockId: 's1',
+            nom: 'Doliprane',
+            disponible: 0,
+            demande: 2,
+            secret: 'x',
+          },
+        ],
+      }),
+      host,
+    );
+    expect(corpsRenvoye().details).toEqual([
+      { stockId: 's1', nom: 'Doliprane', disponible: 0, demande: 2 },
+    ]);
+  });
+
+  it('ne recopie pas details sans code de vente', () => {
+    filtre.catch(
+      new BadRequestException({
+        message: 'Message projet',
+        details: [{ stockId: 's1', secret: 'x' }],
+      }),
+      host,
+    );
+    expect(corpsRenvoye()).not.toHaveProperty('details');
+  });
+
   it("n'ajoute pas donnees sans clé autorisée", () => {
     filtre.catch(
       new ConflictException({ message: 'Message projet', autre: 'x' }),

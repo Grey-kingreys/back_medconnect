@@ -48,6 +48,15 @@ const LIBELLES: Record<number, string> = {
 // Champs d'une exception recopiés dans `donnees` (liste blanche ; TB10b ajoutera finDelaiAt).
 const DONNEES_AUTORISEES = ['peutRelancerA'] as const;
 
+// Codes dont l'exception porte une liste de lignes concernées, recopiée dans `details` (D119).
+const CODES_AVEC_DETAILS: ReadonlySet<CodeErreur> = new Set<CodeErreur>([
+  'STOCK_INSUFFISANT',
+  'MEDICAMENT_EXPIRE',
+  'PRIX_MANQUANT',
+  'ORDONNANCE_NON_CONFIRMEE',
+  'STOCK_INTROUVABLE',
+]);
+
 // Messages anglais par défaut de Nest et d'Express (libellés HTTP standard).
 const MESSAGES_PAR_DEFAUT = new Set(
   [
@@ -148,6 +157,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
             resultat.message = seul.message;
           }
         }
+        if (
+          resultat.code &&
+          CODES_AVEC_DETAILS.has(resultat.code) &&
+          Array.isArray(brut.details)
+        ) {
+          resultat.details = assainirDetails(brut.details);
+        }
         for (const cle of DONNEES_AUTORISEES) {
           const valeur = brut[cle];
           if (typeof valeur === 'string') {
@@ -245,6 +261,23 @@ function assainirChamps(brut: unknown[]): ChampFautif[] {
     };
     if (typeof message === 'string') entree.message = message;
     resultat.push(entree);
+  }
+  return resultat;
+}
+
+// Garde au plus 50 lignes et, par ligne, seulement stockId, nom, disponible et demande (bon type).
+function assainirDetails(brut: unknown[]): Record<string, string | number>[] {
+  const resultat: Record<string, string | number>[] = [];
+  for (const element of brut.slice(0, 50)) {
+    if (typeof element !== 'object' || element === null) continue;
+    const source = element as Record<string, unknown>;
+    const ligne: Record<string, string | number> = {};
+    if (typeof source.stockId === 'string') ligne.stockId = source.stockId;
+    if (typeof source.nom === 'string') ligne.nom = source.nom;
+    if (typeof source.disponible === 'number')
+      ligne.disponible = source.disponible;
+    if (typeof source.demande === 'number') ligne.demande = source.demande;
+    resultat.push(ligne);
   }
   return resultat;
 }
