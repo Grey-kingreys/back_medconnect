@@ -8,14 +8,14 @@ import { VersionMinimaleGuard } from './configuration-publique/version-minimale.
  * Câblage global de l'AppModule (PLAN §2.3, §1.5).
  *
  * L'AuditInterceptor et le throttler par utilisateur ont chacun existé, écrits et
- * corrects, tout en n'étant PAS déclarés dans `providers` — donc silencieusement
+ * corrects, tout en n'étant PAS déclarés dans `providers`, donc silencieusement
  * inactifs (aucune erreur, aucun log). Un test de comportement ne l'aurait pas vu
  * sans provoquer la situation exacte ; on vérifie donc directement la déclaration.
  *
  * Lire les métadonnées du module n'instancie rien : pas de Postgres ni de Redis
  * requis. Toute suppression de ces deux `APP_*` fait échouer ce test.
  */
-describe('AppModule — câblage global (audit + throttling)', () => {
+describe('AppModule : câblage global (audit + throttling)', () => {
   const providers = (Reflect.getMetadata('providers', AppModule) ??
     []) as Array<{ provide?: unknown; useClass?: unknown }>;
 

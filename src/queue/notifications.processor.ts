@@ -32,7 +32,7 @@ export interface EmergencyEmailJob {
 
 /**
  * Traite les jobs asynchrones de notification (in-process pour l'instant ;
- * peut être externalisé dans un conteneur `worker` dédié — voir WORKER_MODE
+ * peut être externalisé dans un conteneur `worker` dédié, voir WORKER_MODE
  * dans main.ts). Découple l'API des appels lents/faillibles (Nimba, Resend).
  */
 @Processor(NOTIFICATIONS_QUEUE)
@@ -56,7 +56,9 @@ export class NotificationsProcessor extends WorkerHost {
       case 'sos': {
         const { recipients, patientName, location } = job.data as SosJob;
         await Promise.allSettled(
-          recipients.map((to) => this.sms.sendEmergencySms(to, patientName, location)),
+          recipients.map((to) =>
+            this.sms.sendEmergencySms(to, patientName, location),
+          ),
         );
         break;
       }

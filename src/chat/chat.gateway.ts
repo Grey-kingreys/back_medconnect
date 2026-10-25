@@ -80,7 +80,7 @@ export class ChatGateway
         return;
       }
 
-      // Secret centralisé (validé au boot, cf. config/env.validation.ts) — plus de fallback en dur.
+      // Secret centralisé (validé au boot, cf. config/env.validation.ts), plus de fallback en dur.
       const decoded = this.jwtService.verify<{ userId: string; sid?: string }>(
         token,
         { secret: process.env.JWT_SECRET },

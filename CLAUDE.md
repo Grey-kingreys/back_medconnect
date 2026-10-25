@@ -1,4 +1,4 @@
-# MedConnecte — Backend (NestJS 11 + Prisma 7)
+# MedConnecte : Backend (NestJS 11 + Prisma 7)
 
 API REST + WebSocket de la plateforme de santé. Voir aussi le `CLAUDE.md` racine
 (architecture globale + liste complète des problématiques).
@@ -78,7 +78,7 @@ File asynchrone dans `src/queue/` (**BullMQ**).
   - Règles : le prix vient du stock (jamais du client), un prix `null` ou 0 vaut « manquant » ; un médicament est périmé si sa `dateExpiration` tombe avant le jour courant à Conakry (UTC+0), le jour même reste vendable ; la vente retire la quantité seule (pas de remise ni de prix modifié) ; `disponible` passe à faux quand la quantité tombe à 0 ; l'alerte de stock bas (`STOCK_ALERTE`) part au franchissement du seuil de 10, sans jamais faire échouer la vente ; audit `create` de la vente. Numérotation `V-AAAA-NNNNNN` (`CompteurVente` par pharmacie et par année, incrémenté dans la transaction, qui verrouille la ligne et sérialise les ventes d'une pharmacie). Les retraits sont des décréments conditionnels (`quantite >= demandée`), jamais lire puis écrire. Une vente n'est jamais supprimée, seulement annulée ; `vendeurId`, `annuleeParId` et les identifiants des lignes n'ont pas de clé étrangère.
   - Prix du stock désormais entier (GNF, colonne `Int`, migration `20261022120000_ventes_pharmacie` avec arrondi) : `UpsertStockDto.prixUnitaire` en `@IsInt` (0 à 2147483647), import Excel arrondi à l'entier (rejet au-delà de 2147483647) ; `UpdateStockQuantiteDto.variation` en `@IsInt`. `updateStockQuantite` verrouille la ligne (`SELECT ... FOR UPDATE`) : plus de mise à jour perdue. Permissions des pharmacies : rôle « Pharmacien » : `stock:read`, `stock:write`, `vente:read`, `vente:write` ; rôle « Administrateur de structure » : `stock:read`, `stock:write`, `vente:read`, `vente:write`, `vente:annuler` (plus `structure:*`, `membre:*`, `role:manage`). Rôles existants : `vente:*` repris par la migration du lot 7 ; depuis B14, `RolesService.completerRolesAdminPharmacie` ajoute au démarrage les 5 permissions de `PERMISSIONS_GARANTIES_ADMIN_PHARMACIE` au rôle « Administrateur de structure » de chaque pharmacie (ajout seul, invalidation du cache du rôle ; une de ces permissions retirée à la main revient au démarrage suivant). Hôpitaux et cliniques : ni `stock:*` ni `vente:*` (voir B10), cache `perms:v3`.
 - **Imports Excel de la pharmacie (stock et catalogue)** : `src/pharmacie/import-excel.ts`. La ligne des titres est la première des 10 premières lignes qui contient toutes les colonnes obligatoires (stock : Médicament, Quantité ; catalogue : Nom, Catégorie), sinon 400 qui nomme les colonnes manquantes. Titres comparés en minuscules sans accents ni ponctuation (`normaliserTitre`), synonymes dans `reconnaitre` de `COLONNES_IMPORT_STOCK` (`pharmacie.service.ts`) et `COLONNES_IMPORT_CATALOGUE` (`catalogue-import.service.ts`) : Désignation, Produit, Libellé, Qté, P.U., Péremption, DCI, Famille… ; un titre de seuil (« Quantité minimale », « Stock alerte ») n'est jamais pris pour la quantité. L'aperçu et l'import renvoient `colonnes: { ligneTitres, reconnues: [{ titre, colonne }], ignorees: [titre] }` (`colonne` = libellé de la plateforme) ; `lignes[].ligne` reste le numéro de ligne Excel.
-- **Validation** globale : `ValidationPipe` (whitelist + forbidNonWhitelisted) — tout
+- **Validation** globale : `ValidationPipe` (whitelist + forbidNonWhitelisted), tout
   champ d'entrée doit être déclaré dans un DTO `class-validator`.
 - **Langue** : messages/logs/commentaires en français.
 
@@ -100,10 +100,10 @@ est vide, le signaler et proposer la commande ci-dessus avant tout commit.
 
 ## Variables d'environnement (lecture mixte `process.env` ET `ConfigService`)
 
-Obligatoires : `DATABASE_URL`, `JWT_SECRET`, **`ENCRYPTION_KEY`** (hex 64 car. — lue via
+Obligatoires : `DATABASE_URL`, `JWT_SECRET`, **`ENCRYPTION_KEY`** (hex 64 car., lue via
 `ConfigService`, app **crashe** si absente/invalide), et les **6 `R2_*`** du stockage
 (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_PUBLIC`,
-`R2_BUCKET_PRIVATE`, `R2_PUBLIC_URL`) — toutes validées au boot (`config/env.validation.ts`).
+`R2_BUCKET_PRIVATE`, `R2_PUBLIC_URL`) : toutes validées au boot (`config/env.validation.ts`).
 Autres : `FRONTEND_URL`, `PORT`, `REDIS_URL`, `RESEND_*`, `NIMBA_*`, `AI_SERVICE_URL`,
 `AI_URGENCE`, `SWAGGER_ENABLED` (optionnelle, `true` pour ouvrir Swagger en production,
 fermé par défaut), `AI_SHARED_SECRET` (optionnelle, 32 caractères min., secret partagé
@@ -146,7 +146,7 @@ instance qui contient de vraies données de santé.
 
 ## Capacités Phase 2 (implémentées)
 
-- **Stockage Cloudflare R2** — module isolé `src/storage/` (**`StorageModule`**, global).
+- **Stockage Cloudflare R2** : module isolé `src/storage/` (**`StorageModule`**, global).
   `S3Client` instancié une seule fois (provider `R2_CLIENT`). Deux buckets : **public**
   (avatars/logos, servis via `R2_PUBLIC_URL`) et **privé** (documents médicaux, URLs
   présignées courtes uniquement). `StorageService` : `upload`, `getSignedUploadUrl`
@@ -158,15 +158,15 @@ instance qui contient de vraies données de santé.
   `POST /storage/confirm`, `GET /storage/:id/read-url` (contrôle d'accès `FileAccessService`
   + audit sur bucket privé), `DELETE /storage/:id`.
   - ⚠️ **Legacy** : l'ancien `src/common/storage.*` (S3/MinIO, endpoints `/storage/upload-url`
-    et `/storage/download-url`) est **encore branché mais dormant** — à retirer une fois
+    et `/storage/download-url`) est **encore branché mais dormant**, à retirer une fois
     les usages migrés (aucun consommateur métier/front à ce jour).
-- **File BullMQ** — `QueueService` (global) : `enqueueSms`, `enqueueSos`,
+- **File BullMQ** : `QueueService` (global) : `enqueueSms`, `enqueueSos`,
   `enqueueWelcomeEmail`, `enqueueEmergencyEmail`. Processor : `src/queue/notifications.processor.ts`.
   **Le SOS (`carnet-sante.createUrgence`) envoie email + SMS via la file** (réponse
   immédiate, 3 retries + backoff). Toggle diag : `QUEUE_SELFTEST=1`.
   - Processors **in-process** pour l'instant ; externalisables dans un service `worker`
     dédié plus tard (les jobs sont déjà découplés via Redis).
-- **Socket.io ↔ Redis** — `RedisIoAdapter` (`src/common/redis-io.adapter.ts`), branché
+- **Socket.io ↔ Redis** : `RedisIoAdapter` (`src/common/redis-io.adapter.ts`), branché
   dans `main.ts`. Prérequis au scaling : `BACKEND_REPLICAS > 1` **exige** cet adapter.
 
 ## ⚠️ Dette/risques spécifiques backend

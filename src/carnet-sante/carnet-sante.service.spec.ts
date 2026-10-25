@@ -13,7 +13,7 @@ import { UpdateRendezVousStatusDto } from './dto/carnet-sante.dto';
  *
  * Les données de santé ne doivent JAMAIS être supprimées physiquement : chaque
  * suppression est un `update({ data: { deletedAt } })` et chaque lecture exclut les
- * enregistrements déjà supprimés (`deletedAt: null`). Ce filtrage est applicatif —
+ * enregistrements déjà supprimés (`deletedAt: null`). Ce filtrage est applicatif,
  * il n'y a pas de middleware Prisma qui le garantisse (le `$use` global de Prisma <5
  * n'existe plus en Prisma 7). Ces tests verrouillent donc la règle méthode par
  * méthode : un retour à `delete()` les fait échouer.
@@ -21,7 +21,7 @@ import { UpdateRendezVousStatusDto } from './dto/carnet-sante.dto';
  * Seul `prisma` est exercé ; les huit autres dépendances du service sont inertes
  * (les méthodes testées ne les appellent pas).
  */
-describe('CarnetSanteService — soft-delete des données de santé', () => {
+describe('CarnetSanteService : soft-delete des données de santé', () => {
   const modelMock = () => ({
     findFirst: jest.fn(),
     update: jest.fn().mockResolvedValue({}),

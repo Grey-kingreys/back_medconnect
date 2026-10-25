@@ -14,7 +14,7 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-// ─── Créer un médicament (catalogue global — ADMIN/SUPER_ADMIN) ──────────────
+// ─── Créer un médicament (catalogue global : ADMIN/SUPER_ADMIN) ──────────────
 
 export class CreateMedicamentDto {
   @ApiProperty({ example: 'Coartem 20mg/120mg' })

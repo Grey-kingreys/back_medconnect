@@ -1,38 +1,44 @@
-import { Injectable, OnModuleDestroy, OnModuleInit, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  OnModuleDestroy,
+  OnModuleInit,
+  Logger,
+} from '@nestjs/common';
 import { PrismaClient } from 'generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 
 @Injectable()
 export class PrismaService
-    extends PrismaClient
-    implements OnModuleInit, OnModuleDestroy {
-    private pool: Pool;
-    private readonly logger = new Logger(PrismaService.name);
+  extends PrismaClient
+  implements OnModuleInit, OnModuleDestroy
+{
+  private pool: Pool;
+  private readonly logger = new Logger(PrismaService.name);
 
-    constructor() {
-        const pool = new Pool({
-            connectionString: process.env.DATABASE_URL,
-        });
-        const adapter = new PrismaPg(pool);
-        super({ adapter });
-        this.pool = pool;
-    }
+  constructor() {
+    const pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+    });
+    const adapter = new PrismaPg(pool);
+    super({ adapter });
+    this.pool = pool;
+  }
 
-    async onModuleInit() {
-        await this.$connect();
-        this.logger.log('✅ Base de données connectée');
-    }
+  async onModuleInit() {
+    await this.$connect();
+    this.logger.log('✅ Base de données connectée');
+  }
 
-    async onModuleDestroy() {
-        await this.$disconnect();
-        await this.pool.end();
-        this.logger.log('🔌 Base de données déconnectée');
-    }
+  async onModuleDestroy() {
+    await this.$disconnect();
+    await this.pool.end();
+    this.logger.log('🔌 Base de données déconnectée');
+  }
 }
 
 /**
- * ⚠️ SOFT-DELETE — règle applicative, sans interception automatique.
+ * ⚠️ SOFT-DELETE : règle applicative, sans interception automatique.
  *
  * `Consultation`, `Ordonnance`, `ResultatAnalyse` et `Vaccination` portent un
  * `deletedAt` : ces données de santé ne sont jamais supprimées physiquement.

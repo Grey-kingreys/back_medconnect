@@ -9,7 +9,7 @@
  * constructeur d'un service (EncryptionService, EmailService…).
  *
  * Choix : validation maison (zéro dépendance) plutôt que Joi/class-validator,
- * pour ne pas alourdir le lock (cf. CLAUDE.md — node_modules = volume Docker).
+ * pour ne pas alourdir le lock (cf. CLAUDE.md : node_modules = volume Docker).
  */
 
 import { FORMAT_VERSION_CONFIG } from '../configuration-publique/versions';
@@ -67,7 +67,7 @@ const RULES: Rule[] = [
     required: true,
     validate: (v) => {
       if (WEAK_SECRETS.has(v.toLowerCase())) {
-        return 'valeur trop faible/par défaut — générez un secret aléatoire (ex. `openssl rand -hex 32`)';
+        return 'valeur trop faible/par défaut : générez un secret aléatoire (ex. `openssl rand -hex 32`)';
       }
       if (v.length < 32) {
         return `doit faire au moins 32 caractères (actuellement ${v.length})`;
@@ -100,7 +100,7 @@ const RULES: Rule[] = [
         ? null
         : 'doit être une URL Redis (redis://… ou rediss://…)',
   },
-  // Compte SUPER_ADMIN initial — créé automatiquement au boot par SuperAdminSeeder
+  // Compte SUPER_ADMIN initial, créé automatiquement au boot par SuperAdminSeeder
   // s'il n'existe pas encore. Obligatoires : pas de mot de passe par défaut faible
   // sur un compte qui a tous les droits.
   {
@@ -116,7 +116,7 @@ const RULES: Rule[] = [
     required: true,
     validate: (v) => {
       if (WEAK_SECRETS.has(v.toLowerCase())) {
-        return 'valeur trop faible/par défaut — choisissez un mot de passe robuste';
+        return 'valeur trop faible/par défaut : choisissez un mot de passe robuste';
       }
       if (v.length < 12) {
         return `doit faire au moins 12 caractères (actuellement ${v.length})`;
@@ -301,7 +301,7 @@ export function validateEnv(
 
   if (errors.length > 0) {
     throw new Error(
-      `\n❌ Configuration invalide — l'application ne peut pas démarrer.\n` +
+      `\n❌ Configuration invalide : l'application ne peut pas démarrer.\n` +
         `Variables d'environnement à corriger :\n${errors.join('\n')}\n`,
     );
   }

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access -- dette de typage préexistante non corrigée */
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import {
   S3Client,
@@ -10,7 +11,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 /**
- * Stockage objets S3-compatible — Cloudflare R2 (dev & prod).
+ * Stockage objets S3-compatible : Cloudflare R2 (dev & prod).
  * Sert aux documents médicaux : résultats d'analyses, ordonnances scannées,
  * photos de profil, pièces jointes.
  *
@@ -53,7 +54,7 @@ export class StorageService implements OnModuleInit {
   /** Crée le bucket au démarrage s'il n'existe pas (idempotent, non bloquant). */
   async onModuleInit(): Promise<void> {
     if (!process.env.S3_ACCESS_KEY) {
-      this.logger.warn('S3_ACCESS_KEY absent — stockage objets non configuré.');
+      this.logger.warn('S3_ACCESS_KEY absent, stockage objets non configuré.');
       return;
     }
     try {
@@ -61,7 +62,9 @@ export class StorageService implements OnModuleInit {
       this.logger.log(`✅ Bucket S3 « ${this.bucket} » prêt.`);
     } catch {
       try {
-        await this.client.send(new CreateBucketCommand({ Bucket: this.bucket }));
+        await this.client.send(
+          new CreateBucketCommand({ Bucket: this.bucket }),
+        );
         this.logger.log(`✅ Bucket S3 « ${this.bucket} » créé.`);
       } catch (err: any) {
         // Ne pas faire échouer le boot si le stockage est momentanément indisponible.
@@ -98,7 +101,11 @@ export class StorageService implements OnModuleInit {
   ): Promise<{ key: string; url: string; expiresIn: number }> {
     const url = await getSignedUrl(
       this.publicClient,
-      new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: contentType }),
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        ContentType: contentType,
+      }),
       { expiresIn },
     );
     return { key, url, expiresIn };
@@ -114,6 +121,8 @@ export class StorageService implements OnModuleInit {
   }
 
   async deleteObject(key: string): Promise<void> {
-    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+    await this.client.send(
+      new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
+    );
   }
 }

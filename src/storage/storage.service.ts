@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- dette de typage préexistante non corrigée */
 import {
   BadRequestException,
   ForbiddenException,
@@ -61,7 +62,7 @@ export interface UploadInput {
  * Règles structurantes :
  *  - le `S3Client` est instancié UNE seule fois (provider `R2_CLIENT`, cf. module) ;
  *  - la clé d'objet ne réutilise JAMAIS le nom original (path traversal / collision /
- *    fuite d'info patient) — cf. `buildKey` ;
+ *    fuite d'info patient), cf. `buildKey` ;
  *  - la whitelist MIME et les tailles max sont appliquées CÔTÉ SERVEUR (STORAGE_POLICY) ;
  *  - on ne persiste JAMAIS d'URL présignée : seule la `key` est stockée (StoredFile).
  */
@@ -81,7 +82,9 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     this.publicBucket = this.config.getOrThrow<string>('R2_BUCKET_PUBLIC');
     this.privateBucket = this.config.getOrThrow<string>('R2_BUCKET_PRIVATE');
     // Retire un éventuel `/` final pour une concaténation propre des URLs publiques.
-    this.publicBaseUrl = this.config.getOrThrow<string>('R2_PUBLIC_URL').replace(/\/+$/, '');
+    this.publicBaseUrl = this.config
+      .getOrThrow<string>('R2_PUBLIC_URL')
+      .replace(/\/+$/, '');
   }
 
   // ─── Cycle de vie ─────────────────────────────────────────────
@@ -150,13 +153,16 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
         ContentType: file.mimetype,
       }),
     );
-    return { key, url: visibility === 'public' ? this.getPublicUrl(key) : null };
+    return {
+      key,
+      url: visibility === 'public' ? this.getPublicUrl(key) : null,
+    };
   }
 
   /**
    * URL PUT présignée : le client téléverse directement sur R2 (le fichier ne
    * transite pas par l'API). TTL = 600 s. Retourne aussi la `key` générée.
-   * `filename` n'entre pas dans la clé — il n'est conservé que pour l'affichage.
+   * `filename` n'entre pas dans la clé, il n'est conservé que pour l'affichage.
    */
   async getSignedUploadUrl(
     prefix: string,
@@ -180,7 +186,10 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** URL GET présignée sur le bucket PRIVÉ (documents médicaux). TTL = 300 s par défaut. */
-  async getSignedReadUrl(key: string, expiresIn: number = PRESIGNED_READ_TTL): Promise<string> {
+  async getSignedReadUrl(
+    key: string,
+    expiresIn: number = PRESIGNED_READ_TTL,
+  ): Promise<string> {
     return getSignedUrl(
       this.client,
       new GetObjectCommand({ Bucket: this.privateBucket, Key: key }),
@@ -195,7 +204,10 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
 
   async delete(key: string, visibility: StorageVisibility): Promise<void> {
     await this.client.send(
-      new DeleteObjectCommand({ Bucket: this.bucketNameFor(visibility), Key: key }),
+      new DeleteObjectCommand({
+        Bucket: this.bucketNameFor(visibility),
+        Key: key,
+      }),
     );
   }
 
@@ -203,11 +215,15 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
   async exists(key: string, visibility: StorageVisibility): Promise<boolean> {
     try {
       await this.client.send(
-        new HeadObjectCommand({ Bucket: this.bucketNameFor(visibility), Key: key }),
+        new HeadObjectCommand({
+          Bucket: this.bucketNameFor(visibility),
+          Key: key,
+        }),
       );
       return true;
     } catch (err: any) {
-      if (err?.$metadata?.httpStatusCode === 404 || err?.name === 'NotFound') return false;
+      if (err?.$metadata?.httpStatusCode === 404 || err?.name === 'NotFound')
+        return false;
       throw err;
     }
   }
@@ -225,7 +241,12 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     contentType: string;
     visibility: StorageVisibility;
     size?: number;
-  }): Promise<{ id: string; key: string; uploadUrl: string; expiresIn: number }> {
+  }): Promise<{
+    id: string;
+    key: string;
+    uploadUrl: string;
+    expiresIn: number;
+  }> {
     const { ownerId, prefix, filename, contentType, visibility, size } = params;
     this.assertSizeAllowed(size, visibility);
 
@@ -257,7 +278,10 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
    * existe réellement, recontrôle la taille réelle (le client ne peut pas
    * contourner la limite), puis passe le `StoredFile` en `confirmed`.
    */
-  async confirmUpload(params: { id: string; ownerId: string }): Promise<StoredFileView> {
+  async confirmUpload(params: {
+    id: string;
+    ownerId: string;
+  }): Promise<StoredFileView> {
     const { id, ownerId } = params;
     const file = await this.prisma.storedFile.findUnique({ where: { id } });
     if (!file || file.ownerId !== ownerId) {
@@ -271,7 +295,10 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     let head;
     try {
       head = await this.client.send(
-        new HeadObjectCommand({ Bucket: this.bucketNameFor(visibility), Key: file.key }),
+        new HeadObjectCommand({
+          Bucket: this.bucketNameFor(visibility),
+          Key: file.key,
+        }),
       );
     } catch {
       throw new BadRequestException(
@@ -284,7 +311,9 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     if (realSize > maxSize) {
       // Fichier trop volumineux : on nettoie l'objet et l'enregistrement.
       await this.delete(file.key, visibility).catch(() => undefined);
-      await this.prisma.storedFile.delete({ where: { id } }).catch(() => undefined);
+      await this.prisma.storedFile
+        .delete({ where: { id } })
+        .catch(() => undefined);
       throw new BadRequestException(
         `Fichier trop volumineux (${realSize} octets). Maximum ${maxSize} octets pour un fichier ${visibility}.`,
       );
@@ -292,7 +321,11 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
 
     const updated = await this.prisma.storedFile.update({
       where: { id },
-      data: { status: StoredFileStatus.CONFIRMED, confirmedAt: new Date(), size: realSize },
+      data: {
+        status: StoredFileStatus.CONFIRMED,
+        confirmedAt: new Date(),
+        size: realSize,
+      },
     });
     return this.toView(updated);
   }
@@ -316,15 +349,17 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     });
     if (!file) throw new NotFoundException('Fichier introuvable.');
     if (file.ownerId !== ownerId) {
-      throw new ForbiddenException("Ce fichier ne vous appartient pas.");
+      throw new ForbiddenException('Ce fichier ne vous appartient pas.');
     }
     if (file.status !== StoredFileStatus.CONFIRMED) {
       throw new BadRequestException(
-        "Upload non confirmé : confirmez le fichier (POST /storage/confirm) avant de le rattacher.",
+        'Upload non confirmé : confirmez le fichier (POST /storage/confirm) avant de le rattacher.',
       );
     }
     if (file.bucket !== this.bucketEnum(visibility)) {
-      throw new BadRequestException(`Ce fichier n'est pas dans l'espace « ${visibility} ».`);
+      throw new BadRequestException(
+        `Ce fichier n'est pas dans l'espace « ${visibility} ».`,
+      );
     }
   }
 
@@ -349,7 +384,9 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** URL publique pérenne d'un fichier (bucket public) à partir de son id, ou null. */
-  async getPublicUrlById(fileId: string | null | undefined): Promise<string | null> {
+  async getPublicUrlById(
+    fileId: string | null | undefined,
+  ): Promise<string | null> {
     if (!fileId) return null;
     const file = await this.prisma.storedFile.findUnique({
       where: { id: fileId },
@@ -360,7 +397,9 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Charge un `StoredFile` par id (404 sinon). Le contrôle d'accès est fait à part. */
-  async getStoredFileOrThrow(id: string): Promise<StoredFileView & { ownerId: string }> {
+  async getStoredFileOrThrow(
+    id: string,
+  ): Promise<StoredFileView & { ownerId: string }> {
     const file = await this.prisma.storedFile.findUnique({ where: { id } });
     if (!file) throw new NotFoundException('Fichier introuvable.');
     return { ...this.toView(file), ownerId: file.ownerId };
@@ -369,7 +408,7 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
   /**
    * Supprime un fichier (objet R2 + enregistrement). Propriétaire ou rôle
    * administratif uniquement. Un document médical PRIVÉ déjà confirmé n'est pas
-   * supprimable par le propriétaire (conservation) — réservé à l'administration.
+   * supprimable par le propriétaire (conservation), réservé à l'administration.
    */
   async deleteStoredFile(params: {
     id: string;
@@ -380,9 +419,12 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     if (!file) throw new NotFoundException('Fichier introuvable.');
 
     const isOwner = file.ownerId === requester.userId;
-    const isAdmin = requester.role === 'SUPER_ADMIN' || requester.role === 'ADMIN';
+    const isAdmin =
+      requester.role === 'SUPER_ADMIN' || requester.role === 'ADMIN';
     if (!isOwner && !isAdmin) {
-      throw new ForbiddenException("Vous n'êtes pas autorisé à supprimer ce fichier.");
+      throw new ForbiddenException(
+        "Vous n'êtes pas autorisé à supprimer ce fichier.",
+      );
     }
     if (
       file.status === StoredFileStatus.CONFIRMED &&
@@ -391,12 +433,14 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     ) {
       throw new ForbiddenException(
         'Les documents médicaux confirmés suivent la politique de conservation du carnet de santé ' +
-          "et ne peuvent pas être supprimés par cette voie.",
+          'et ne peuvent pas être supprimés par cette voie.',
       );
     }
 
     await this.delete(file.key, this.visibilityOf(file.bucket)).catch((e) =>
-      this.logger.warn(`Suppression R2 échouée (${file.key}) : ${(e as Error).message}`),
+      this.logger.warn(
+        `Suppression R2 échouée (${file.key}) : ${(e as Error).message}`,
+      ),
     );
     await this.prisma.storedFile.delete({ where: { id } });
   }
@@ -413,12 +457,18 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     });
     let purged = 0;
     for (const f of stale) {
-      await this.delete(f.key, this.visibilityOf(f.bucket)).catch(() => undefined);
-      await this.prisma.storedFile.delete({ where: { id: f.id } }).catch(() => undefined);
+      await this.delete(f.key, this.visibilityOf(f.bucket)).catch(
+        () => undefined,
+      );
+      await this.prisma.storedFile
+        .delete({ where: { id: f.id } })
+        .catch(() => undefined);
       purged++;
     }
     if (purged > 0) {
-      this.logger.log(`Purge stockage : ${purged} upload(s) « pending » périmé(s) supprimé(s).`);
+      this.logger.log(
+        `Purge stockage : ${purged} upload(s) « pending » périmé(s) supprimé(s).`,
+      );
     }
     return purged;
   }
@@ -448,7 +498,10 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     return cleaned || 'divers';
   }
 
-  private assertMimeAllowed(contentType: string, visibility: StorageVisibility): void {
+  private assertMimeAllowed(
+    contentType: string,
+    visibility: StorageVisibility,
+  ): void {
     const { mimes } = STORAGE_POLICY[visibility];
     if (!mimes.includes(contentType)) {
       throw new BadRequestException(
@@ -458,7 +511,10 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private assertSizeAllowed(size: number | undefined, visibility: StorageVisibility): void {
+  private assertSizeAllowed(
+    size: number | undefined,
+    visibility: StorageVisibility,
+  ): void {
     if (size == null) return;
     const { maxSize } = STORAGE_POLICY[visibility];
     if (size > maxSize) {
@@ -473,7 +529,9 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
   }
 
   private bucketEnum(visibility: StorageVisibility): StoredFileBucket {
-    return visibility === 'public' ? StoredFileBucket.PUBLIC : StoredFileBucket.PRIVATE;
+    return visibility === 'public'
+      ? StoredFileBucket.PUBLIC
+      : StoredFileBucket.PRIVATE;
   }
 
   private visibilityOf(bucket: StoredFileBucket): StorageVisibility {
@@ -501,7 +559,10 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
       status: file.status,
       createdAt: file.createdAt,
       confirmedAt: file.confirmedAt,
-      url: file.bucket === StoredFileBucket.PUBLIC ? this.getPublicUrl(file.key) : null,
+      url:
+        file.bucket === StoredFileBucket.PUBLIC
+          ? this.getPublicUrl(file.key)
+          : null,
     };
   }
 }

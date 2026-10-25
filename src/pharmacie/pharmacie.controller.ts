@@ -269,7 +269,7 @@ export class PharmacieController {
   @ApiParam({ name: 'structureId' })
   @ApiOperation({
     summary: 'Ajouter/mettre à jour un médicament en stock',
-    description: 'Upsert — crée ou met à jour le stock pour ce médicament.',
+    description: 'Upsert : crée ou met à jour le stock pour ce médicament.',
   })
   upsertStock(
     @Param('structureId') structureId: string,

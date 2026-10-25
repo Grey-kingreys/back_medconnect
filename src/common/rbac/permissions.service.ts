@@ -11,7 +11,7 @@ import {
  * Résout les permissions effectives d'un utilisateur (= permissions de son rôle).
  *
  * Choix d'archi (cf. PLAN §2.5.b) : les permissions sont résolues CÔTÉ SERVEUR à
- * chaque requête, jamais portées par le JWT — ainsi une modification de rôle par un
+ * chaque requête, jamais portées par le JWT, ainsi une modification de rôle par un
  * admin prend effet immédiatement (au plus après expiration du cache), sans attendre
  * un nouveau login. Cache Redis court (5 min), invalidé explicitement aux mutations.
  *
