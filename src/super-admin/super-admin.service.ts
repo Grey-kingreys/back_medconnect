@@ -18,6 +18,7 @@ import {
 } from 'src/common/telephone/telephone-unicite';
 import {
   assurerPointDeVente,
+  structureAPieces,
   supprimerConfigurationPharmacies,
 } from 'src/pharmacie/point-de-vente';
 import { CreateStructureDto, CreateSuperAdminDto } from './dto/super-admin.dto';
@@ -452,6 +453,15 @@ export class SuperAdminService {
 
     // Transaction pour tout supprimer proprement
     await this.prisma.$transaction(async (tx) => {
+      // Une structure qui a des ventes, un journal de stock ou de caisse ne se supprime pas (O12, D430, D522).
+      if (await structureAPieces(tx, structureId)) {
+        throw new ConflictException({
+          message:
+            'Cette structure a des ventes ou des mouvements de stock : désactivez-la.',
+          code: 'STRUCTURE_AVEC_PIECES',
+        });
+      }
+
       // 1. Supprimer tous les membres de la structure
       await tx.user.deleteMany({
         where: { structureId: structureId },

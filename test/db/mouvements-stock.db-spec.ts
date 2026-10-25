@@ -846,7 +846,7 @@ describe('Mouvements de stock et lectures recâblées sur base de test (PB08)', 
       `INSERT INTO "Medicament" ("id", "nom", "categorie", "updatedAt") VALUES ('med-test-vendu', 'Médicament vendu (test)', 'Test PB08', now())`,
     );
     await sql(
-      `INSERT INTO "LigneVente" ("id", "venteId", "medicamentId", "stockMedicamentId", "nomMedicament", "prixUnitaire", "quantite", "sousTotal") VALUES ('lv-test-vendu', 'vte-p1-1', 'med-test-vendu', 'stk-inexistant', 'Médicament vendu (test)', 100, 1, 100)`,
+      `INSERT INTO "LigneVente" ("id", "venteId", "medicamentId", "stockMedicamentId", "nomMedicament", "prixUnitaire", "quantite", "sousTotal", "nombreAffiche") VALUES ('lv-test-vendu', 'vte-p1-1', 'med-test-vendu', 'stk-inexistant', 'Médicament vendu (test)', 100, 1, 100, 1)`,
     );
     const vendu = await refus(
       pharmacie.deleteMedicament('med-test-vendu', 'usr-admin-p1'),

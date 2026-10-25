@@ -468,6 +468,9 @@ model StockMedicament {
   agregatsProduit         AgregatStockProduit[]
   conditionnementsOuverts ConditionnementOuvert[]
 
+  // Inventaires (PB09, M5)
+  lignesInventaire LigneInventaire[]
+
   @@unique([medicamentId, structureId])
 }
 
@@ -487,43 +490,82 @@ enum StatutVente {
   ANNULEE
 }
 
-// Vente au comptoir d'une pharmacie (lot 7). Jamais supprimée, seulement annulée.
-// vendeurId, annuleeParId et les identifiants des lignes sont sans clé étrangère (D109) :
-// un membre, un stock ou un médicament supprimé ne bloque rien et le reçu reste lisible.
+// Nature d'une pièce de vente (PB09, M6) : vente, annulation (O5) ou régularisation après clôture.
+enum TypePieceVente {
+  VENTE
+  ANNULATION
+  REGULARISATION
+}
+
+// Unité saisie sur une ligne de vente (PB09, M6).
+enum UniteVente {
+  BOITE
+  UNITE
+}
+
+// Vente au comptoir d'une pharmacie (lot 7) : pièce comptable immuable depuis M6 (trigger, D431).
+// Une annulation est une pièce ANNULATION qui pointe l'origine (O5, D419) ; statut, annuleeLe,
+// annuleeParId et motifAnnulation de l'origine sont gelés et dérivés en lecture (PB12).
+// vendeurId, annuleeParId et les identifiants des lignes sont sans clé étrangère (D109).
 model Vente {
-  id                 String      @id @default(uuid())
+  id                 String         @id @default(uuid())
   structureId        String
-  structure          Structure   @relation(fields: [structureId], references: [id], onDelete: Cascade)
-  numero             String      // V-AAAA-NNNNNN, séquence par pharmacie et par année
+  structure          Structure      @relation(fields: [structureId], references: [id], onDelete: Restrict)
+  pointDeVenteId     String
+  pointDeVente       PointDeVente   @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  posteId            String // ventes historiques : poste technique REPRISE (D421)
+  poste              Poste          @relation(fields: [posteId], references: [id], onDelete: Restrict)
+  sessionCaisseId    String // ventes historiques : session technique de reprise (D421)
+  sessionCaisse      SessionCaisse  @relation(fields: [sessionCaisseId], references: [id], onDelete: Restrict)
+  typePiece          TypePieceVente @default(VENTE)
+  venteOrigineId     String?        @unique // l'unicité interdit une seconde pièce sur la même origine
+  venteOrigine       Vente?         @relation("PieceLiee", fields: [venteOrigineId], references: [id], onDelete: Restrict)
+  pieceLiee          Vente?         @relation("PieceLiee")
+  numero             String // V-AAAA-NNNNNN (historique), T<ordre>-NNNNNNN, S<ordre>-<poste>-<n>, A-<numero>
+  numeroTicket       Int? // numéro pris dans le compteur ou la plage du point de vente
+  jourMetier         DateTime       @db.Date // jour de rattachement (Conakry, O10) ; historique : jour de createdAt
+  jourMetierOrigine  DateTime?      @db.Date // jour réel si la pièce est rattachée à un autre jour
+  horodatageLocal    DateTime?
+  sequencePoste      Int?
   vendeurId          String
-  vendeurNom         String      // copie « Prénom Nom » au moment de la vente
+  vendeurNom         String // copie « Prénom Nom » au moment de la vente
   clientNom          String?
   clientTelephone    String?
-  ordonnanceVerifiee Boolean     @default(false)
-  total              Int         // GNF, entier
-  statut             StatutVente @default(VALIDEE)
-  annuleeLe          DateTime?
-  annuleeParId       String?
-  motifAnnulation    String?
-  cleIdempotence     String?     // jamais renvoyée au client
+  ordonnanceVerifiee Boolean        @default(false)
+  total              Int // GNF, entier ; négatif pour une annulation
+  statut             StatutVente    @default(VALIDEE) // gelé : plus écrit après M6
+  annuleeLe          DateTime? // gelé
+  annuleeParId       String? // gelé
+  motifAnnulation    String? // gelé sur l'origine ; motif de l'annulation sur une pièce ANNULATION
+  cleIdempotence     String? // jamais renvoyée au client
   lignes             LigneVente[]
-  createdAt          DateTime    @default(now())
+  paiements          Paiement[]
+  createdAt          DateTime       @default(now())
 
   @@unique([structureId, numero])
   @@unique([structureId, cleIdempotence])
+  @@unique([pointDeVenteId, numeroTicket])
   @@index([structureId, createdAt])
+  @@index([pointDeVenteId, jourMetier])
+  @@index([sessionCaisseId])
 }
 
+// Ligne de vente, immuable depuis M6. quantite en UM, toujours égale à nombreAffiche x
+// coefficientApplique (CHECK) ; sousTotal = montant de ligne, seule référence des totaux (D409, D470).
 model LigneVente {
-  id                String @id @default(uuid())
-  venteId           String
-  vente             Vente  @relation(fields: [venteId], references: [id], onDelete: Cascade)
-  medicamentId      String
-  stockMedicamentId String
-  nomMedicament     String // copie du nom au moment de la vente
-  prixUnitaire      Int    // copie du prix du stock, GNF
-  quantite          Int
-  sousTotal         Int
+  id                  String          @id @default(uuid())
+  venteId             String
+  vente               Vente           @relation(fields: [venteId], references: [id], onDelete: Restrict)
+  medicamentId        String
+  stockMedicamentId   String
+  nomMedicament       String // copie du nom au moment de la vente
+  prixUnitaire        Int // prix appliqué par UM, GNF (affichage et contrôle)
+  quantite            Int // en UM
+  sousTotal           Int // montant de la ligne
+  uniteAffichee       UniteVente      @default(BOITE)
+  nombreAffiche       Int // nombre de boîtes ou d'UM saisi ; historique = quantite
+  coefficientApplique Int             @default(1) // coefficient de la fiche pour BOITE, 1 pour UNITE
+  allocations         AllocationLot[]
 
   @@index([venteId])
 }
@@ -594,6 +636,14 @@ model PointDeVente {
   agregatsProduit         AgregatStockProduit[]
   conditionnementsOuverts ConditionnementOuvert[]
 
+  // Caisse, pièces, réceptions et inventaires (PB09, M5 et M6)
+  sessionsCaisse   SessionCaisse[]
+  mouvementsCaisse MouvementCaisse[]
+  clotures         ClotureJournaliere[]
+  receptions       Reception[]
+  inventaires      Inventaire[]
+  ventes           Vente[]
+
   @@unique([structureId, ordre])
   @@index([structureId])
 }
@@ -616,6 +666,11 @@ model Poste {
 
   plagesTicket    PlageTicket[]
   mouvementsStock MouvementStock[]
+
+  // Caisse et synchronisation (PB09, M5 et M6)
+  sessionsCaisse    SessionCaisse[]
+  ventes            Vente[]
+  evenementsSynchro EvenementSynchro[]
 
   @@unique([pointDeVenteId, code])
   @@unique([pointDeVenteId, appareilId])
@@ -668,6 +723,13 @@ model ModePaiement {
   referenceAutorisee Boolean
   ordre              Int
   actif              Boolean @default(true)
+
+  // Caisse (PB09, M5)
+  paiements        Paiement[]
+  relevesComptage  ReleveModePaiement[]
+  mouvementsCaisse MouvementCaisse[]
+  resultatsSession ResultatSessionMode[]
+  totauxCloture    TotalClotureMode[]
 }
 
 // Coupures comptées en caisse (O8 et correction du porteur : billets de 20 000 à 500 GNF).
@@ -692,7 +754,8 @@ model Fournisseur {
   actif       Boolean   @default(true)
   createdAt   DateTime  @default(now())
 
-  lots LotStock[]
+  lots       LotStock[]
+  receptions Reception[]
 
   @@unique([structureId, nom])
 }
@@ -712,6 +775,8 @@ model Anomalie {
   traiteeLe             DateTime?
   traiteeParId          String?
   commentaireTraitement String?
+
+  lignesInventaire LigneInventaire[]
 
   @@index([pointDeVenteId, statut, creeLe])
 }
@@ -757,7 +822,8 @@ model LotStock {
   coefficientReception Int // UM par boîte à la réception, base du reliquat
   fournisseurId        String?
   fournisseur          Fournisseur?    @relation(fields: [fournisseurId], references: [id], onDelete: Restrict)
-  receptionId          String? // clé étrangère vers Reception posée par M5 (PB09)
+  receptionId          String?
+  reception            Reception?      @relation(fields: [receptionId], references: [id], onDelete: Restrict)
   dateReception        DateTime
   lotTechnique         Boolean         @default(false)
   auteurId             String? // nul = système, sans clé étrangère (D109)
@@ -766,6 +832,7 @@ model LotStock {
   mouvements       MouvementStock[]
   agregat          AgregatStockLot?
   conditionnements ConditionnementOuvert[]
+  lignesInventaire LigneInventaire[]
 
   @@index([stockMedicamentId, pointDeVenteId, dateExpiration, dateReception])
   @@index([pointDeVenteId, dateExpiration])
@@ -841,6 +908,300 @@ model ConditionnementOuvert {
   fermeLe                  DateTime?
 
   @@unique([stockMedicamentId, lotId, pointDeVenteId], where: raw("\"fermeLe\" IS NULL"))
+  @@index([lotId])
+}
+
+// ====== Tranche pharmacie 1 : caisse, réceptions, inventaires et synchronisation (PB09, M5) ======
+
+enum StatutSession {
+  OUVERTE
+  FERMEE
+  INCLUSE_DANS_CLOTURE
+}
+
+enum MomentComptage {
+  OUVERTURE
+  FERMETURE
+}
+
+enum TypeMouvementCaisse {
+  PRELEVEMENT
+  APPORT
+  REMBOURSEMENT
+}
+
+enum StatutEvenementSynchro {
+  APPLIQUE
+  EN_ATTENTE
+  REJETE
+}
+
+// Session de caisse d'un poste : une seule OUVERTE par poste (index partiel). Transitions permises
+// par trigger : OUVERTE vers FERMEE, FERMEE vers INCLUSE_DANS_CLOTURE. La session technique de
+// reprise (une par point de vente, poste REPRISE, D421) porte les ventes historiques et ne change
+// jamais. Le fond de caisse est dérivé du comptage d'ouverture, jamais stocké.
+model SessionCaisse {
+  id                   String              @id @default(uuid()) // UUID client accepté (D427)
+  pointDeVenteId       String
+  pointDeVente         PointDeVente        @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  posteId              String
+  poste                Poste               @relation(fields: [posteId], references: [id], onDelete: Restrict)
+  utilisateurId        String? // sans clé étrangère (D109) ; nul seulement pour la session technique
+  utilisateurNom       String // copie « Prénom Nom » à l'ouverture
+  statut               StatutSession       @default(OUVERTE)
+  technique            Boolean             @default(false)
+  jourMetier           DateTime            @db.Date // jour d'ouverture (Conakry), jour de toutes ses ventes (D435)
+  jourMetierOrigine    DateTime?           @db.Date
+  ouverteLe            DateTime            @default(now())
+  ouverteLeLocal       DateTime?
+  fermeeLe             DateTime?
+  fermeeLeLocal        DateTime?
+  evenementOuvertureId String              @unique
+  evenementFermetureId String?             @unique
+  commentaireEcart     String?
+  commentaireParId     String? // sans clé étrangère
+  clotureJournaliereId String?
+  clotureJournaliere   ClotureJournaliere? @relation(fields: [clotureJournaliereId], references: [id], onDelete: Restrict)
+
+  comptages        ComptageCaisse[]
+  mouvementsCaisse MouvementCaisse[]
+  paiements        Paiement[]
+  resultats        ResultatSessionMode[]
+  ventes           Vente[]
+
+  @@unique([posteId], map: "SessionCaisse_posteId_ouverte_key", where: raw("\"statut\" = 'OUVERTE'"))
+  @@index([pointDeVenteId, jourMetier])
+  @@index([clotureJournaliereId])
+}
+
+// Comptage des espèces à l'ouverture ou à la fermeture d'une session, immuable. Par coupure
+// seulement (LigneComptage), aucun champ « pièces et autres » (CORRECTIONS-PORTEUR.md, point 1).
+model ComptageCaisse {
+  id              String         @id @default(uuid()) // UUID client accepté (D427)
+  sessionCaisseId String
+  sessionCaisse   SessionCaisse  @relation(fields: [sessionCaisseId], references: [id], onDelete: Restrict)
+  moment          MomentComptage
+  totalEspeces    Int // somme des lignes (valeurFaciale x nombre), calculée et vérifiée par le service
+  auteurId        String // sans clé étrangère (D109)
+  evenementId     String         @unique
+  horodatageLocal DateTime?
+  createdAt       DateTime       @default(now())
+
+  lignes  LigneComptage[]
+  releves ReleveModePaiement[]
+
+  @@unique([sessionCaisseId, moment])
+}
+
+// Ligne d'un comptage : nombre de billets d'une coupure (copie de la valeur faciale), immuable.
+model LigneComptage {
+  id            String         @id @default(uuid())
+  comptageId    String
+  comptage      ComptageCaisse @relation(fields: [comptageId], references: [id], onDelete: Restrict)
+  valeurFaciale Int
+  nombre        Int
+
+  @@unique([comptageId, valeurFaciale])
+}
+
+// Total d'un mode de paiement mobile relevé sur le compte marchand à la fermeture, immuable.
+model ReleveModePaiement {
+  id             String         @id @default(uuid())
+  comptageId     String
+  comptage       ComptageCaisse @relation(fields: [comptageId], references: [id], onDelete: Restrict)
+  modePaiementId String
+  modePaiement   ModePaiement   @relation(fields: [modePaiementId], references: [id], onDelete: Restrict)
+  montantDeclare Int
+
+  @@unique([comptageId, modePaiementId])
+}
+
+// Prélèvement, apport ou remboursement dans une session, motivé et attribué, immuable.
+model MouvementCaisse {
+  id                String              @id @default(uuid()) // UUID client accepté (D427)
+  sessionCaisseId   String
+  sessionCaisse     SessionCaisse       @relation(fields: [sessionCaisseId], references: [id], onDelete: Restrict)
+  pointDeVenteId    String
+  pointDeVente      PointDeVente        @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  type              TypeMouvementCaisse
+  modePaiementId    String
+  modePaiement      ModePaiement        @relation(fields: [modePaiementId], references: [id], onDelete: Restrict)
+  montant           Int // GNF, strictement positif
+  motif             String
+  auteurId          String // sans clé étrangère (D109)
+  horodatageServeur DateTime            @default(now())
+  horodatageLocal   DateTime?
+  evenementId       String              @unique
+
+  @@index([sessionCaisseId])
+}
+
+// Paiement d'une pièce de vente, immuable ; montant signé (négatif pour une annulation).
+// Invariant tenu par le service : somme des paiements d'une vente = Vente.total.
+model Paiement {
+  id               String        @id @default(uuid())
+  venteId          String
+  vente            Vente         @relation(fields: [venteId], references: [id], onDelete: Restrict)
+  sessionCaisseId  String
+  sessionCaisse    SessionCaisse @relation(fields: [sessionCaisseId], references: [id], onDelete: Restrict)
+  modePaiementId   String
+  modePaiement     ModePaiement  @relation(fields: [modePaiementId], references: [id], onDelete: Restrict)
+  montant          Int
+  referenceExterne String?
+  montantRecu      Int? // espèces remises par le client, pour le rendu du ticket
+  createdAt        DateTime      @default(now())
+
+  @@index([venteId])
+  @@index([sessionCaisseId, modePaiementId])
+}
+
+// Photographie du théorique, du compté et de l'écart d'un mode à la fermeture d'une session, immuable.
+model ResultatSessionMode {
+  id              String        @id @default(uuid())
+  sessionCaisseId String
+  sessionCaisse   SessionCaisse @relation(fields: [sessionCaisseId], references: [id], onDelete: Restrict)
+  modePaiementId  String
+  modePaiement    ModePaiement  @relation(fields: [modePaiementId], references: [id], onDelete: Restrict)
+  theorique       Int
+  compte          Int? // nul : non rapproché
+  ecart           Int? // compte - theorique, signé, jamais corrigé
+  createdAt       DateTime      @default(now())
+
+  @@unique([sessionCaisseId, modePaiementId])
+}
+
+// Clôture d'une journée métier d'un point de vente : son existence est le verrou, immuable.
+model ClotureJournaliere {
+  id              String       @id @default(uuid())
+  pointDeVenteId  String
+  pointDeVente    PointDeVente @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  jourMetier      DateTime     @db.Date
+  clotureParId    String // sans clé étrangère (D109)
+  clotureeLe      DateTime     @default(now())
+  forcee          Boolean      @default(false)
+  motifForcage    String?
+  postesManquants Json         @default("[]") // [{ posteId, code, libelle }]
+
+  sessions SessionCaisse[]
+  totaux   TotalClotureMode[]
+
+  @@unique([pointDeVenteId, jourMetier])
+}
+
+// Totaux par mode d'une clôture, immuables.
+model TotalClotureMode {
+  id             String             @id @default(uuid())
+  clotureId      String
+  cloture        ClotureJournaliere @relation(fields: [clotureId], references: [id], onDelete: Restrict)
+  modePaiementId String
+  modePaiement   ModePaiement       @relation(fields: [modePaiementId], references: [id], onDelete: Restrict)
+  theorique      Int
+  compte         Int?
+  ecart          Int?
+
+  @@unique([clotureId, modePaiementId])
+}
+
+// Réception d'une livraison, immuable ; ses lignes sont les lots créés (LotStock.receptionId).
+model Reception {
+  id             String       @id @default(uuid())
+  pointDeVenteId String
+  pointDeVente   PointDeVente @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  fournisseurId  String?
+  fournisseur    Fournisseur? @relation(fields: [fournisseurId], references: [id], onDelete: Restrict)
+  reference      String? // bon de livraison
+  recueLe        DateTime
+  auteurId       String // sans clé étrangère (D109)
+  createdAt      DateTime     @default(now())
+
+  lots LotStock[]
+
+  @@index([pointDeVenteId, recueLe])
+}
+
+// Inventaire d'un point de vente, immuable avec ses lignes.
+model Inventaire {
+  id             String       @id @default(uuid())
+  pointDeVenteId String
+  pointDeVente   PointDeVente @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  auteurId       String // sans clé étrangère (D109)
+  commentaire    String?
+  createdAt      DateTime     @default(now())
+
+  lignes LigneInventaire[]
+
+  @@index([pointDeVenteId, createdAt])
+}
+
+// Ligne d'inventaire par lot, immuable ; ecart = quantiteComptee - quantiteTheorique (CHECK).
+model LigneInventaire {
+  id                String          @id @default(uuid())
+  inventaireId      String
+  inventaire        Inventaire      @relation(fields: [inventaireId], references: [id], onDelete: Restrict)
+  stockMedicamentId String
+  stockMedicament   StockMedicament @relation(fields: [stockMedicamentId], references: [id], onDelete: Restrict)
+  lotId             String? // nul seulement pour une fiche sans lot (PB15)
+  lot               LotStock?       @relation(fields: [lotId], references: [id], onDelete: Restrict)
+  quantiteTheorique Int
+  quantiteComptee   Int
+  ecart             Int
+  sousTolerance     Boolean
+  anomalieId        String?
+  anomalie          Anomalie?       @relation(fields: [anomalieId], references: [id], onDelete: Restrict)
+
+  @@index([inventaireId])
+  @@index([lotId])
+}
+
+// Événement de synchronisation reçu d'un poste desktop. Seule transition permise (trigger) :
+// EN_ATTENTE vers APPLIQUE ou REJETE (avec son résultat).
+model EvenementSynchro {
+  id              String                 @id @default(uuid())
+  evenementId     String                 @unique // UUID client
+  posteId         String
+  poste           Poste                  @relation(fields: [posteId], references: [id], onDelete: Restrict)
+  sequence        Int
+  type            String
+  utilisateurId   String? // nul seulement pour un événement illisible (PB18)
+  horodatageLocal DateTime?
+  recuLe          DateTime               @default(now())
+  statut          StatutEvenementSynchro
+  empreinte       String // sha256 du corps canonique
+  corps           Json
+  resultat        Json?
+
+  @@unique([posteId, sequence])
+  @@index([posteId, statut])
+}
+
+// ====== Tranche pharmacie 1 : allocations de lots des lignes de vente (PB09, M6) ======
+
+enum StatutAllocation {
+  DEFINITIVE
+  PROVISOIRE
+  REMPLACEE
+}
+
+// Allocation d'une ligne de vente à un lot (copie du lot, sans clé étrangère). Seule mise à jour
+// permise (trigger) : PROVISOIRE vers REMPLACEE. Lot présent si et seulement si DEFINITIVE.
+model AllocationLot {
+  id                  String           @id @default(uuid())
+  ligneVenteId        String
+  ligneVente          LigneVente       @relation(fields: [ligneVenteId], references: [id], onDelete: Restrict)
+  lotId               String? // copie sans clé étrangère ; nul pour une allocation provisoire
+  numeroLot           String?
+  dateExpiration      DateTime?        @db.Date
+  quantite            Int // UM, signée (négative pour une annulation)
+  coutUnitaire        Int // copie du coût du lot à la sortie, GNF par UM
+  lotTechnique        Boolean          @default(false)
+  statut              StatutAllocation
+  remplaceeParPieceId String?
+  sortieManuelle      Boolean          @default(false)
+  motif               String?
+  auteurId            String? // nul = système, sans clé étrangère (D109)
+  createdAt           DateTime         @default(now())
+
+  @@index([ligneVenteId])
   @@index([lotId])
 }
 

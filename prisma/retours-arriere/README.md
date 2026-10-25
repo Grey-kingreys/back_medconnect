@@ -9,6 +9,12 @@ tranche pharmacie. Il défait la migration du même nom.
 2. Marquer la migration comme annulée : `npx prisma migrate resolve --rolled-back <nom>`.
 3. Redéployer la version de code précédente.
 
+## Ordre
+
+Défaire de la plus récente à la plus ancienne : M6 (`20261026140000_pharmacie_t1_ventes_pieces`),
+puis M5 (`20261026130000_pharmacie_t1_caisse`, refusé tant que M6 est en place), puis M4, M3, M2,
+M1. Chaque fichier liste en tête ce qu'il perd.
+
 ## Vérification
 
 Chaque fichier est testé par le harnais (`npm run test:db`) : migration en haut, retour

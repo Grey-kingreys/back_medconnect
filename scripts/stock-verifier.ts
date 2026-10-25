@@ -1,6 +1,6 @@
 /**
  * Vérifie, en lecture seule, la cohérence du journal de stock : agrégats contre mouvements,
- * lots au solde négatif, conditionnements ouverts contre reliquat, plages de tickets superposées.
+ * lots au solde négatif, conditionnements ouverts contre reliquat, plages de tickets superposées, allocations des lignes de vente.
  *
  * Usage (dev) : docker compose exec -T backend npm run stock:verifier
  * Usage (production) :
@@ -75,11 +75,18 @@ async function principal(): Promise<void> {
       rapport.plagesSuperposees,
       (e) => `point de vente ${e.pointDeVenteId} | ${e.plageA} et ${e.plageB}`,
     );
+    console.log(
+      `Lignes de vente dont les allocations définitives diffèrent de la quantité : ${rapport.allocations.nombre}`,
+    );
+    afficher(
+      rapport.allocations,
+      (e) => `${e.ligneVenteId} | quantité ${e.quantite} | allouée ${e.alloue}`,
+    );
     if (rapport.totalAnomalies === 0) {
       console.log('Résultat : aucune anomalie.');
     } else {
       console.log(
-        `Résultat : ${rapport.totalAnomalies} anomalie(s). Agrégats et conditionnements : lancer stock:reconstruire ; lots négatifs et plages : analyse requise.`,
+        `Résultat : ${rapport.totalAnomalies} anomalie(s). Agrégats et conditionnements : lancer stock:reconstruire ; lots négatifs, plages et allocations : analyse requise.`,
       );
       process.exitCode = 1;
     }

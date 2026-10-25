@@ -36,7 +36,12 @@ export interface RapportVerification {
     plageA: string;
     plageB: string;
   }>;
-  totalAnomalies: number; // somme des cinq `nombre`
+  allocations: Echantillon<{
+    ligneVenteId: string;
+    quantite: number;
+    alloue: number;
+  }>;
+  totalAnomalies: number; // somme des six `nombre`
 }
 
 export interface BilanReconstruction {
@@ -144,6 +149,17 @@ FROM "PlageTicket" a
 JOIN "PlageTicket" b
   ON b."pointDeVenteId" = a."pointDeVenteId" AND a."id" < b."id" AND a."debut" <= b."fin" AND b."debut" <= a."fin"
 ORDER BY 1, 2, 3`;
+
+const SQL_VERIFIER_TABLE_ALLOCATIONS = `SELECT to_regclass('"AllocationLot"') IS NOT NULL AS "present"`;
+
+const SQL_VERIFIER_ALLOCATIONS = `
+SELECT l."id" AS "ligneVenteId", l."quantite" AS "quantite", COALESCE(sum(a."quantite") FILTER (WHERE a."statut" = 'DEFINITIVE'), 0)::int AS "alloue"
+FROM "LigneVente" l
+JOIN "AllocationLot" a ON a."ligneVenteId" = l."id"
+GROUP BY l."id", l."quantite"
+HAVING count(*) FILTER (WHERE a."statut" = 'PROVISOIRE') = 0
+   AND COALESCE(sum(a."quantite") FILTER (WHERE a."statut" = 'DEFINITIVE'), 0) <> l."quantite"
+ORDER BY l."id"`;
 
 const SQL_RECONSTRUIRE_PRODUIT = `
 INSERT INTO "AgregatStockProduit" ("stockMedicamentId", "pointDeVenteId", "quantite", "misAJourLe")
@@ -289,6 +305,18 @@ export async function verifierStock(
       plageA: string;
       plageB: string;
     }>(SQL_VERIFIER_PLAGES);
+    const tableAllocations = await client.query<{ present: boolean }>(
+      SQL_VERIFIER_TABLE_ALLOCATIONS,
+    );
+    const allocations = tableAllocations.rows[0].present
+      ? (
+          await client.query<{
+            ligneVenteId: string;
+            quantite: number;
+            alloue: number;
+          }>(SQL_VERIFIER_ALLOCATIONS)
+        ).rows
+      : [];
 
     const rapport: RapportVerification = {
       agregatsProduit: echantillon(produit.rows),
@@ -296,6 +324,7 @@ export async function verifierStock(
       lotsNegatifs: echantillon(negatifs.rows),
       conditionnements: echantillon(conditionnements.rows),
       plagesSuperposees: echantillon(plages.rows),
+      allocations: echantillon(allocations),
       totalAnomalies: 0,
     };
     rapport.totalAnomalies =
@@ -303,7 +332,8 @@ export async function verifierStock(
       rapport.agregatsLot.nombre +
       rapport.lotsNegatifs.nombre +
       rapport.conditionnements.nombre +
-      rapport.plagesSuperposees.nombre;
+      rapport.plagesSuperposees.nombre +
+      rapport.allocations.nombre;
     return rapport;
   } finally {
     await terminerLectureSeule(client);

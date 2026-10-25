@@ -11,6 +11,7 @@ function creerTx() {
     agregatStockProduit: modele(),
     mouvementStock: modele(),
     lotStock: modele(),
+    reception: modele(),
   };
 }
 
@@ -26,6 +27,7 @@ describe('purgerStockPharmacies', () => {
     expect(tx.agregatStockProduit.deleteMany).not.toHaveBeenCalled();
     expect(tx.mouvementStock.deleteMany).not.toHaveBeenCalled();
     expect(tx.lotStock.deleteMany).not.toHaveBeenCalled();
+    expect(tx.reception.deleteMany).not.toHaveBeenCalled();
   });
 
   it("pose le contournement, supprime dans l'ordre des dépendances, puis le retire", async () => {
@@ -42,6 +44,7 @@ describe('purgerStockPharmacies', () => {
       tx.agregatStockProduit,
       tx.mouvementStock,
       tx.lotStock,
+      tx.reception,
     ]) {
       expect(modele.deleteMany).toHaveBeenCalledTimes(1);
       expect(modele.deleteMany).toHaveBeenCalledWith(filtre);
@@ -61,6 +64,7 @@ describe('purgerStockPharmacies', () => {
       tx.agregatStockProduit.deleteMany.mock.invocationCallOrder[0],
       tx.mouvementStock.deleteMany.mock.invocationCallOrder[0],
       tx.lotStock.deleteMany.mock.invocationCallOrder[0],
+      tx.reception.deleteMany.mock.invocationCallOrder[0],
       tx.$queryRaw.mock.invocationCallOrder[1],
     ];
     expect(ordre).toEqual([...ordre].sort((a, b) => a - b));

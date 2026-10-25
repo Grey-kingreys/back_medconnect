@@ -541,6 +541,34 @@ describe('DemoSeeder', () => {
       ).toBeLessThan(prisma.structure.deleteMany.mock.invocationCallOrder[0]);
     });
 
+    it('purge : pièces de caisse et de vente avant le journal de stock, réceptions après les lots', async () => {
+      process.env.DEMO_MODE = 'true';
+      prisma.structure.findMany.mockResolvedValue([{ id: 's-pharma' }]);
+      prisma.user.deleteMany.mockResolvedValue({ count: 0 });
+      prisma.structure.deleteMany.mockResolvedValue({ count: 0 });
+
+      await seeder.reinitialiserJeuDeDonnees();
+
+      expect(prisma.vente.deleteMany).toHaveBeenCalledWith({
+        where: {
+          structureId: { in: ['s-pharma'] },
+          venteOrigineId: { not: null },
+        },
+      });
+      expect(prisma.vente.deleteMany).toHaveBeenCalledWith({
+        where: { structureId: { in: ['s-pharma'] } },
+      });
+      const ordre = [
+        prisma.vente.deleteMany.mock.invocationCallOrder[0],
+        prisma.sessionCaisse.deleteMany.mock.invocationCallOrder[0],
+        prisma.lotStock.deleteMany.mock.invocationCallOrder[0],
+        prisma.reception.deleteMany.mock.invocationCallOrder[0],
+        prisma.pointDeVente.deleteMany.mock.invocationCallOrder[0],
+      ];
+      expect(ordre).toEqual([...ordre].sort((a, b) => a - b));
+      expect(new Set(ordre).size).toBe(ordre.length);
+    });
+
     it("ne supprime aucun journal d'audit si aucun compte démo n'existe", async () => {
       process.env.DEMO_MODE = 'true';
       prisma.user.deleteMany.mockResolvedValue({ count: 0 });

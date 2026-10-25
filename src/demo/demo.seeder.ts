@@ -33,6 +33,7 @@ import {
   supprimerConfigurationPharmacies,
 } from 'src/pharmacie/point-de-vente';
 import { purgerStockPharmacies } from 'src/pharmacie/stock/purge-stock';
+import { purgerPiecesPharmacies } from 'src/pharmacie/caisse/purge-pieces';
 
 const MINUTE = 60_000;
 
@@ -176,8 +177,9 @@ export class DemoSeeder implements OnApplicationBootstrap {
    *
    * Périmètre : comptes et structures dont l'email est en `@demo.medconnecte.gn`.
    * Les journaux d'audit de ces comptes sont supprimés explicitement (leur clé
-   * étrangère est en SET NULL), de même que le journal de stock (lots, mouvements,
-   * agrégats, conditionnements, D503) et la configuration de caisse des
+   * étrangère est en SET NULL), de même que les pièces de caisse et de vente (D523),
+   * le journal de stock (lots, mouvements, agrégats, conditionnements, réceptions,
+   * D503) et la configuration de caisse des
    * pharmacies (points de vente, postes, compteurs, plages, paramètres,
    * fournisseurs, anomalies : clés étrangères en Restrict) ; tout le reste suit les `onDelete: Cascade` du
    * schéma : profil, carnet (consultations, ordonnances, analyses, vaccinations),
@@ -203,6 +205,11 @@ export class DemoSeeder implements OnApplicationBootstrap {
       where: filtre,
       select: { id: true },
     });
+    // Pièces de caisse et de vente des pharmacies démo (immuables, clés étrangères en Restrict, D523).
+    await purgerPiecesPharmacies(
+      tx,
+      structuresDemo.map((s) => s.id),
+    );
     // Journal de stock des pharmacies démo (lots en Restrict vers les points de vente, D503).
     await purgerStockPharmacies(
       tx,

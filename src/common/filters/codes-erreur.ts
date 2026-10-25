@@ -68,6 +68,8 @@ export const CODES_ERREUR = [
   'DATE_PEREMPTION_REQUISE',
   // Médicament du catalogue déjà utilisé par un lot, un mouvement ou une vente (409).
   'MEDICAMENT_UTILISE',
+  // Structure qui a des ventes, un journal de stock ou de caisse : suppression refusée, la désactiver (409).
+  'STRUCTURE_AVEC_PIECES',
 ] as const;
 
 export type CodeErreur = (typeof CODES_ERREUR)[number];

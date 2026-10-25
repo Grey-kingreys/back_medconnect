@@ -318,6 +318,7 @@ export class VenteService {
         nomMedicament: stock.medicament.nom,
         prixUnitaire,
         quantite: l.quantite,
+        nombreAffiche: l.quantite,
         sousTotal: prixUnitaire * l.quantite,
       };
     });
@@ -332,19 +333,25 @@ export class VenteService {
     }
 
     // La vente est créée avant les retraits : un rejeu simultané de la même clé échoue ici.
+    // Entre PB09 et PB11, ni point de vente, ni poste, ni session, ni jour métier : l'insertion
+    // échoue en base (colonnes non nulles), comme le compteur gelé depuis M4 (D505, D524).
+    const donneesVente: Omit<
+      Prisma.VenteUncheckedCreateInput,
+      'pointDeVenteId' | 'posteId' | 'sessionCaisseId' | 'jourMetier'
+    > = {
+      structureId,
+      numero: formaterNumero(annee, dernierNumero),
+      vendeurId: user.id,
+      vendeurNom: `${user.prenom} ${user.nom}`.trim(),
+      clientNom: dto.clientNom?.trim() || null,
+      clientTelephone: dto.clientTelephone?.trim() || null,
+      ordonnanceVerifiee: dto.ordonnanceVerifiee === true,
+      total,
+      cleIdempotence: cle,
+      lignes: { create: lignes },
+    };
     const vente = await tx.vente.create({
-      data: {
-        structureId,
-        numero: formaterNumero(annee, dernierNumero),
-        vendeurId: user.id,
-        vendeurNom: `${user.prenom} ${user.nom}`.trim(),
-        clientNom: dto.clientNom?.trim() || null,
-        clientTelephone: dto.clientTelephone?.trim() || null,
-        ordonnanceVerifiee: dto.ordonnanceVerifiee === true,
-        total,
-        cleIdempotence: cle,
-        lignes: { create: lignes },
-      },
+      data: donneesVente as Prisma.VenteUncheckedCreateInput,
       include: { lignes: true },
     });
 

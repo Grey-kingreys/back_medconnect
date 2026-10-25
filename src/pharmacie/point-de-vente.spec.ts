@@ -1,6 +1,7 @@
 import type { Prisma } from 'generated/prisma/client';
 import {
   assurerPointDeVente,
+  structureAPieces,
   supprimerConfigurationPharmacies,
 } from './point-de-vente';
 
@@ -8,6 +9,7 @@ describe('Point de vente : fonctions communes', () => {
   const MODELES_SUPPRESSION = [
     'anomalie',
     'plageTicket',
+    'sessionCaisse',
     'poste',
     'compteurTicket',
     'pointDeVente',
@@ -38,6 +40,8 @@ describe('Point de vente : fonctions communes', () => {
       anomalie: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
       plageTicket: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
       fournisseur: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      sessionCaisse: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      $queryRaw: jest.fn(),
     };
   }
 
@@ -111,6 +115,12 @@ describe('Point de vente : fonctions communes', () => {
     expect(tx.pointDeVente.deleteMany).toHaveBeenCalledWith({
       where: { structureId: { in: ['s1', 's2'] } },
     });
+    expect(tx.sessionCaisse.deleteMany).toHaveBeenCalledWith({
+      where: {
+        technique: true,
+        pointDeVente: { structureId: { in: ['s1', 's2'] } },
+      },
+    });
   });
 
   it('4. supprimerConfigurationPharmacies : liste vide, aucune requête', async () => {
@@ -119,5 +129,33 @@ describe('Point de vente : fonctions communes', () => {
     for (const m of MODELES_SUPPRESSION) {
       expect(tx[m].deleteMany).not.toHaveBeenCalled();
     }
+  });
+
+  it('5. structureAPieces : lit le booléen de la requête, faux sans ligne', async () => {
+    const tx = creerTx();
+    tx.$queryRaw.mockResolvedValueOnce([{ aDesPieces: true }]);
+    expect(await structureAPieces(comme(tx), 'str-1')).toBe(true);
+
+    tx.$queryRaw.mockResolvedValueOnce([{ aDesPieces: false }]);
+    expect(await structureAPieces(comme(tx), 'str-1')).toBe(false);
+
+    tx.$queryRaw.mockResolvedValueOnce([]);
+    expect(await structureAPieces(comme(tx), 'str-1')).toBe(false);
+
+    const appel = tx.$queryRaw.mock.calls[0] as [string[], ...string[]];
+    const texte = appel[0].join('');
+    for (const attendu of [
+      '"Vente"',
+      '"LotStock"',
+      '"MouvementStock"',
+      'NOT s."technique"',
+      '"ClotureJournaliere"',
+      '"Reception"',
+      '"Inventaire"',
+      '"EvenementSynchro"',
+    ]) {
+      expect(texte).toContain(attendu);
+    }
+    expect(appel.slice(1)).toEqual(Array(8).fill('str-1'));
   });
 });
