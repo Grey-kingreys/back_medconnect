@@ -12,7 +12,7 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | ID | Tâche | Tier | Statut | Tent. |
 |----|-------|------|--------|-------|
 | PB01 | Harnais de base de test, `npm run test:db` (tasks/PB01-harnais-base-de-test.md) | dur | validé (D456, D457) | 1 |
-| PB02 | Non-régression des alertes et des lectures, instantanés avant recâblage | spécifié | à faire | 0 |
+| PB02 | Non-régression des alertes et des lectures, instantanés avant recâblage (tasks/PB02-non-regression-lectures.md) | spécifié | à faire | 0 |
 | PB03 | Permissions T1, contrôle d'accès unifié, `masquerCouts`, migration M1 | spécifié | à faire | 0 |
 | PB04 | Règles pures du domaine et vecteurs de test | dur | à faire | 0 |
 | PB05 | Points de vente, postes et référentiels, migration M2 | spécifié | à faire | 0 |
@@ -43,8 +43,8 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 
 ## Dernières décisions (5 max, historique complet dans decisions.md)
 
-- D448 Harnais : chaque fichier SQL envoyé en une seule requête simple `pg`, comme le moteur de Prisma (révisable)
-- D449 Jeu « format actuel » en SQL brut figé, chargé juste après `20261022120000_ventes_pharmacie` (plan)
-- D450 Base jetable `mc_test_<12 hex>`, créée et supprimée par la base `postgres`, garde de préfixe (révisable)
-- D451 Transaction de Prisma prouvée par un vrai `prisma migrate deploy --config` sur une base vide (plan)
-- D454 Aucune URL ni partie d'URL affichée par les tests ou le harnais (convention)
+- D456 Prisma n'enveloppe pas une migration en transaction : `BEGIN;`/`COMMIT;` explicites et test statique (plan)
+- D458 Instantanés PB02 en JSON, projection sur leurs clés, jamais régénérés sans décision du chef (révisable)
+- D459 Instantanés normalisés : dates relatives à J, volatils, tri stable dans les groupes (révisable)
+- D460 Divergences attendues à traiter dans PB08 : périmés exclus de la recherche, date des fiches sans lot (plan)
+- D462 Changement de constructeur : seul le bloc de construction du test PB02 est modifié (convention)
