@@ -8,6 +8,8 @@ import {
 } from 'src/pharmacie/fiche-produit.service';
 import { cheminsCout } from 'src/pharmacie/masquer-couts';
 import { PharmacieService } from 'src/pharmacie/pharmacie.service';
+import { MouvementsStockService } from 'src/pharmacie/stock/mouvements-stock.service';
+import type { PermissionsService } from 'src/common/rbac/permissions.service';
 import { NotificationsService } from 'src/notifications/notifications.service';
 import { PrismaService } from 'src/common/services/prisma.service';
 import {
@@ -53,10 +55,15 @@ describe('Fiche produit étendue sur base de test (PB06)', () => {
     prisma = creerPrismaDeTest(base);
     const acces = new AccesPharmacieService(prisma);
     service = new FicheProduitService(prisma, acces);
+    const permissionsFactices = {
+      getUserPermissions: () => Promise.resolve([] as string[]),
+    } as unknown as PermissionsService;
     pharmacie = new PharmacieService(
       prisma,
       new NotificationsService(prisma),
       acces,
+      new MouvementsStockService(),
+      permissionsFactices,
     );
   });
 

@@ -231,7 +231,11 @@ export class PharmacieController {
   @Delete('catalogue/:medicamentId')
   @ApiBearerAuth()
   @ApiParam({ name: 'medicamentId' })
-  @ApiOperation({ summary: 'Supprimer un médicament du catalogue (Admin)' })
+  @ApiOperation({
+    summary: 'Supprimer un médicament du catalogue (Admin)',
+    description:
+      'Refusé (409 MEDICAMENT_UTILISE) si une pharmacie a un lot, un mouvement ou une vente de ce médicament.',
+  })
   deleteMedicament(
     @Param('medicamentId') medicamentId: string,
     @Req() req: any,
@@ -269,7 +273,8 @@ export class PharmacieController {
   @ApiParam({ name: 'structureId' })
   @ApiOperation({
     summary: 'Ajouter/mettre à jour un médicament en stock',
-    description: 'Upsert : crée ou met à jour le stock pour ce médicament.',
+    description:
+      'Crée ou met à jour la fiche (prix de la boîte, notes) et la désarchive. quantite est en unités minimales : sans lot en stock, une quantité positive crée un lot (date de péremption obligatoire sauf sansPeremption, 400 DATE_PEREMPTION_REQUISE) ; avec un seul lot, un mouvement INVENTAIRE amène le stock à la quantité saisie et dateExpiration corrige la date du lot ; avec plusieurs lots, une autre quantité ou une autre date est refusée (409 LOT_REQUIS). Réponse : fiche lue et avertissements.',
   })
   upsertStock(
     @Param('structureId') structureId: string,
@@ -286,9 +291,9 @@ export class PharmacieController {
   @ApiParam({ name: 'structureId' })
   @ApiParam({ name: 'stockId' })
   @ApiOperation({
-    summary: 'Ajuster la quantité en stock',
+    summary: "Corriger la quantité d'un lot",
     description:
-      'Passer une variation positive (réception) ou négative (dispensation).',
+      "Variation signée non nulle en unités minimales sur un lot (lotId facultatif si le médicament n'a qu'un lot en stock), motif obligatoire de 3 à 300 caractères (400 MOTIF_REQUIS). Écrit un mouvement CORRECTION. 409 LOT_REQUIS, 409 STOCK_LOT_NEGATIF, 404 si la fiche ou le lot est introuvable.",
   })
   updateQuantite(
     @Param('structureId') structureId: string,
@@ -310,7 +315,11 @@ export class PharmacieController {
   @ApiBearerAuth()
   @ApiParam({ name: 'structureId' })
   @ApiParam({ name: 'stockId' })
-  @ApiOperation({ summary: 'Retirer un médicament du stock' })
+  @ApiOperation({
+    summary: 'Archiver un médicament du stock',
+    description:
+      'Archivage, jamais de suppression : la fiche sort des listes, de la vente et de la recherche publique, son journal est conservé. Une nouvelle saisie de la fiche (POST) la désarchive.',
+  })
   removeStock(
     @Param('structureId') structureId: string,
     @Param('stockId') stockId: string,

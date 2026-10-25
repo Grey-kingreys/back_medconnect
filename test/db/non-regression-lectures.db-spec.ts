@@ -6,6 +6,8 @@ import { NotificationsService } from 'src/notifications/notifications.service';
 import { PharmacieService } from 'src/pharmacie/pharmacie.service';
 import { AccesPharmacieService } from 'src/pharmacie/acces-pharmacie.service';
 import { VenteService } from 'src/pharmacie/vente.service';
+import { MouvementsStockService } from 'src/pharmacie/stock/mouvements-stock.service';
+import type { PermissionsService } from 'src/common/rbac/permissions.service';
 import type { StorageService } from 'src/storage/storage.service';
 import { PrismaService } from 'src/common/services/prisma.service';
 import {
@@ -91,6 +93,58 @@ function parId(a: { id: string }, b: { id: string }): number {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
+// Divergences attendues après le recâblage des lectures (D460, D506), nommées une à une
+const DATE_PERIMEE = 'J-30j 00:00:00.000';
+type EntreeInstantane = Record<string, unknown>;
+
+/** D460 (2) : une fiche sans lot en stock a une date calculée nulle. */
+function dateNulleSansStock(attendu: unknown): unknown {
+  const objet = attendu as Record<
+    string,
+    { data: { stocks: EntreeInstantane[] } }
+  >;
+  for (const reponse of Object.values(objet)) {
+    for (const s of reponse.data.stocks) {
+      if (s.quantite === 0) s.dateExpiration = null;
+    }
+  }
+  return objet;
+}
+
+/** D460 (1), D426 : la recherche publique n'annonce plus un stock périmé. */
+function rechercheSansPerimes(attendu: unknown): unknown {
+  const objet = attendu as Record<
+    string,
+    { data: EntreeInstantane[]; message: string }
+  >;
+  for (const reponse of Object.values(objet)) {
+    reponse.data = reponse.data.filter(
+      (s) => s.dateExpiration !== DATE_PERIMEE,
+    );
+    reponse.message = reponse.message.replace(
+      /^\d+ résultat/,
+      `${reponse.data.length} résultat`,
+    );
+  }
+  return objet;
+}
+
+/** D460 (1), D426 : le détail catalogue n'annonce plus un stock périmé. */
+function medicamentSansPerimes(attendu: unknown): unknown {
+  const objet = attendu as Record<
+    string,
+    { data?: { stocks?: EntreeInstantane[] } }
+  >;
+  for (const reponse of Object.values(objet)) {
+    if (reponse.data?.stocks) {
+      reponse.data.stocks = reponse.data.stocks.filter(
+        (s) => s.dateExpiration !== DATE_PERIMEE,
+      );
+    }
+  }
+  return objet;
+}
+
 describe('Non-régression des lectures pharmacie (PB02)', () => {
   let base: BaseDeTest | undefined;
   let prisma: PrismaService | undefined;
@@ -126,7 +180,16 @@ describe('Non-régression des lectures pharmacie (PB02)', () => {
       getPublicUrl: (cle: string) => `logo-harnais/${cle}`,
     } as unknown as StorageService;
     const acces = new AccesPharmacieService(prisma);
-    pharmacie = new PharmacieService(prisma, notifications, acces);
+    const permissionsFactices = {
+      getUserPermissions: () => Promise.resolve([] as string[]),
+    } as unknown as PermissionsService;
+    pharmacie = new PharmacieService(
+      prisma,
+      notifications,
+      acces,
+      new MouvementsStockService(),
+      permissionsFactices,
+    );
     ventes = new VenteService(prisma, notifications, stockageFactice, acces);
 
     J = resume.aujourdhui;
@@ -276,6 +339,7 @@ describe('Non-régression des lectures pharmacie (PB02)', () => {
     verifierInstantane(
       'get-stock-pharmacie',
       normaliser(objet, options(VOLATILES_FICHES)),
+      dateNulleSansStock,
     );
   });
 
@@ -314,7 +378,7 @@ describe('Non-régression des lectures pharmacie (PB02)', () => {
       };
 
       if (cle === 'sans filtre') {
-        expect(liste.length).toBe(29);
+        expect(liste.length).toBe(23);
         for (const s of liste) {
           expect(s.quantite).toBeGreaterThan(0);
           expect(s.disponible).toBe(true);
@@ -325,7 +389,8 @@ describe('Non-régression des lectures pharmacie (PB02)', () => {
             .filter(
               (f) =>
                 ['str-pharma-1', 'str-pharma-2'].includes(f.structureId) &&
-                f.quantite > 0,
+                f.quantite > 0 &&
+                !(f.dateExpiration !== null && f.dateExpiration < J),
             )
             .map((f) => f.id)
             .sort(),
@@ -338,6 +403,7 @@ describe('Non-régression des lectures pharmacie (PB02)', () => {
     verifierInstantane(
       'rechercher-disponibilite',
       normaliser(objet, options(VOLATILES_FICHES)),
+      rechercheSansPerimes,
     );
   });
 
@@ -355,7 +421,11 @@ describe('Non-régression des lectures pharmacie (PB02)', () => {
       expect(r.data.stocks.map((s) => s.id).sort()).toEqual(
         resume.fiches
           .filter(
-            (f) => f.medicamentId === id && f.quantite > 0 && f.disponible,
+            (f) =>
+              f.medicamentId === id &&
+              f.quantite > 0 &&
+              f.disponible &&
+              !(f.dateExpiration !== null && f.dateExpiration < J),
           )
           .map((f) => f.id)
           .sort(),
@@ -369,6 +439,7 @@ describe('Non-régression des lectures pharmacie (PB02)', () => {
     verifierInstantane(
       'get-medicament',
       normaliser(objet, options(VOLATILES_FICHES)),
+      medicamentSansPerimes,
     );
   });
 

@@ -1,11 +1,31 @@
 // Dette de typage préexistante, backlog points 21 et 22
 /* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
+import type { Prisma } from 'generated/prisma/client';
 import { PrismaService } from 'src/common/services/prisma.service';
+import { PermissionsService } from 'src/common/rbac/permissions.service';
+import { PERMISSIONS } from 'src/common/rbac/permissions.constants';
+import { assurerPointDeVente } from './point-de-vente';
+import { jourConakry } from './vente.service';
+import { masquerCouts } from './masquer-couts';
+import { etatStock } from './domaine/quantites';
+import { avertissementEcartPrix } from './domaine/prix';
+import { MouvementsStockService } from './stock/mouvements-stock.service';
+import { estCleEtrangereViolee } from './stock/erreurs-base';
+import {
+  avecStock,
+  avecStockPublic,
+  dateVersJour,
+  jourVersDate,
+  filtreLotVendable,
+  lireEtatsStock,
+  type EtatStockFiche,
+} from './stock/lecture-stock';
 import { AccesPharmacieService } from './acces-pharmacie.service';
 import {
   CreateMedicamentDto,
@@ -36,6 +56,43 @@ const SEUIL_STOCK_BAS = 10;
 const QUANTITE_MAX = 2147483647;
 /** Plus grand prix enregistrable (colonne Int de PostgreSQL). */
 const PRIX_MAX = 2147483647;
+
+/** Sélection du médicament dans les lectures de stock (contrat existant de getStockPharmacie). */
+const SELECT_MEDICAMENT_STOCK = {
+  id: true,
+  nom: true,
+  nomGenerique: true,
+  categorie: true,
+  formes: true,
+  ordonnanceRequise: true,
+} as const;
+
+const MOTIF_SAISIE_FICHE = 'Quantité saisie sur la fiche de stock';
+const MOTIF_CORRECTION_FICHE = 'Quantité corrigée sur la fiche de stock';
+
+export const MESSAGE_LOT_REQUIS_QUANTITE =
+  'Ce médicament a plusieurs lots : faites un inventaire.';
+export const MESSAGE_LOT_REQUIS_DATE =
+  'Ce médicament a plusieurs lots : corrigez la date de péremption lot par lot.';
+export const MESSAGE_LOT_REQUIS_PROVISOIRE =
+  'Des ventes de ce médicament attendent la réception de son stock : faites un inventaire.';
+export const MESSAGE_LOT_REQUIS_CHOIX =
+  'Ce médicament a plusieurs lots : choisissez le lot à corriger.';
+export const MESSAGE_LOT_REQUIS_AUCUN =
+  "Ce médicament n'a aucun lot en stock : modifiez la fiche pour saisir la quantité et la date de péremption.";
+export const MESSAGE_LOT_INTROUVABLE =
+  'Ce lot est introuvable pour ce médicament.';
+export const MESSAGE_MOTIF_REQUIS =
+  'Indiquez le motif de la correction (3 caractères au moins).';
+export const MESSAGE_DATE_PEREMPTION_REQUISE =
+  "Indiquez la date de péremption de ce stock, ou précisez que ce médicament n'a pas de date de péremption.";
+export const MESSAGE_MEDICAMENT_UTILISE =
+  'Ce médicament a déjà du stock ou des ventes dans une pharmacie : il ne peut pas être supprimé du catalogue.';
+
+/** Message du refus d'une correction qui rendrait le lot négatif (testé avant écriture, D510). */
+export function messageStockLotNegatif(solde: number): string {
+  return `Ce lot n'a que ${solde} unité(s) en stock : la correction ne peut pas le rendre négatif.`;
+}
 /** Transaction interactive de l'import : jusqu'à 1000 écritures successives. */
 const OPTIONS_TRANSACTION_IMPORT = { maxWait: 10_000, timeout: 60_000 };
 
@@ -116,6 +173,8 @@ export class PharmacieService {
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
     private readonly accesPharmacie: AccesPharmacieService,
+    private readonly mouvementsStock: MouvementsStockService,
+    private readonly permissions: PermissionsService,
   ) {}
 
   // ─── Catalogue Global (ADMIN/SUPER_ADMIN) ─────────────────────
@@ -213,11 +272,12 @@ export class PharmacieService {
   }
 
   async getMedicament(medicamentId: string) {
+    const jour = jourConakry(new Date());
     const med = await this.prisma.medicament.findUnique({
       where: { id: medicamentId },
       include: {
         stocks: {
-          where: { disponible: true, quantite: { gt: 0 } },
+          where: { archiveLe: null, lots: { some: filtreLotVendable(jour) } },
           include: {
             structure: {
               select: {
@@ -237,7 +297,21 @@ export class PharmacieService {
 
     if (!med) throw new NotFoundException('Médicament non trouvé');
 
-    return { data: med, message: 'Médicament trouvé', success: true };
+    const etats = await lireEtatsStock(
+      this.prisma,
+      med.stocks.map((s) => s.id),
+      jour,
+    );
+    return {
+      data: {
+        ...med,
+        stocks: med.stocks.map((s) =>
+          avecStockPublic(s, etats.get(s.id) as EtatStockFiche),
+        ),
+      },
+      message: 'Médicament trouvé',
+      success: true,
+    };
   }
 
   async updateMedicament(
@@ -301,8 +375,36 @@ export class PharmacieService {
     });
     if (!med) throw new NotFoundException('Médicament non trouvé');
 
+    // Refus si une pharmacie a un lot, un mouvement ou une vente de ce médicament (O12, D511)
+    const fichesUtilisees = await this.prisma.stockMedicament.count({
+      where: {
+        medicamentId,
+        OR: [{ lots: { some: {} } }, { mouvements: { some: {} } }],
+      },
+    });
+    const lignesVendues = await this.prisma.ligneVente.count({
+      where: { medicamentId },
+    });
+    if (fichesUtilisees > 0 || lignesVendues > 0) {
+      throw new ConflictException({
+        message: MESSAGE_MEDICAMENT_UTILISE,
+        code: 'MEDICAMENT_UTILISE',
+      });
+    }
+
     const categoryToDelete = med.categorie;
-    await this.prisma.medicament.delete({ where: { id: medicamentId } });
+    try {
+      await this.prisma.medicament.delete({ where: { id: medicamentId } });
+    } catch (erreur) {
+      // Lot créé entre le contrôle et la suppression : la clé étrangère Restrict refuse
+      if (estCleEtrangereViolee(erreur)) {
+        throw new ConflictException({
+          message: MESSAGE_MEDICAMENT_UTILISE,
+          code: 'MEDICAMENT_UTILISE',
+        });
+      }
+      throw erreur;
+    }
 
     // Vérifier si c'était le dernier de sa catégorie
     const remainingInCategory = await this.prisma.medicament.count({
@@ -363,7 +465,10 @@ export class PharmacieService {
     adminUserId: string,
     dto: UpsertStockDto,
   ) {
-    await this.accesPharmacie.verifier(structureId, adminUserId);
+    const { user, structure } = await this.accesPharmacie.verifier(
+      structureId,
+      adminUserId,
+    );
 
     // Vérifier que le médicament existe
     const med = await this.prisma.medicament.findUnique({
@@ -372,56 +477,183 @@ export class PharmacieService {
     if (!med)
       throw new NotFoundException('Médicament non trouvé dans le catalogue');
 
-    const stock = await this.prisma.stockMedicament.upsert({
-      where: {
-        medicamentId_structureId: {
-          medicamentId: dto.medicamentId,
-          structureId,
-        },
-      },
-      create: {
-        medicamentId: dto.medicamentId,
-        structureId,
-        quantite: dto.quantite,
-        prixUnitaire: dto.prixUnitaire,
-        disponible: dto.quantite > 0,
-        dateExpiration: dto.dateExpiration
-          ? new Date(dto.dateExpiration)
-          : null,
-        notes: dto.notes?.trim(),
-      },
-      update: {
-        quantite: dto.quantite,
-        prixUnitaire: dto.prixUnitaire,
-        disponible: dto.quantite > 0,
-        dateExpiration: dto.dateExpiration
-          ? new Date(dto.dateExpiration)
-          : null,
-        notes: dto.notes?.trim(),
-      },
-      include: {
-        medicament: { select: { id: true, nom: true, categorie: true } },
-      },
-    });
+    const jour = jourConakry(new Date());
+    const jourSaisi = dto.dateExpiration
+      ? dateVersJour(new Date(dto.dateExpiration))
+      : undefined;
 
-    // Alerte stock bas
-    if (dto.quantite < 10) {
-      const staff = await this.prisma.user.findMany({
-        where: { structureId, role: { in: ['PHARMACIEN', 'STRUCTURE_ADMIN'] } },
-        select: { id: true },
+    const { ficheId, seuilPrix, seuilStockBas } =
+      await this.prisma.$transaction(async (tx) => {
+        const cle = {
+          medicamentId_structureId: {
+            medicamentId: dto.medicamentId,
+            structureId,
+          },
+        };
+        const avant = await tx.stockMedicament.findUnique({
+          where: cle,
+          select: { archiveLe: true },
+        });
+        // Fiche créée à quantité nulle (D493) ; verrou de ligne avant le verrou consultatif (D507)
+        const fiche = await tx.stockMedicament.upsert({
+          where: cle,
+          create: {
+            medicamentId: dto.medicamentId,
+            structureId,
+            prixUnitaire: dto.prixUnitaire,
+            notes: dto.notes?.trim(),
+          },
+          update: {
+            prixUnitaire: dto.prixUnitaire,
+            notes: dto.notes?.trim(),
+            archiveLe: null,
+          },
+        });
+        if (avant?.archiveLe) {
+          await tx.auditLog.create({
+            data: {
+              userId: user.id,
+              action: 'update',
+              entityType: 'StockMedicament',
+              entityId: fiche.id,
+              ip: null,
+              metadata: {
+                avant: { archiveLe: avant.archiveLe.toISOString() },
+                apres: { archiveLe: null },
+              },
+            },
+          });
+        }
+
+        const { pointDeVente, parametres } =
+          await this.pointDeVenteEtParametres(tx, structure);
+        await this.mouvementsStock.verrouillerFiches(tx, [fiche.id]);
+        const etat = (await lireEtatsStock(tx, [fiche.id], jour)).get(
+          fiche.id,
+        ) as EtatStockFiche;
+        const sommeLots = etat.lots.reduce((s, l) => s + l.quantite, 0);
+        const quantite = dto.quantite;
+
+        if (etat.quantite !== sommeLots) {
+          // Part provisoire sans lot (vente en négatif, O11) : seule une réception ou un inventaire la résout
+          if (quantite !== etat.quantite) {
+            throw new ConflictException({
+              message: MESSAGE_LOT_REQUIS_PROVISOIRE,
+              code: 'LOT_REQUIS',
+            });
+          }
+        } else if (etat.lots.length === 0) {
+          if (quantite > 0) {
+            if (jourSaisi === undefined && dto.sansPeremption !== true) {
+              throw new BadRequestException({
+                message: MESSAGE_DATE_PEREMPTION_REQUISE,
+                code: 'DATE_PEREMPTION_REQUISE',
+              });
+            }
+            await this.mouvementsStock.creerLot(tx, {
+              stockMedicamentId: fiche.id,
+              pointDeVenteId: pointDeVente.id,
+              numeroLot: null,
+              dateExpiration: jourSaisi ? jourVersDate(jourSaisi) : null,
+              quantite,
+              coutUnitaire: 0,
+              coutAchatBoite: null,
+              coefficientReception: fiche.coefficientBoite,
+              fournisseurId: null,
+              receptionId: null,
+              lotTechnique: false,
+              auteurId: user.id,
+              pieceOrigineType: 'AJUSTEMENT',
+              pieceOrigineId: null,
+              motif: MOTIF_SAISIE_FICHE,
+            });
+          }
+        } else if (etat.lots.length === 1) {
+          const lot = etat.lots[0];
+          if (quantite !== lot.quantite) {
+            await this.mouvementsStock.ecrire(tx, {
+              pointDeVenteId: pointDeVente.id,
+              stockMedicamentId: fiche.id,
+              lotId: lot.id,
+              type: 'INVENTAIRE',
+              quantite: quantite - lot.quantite,
+              pieceOrigineType: 'AJUSTEMENT',
+              pieceOrigineId: null,
+              motif: MOTIF_CORRECTION_FICHE,
+              auteurId: user.id,
+            });
+          }
+          const jourLot = lot.dateExpiration
+            ? dateVersJour(lot.dateExpiration)
+            : null;
+          if (jourSaisi !== undefined && jourSaisi !== jourLot) {
+            await tx.lotStock.update({
+              where: { id: lot.id },
+              data: { dateExpiration: jourVersDate(jourSaisi) },
+            });
+            await tx.auditLog.create({
+              data: {
+                userId: user.id,
+                action: 'update',
+                entityType: 'LotStock',
+                entityId: lot.id,
+                ip: null,
+                metadata: {
+                  avant: { dateExpiration: jourLot },
+                  apres: { dateExpiration: jourSaisi },
+                },
+              },
+            });
+          }
+        } else {
+          if (quantite !== etat.quantite) {
+            throw new ConflictException({
+              message: MESSAGE_LOT_REQUIS_QUANTITE,
+              code: 'LOT_REQUIS',
+            });
+          }
+          const jourAffiche = etat.dateExpiration
+            ? dateVersJour(etat.dateExpiration)
+            : null;
+          if (jourSaisi !== undefined && jourSaisi !== jourAffiche) {
+            throw new ConflictException({
+              message: MESSAGE_LOT_REQUIS_DATE,
+              code: 'LOT_REQUIS',
+            });
+          }
+        }
+        return {
+          ficheId: fiche.id,
+          seuilPrix: parametres.seuilAvertissementPrixPct,
+          seuilStockBas: parametres.seuilStockBas,
+        };
       });
-      await this.notificationsService.createManyNotifications(
-        staff.map((u) => u.id),
-        {
-          type: 'STOCK_ALERTE',
-          titre: 'Stock critique',
-          message: `Le stock de "${stock.medicament.nom}" est ${dto.quantite === 0 ? 'épuisé' : `bas (${dto.quantite} unités)`}.`,
-        },
+
+    const [fiche] = await this.lireFichesStock({ id: ficheId }, jour);
+    const avertissement = avertissementEcartPrix(
+      fiche.prixUnitaire,
+      fiche.prixUnite,
+      fiche.coefficientBoite,
+      seuilPrix,
+    );
+
+    // Alerte stock bas ou épuisé (seuil en boîtes, A4)
+    if (
+      etatStock(fiche.quantite, fiche.coefficientBoite, seuilStockBas) !==
+      'NORMAL'
+    ) {
+      await this.alerterStock(
+        structureId,
+        `Le stock de "${fiche.medicament.nom}" est ${fiche.quantite <= 0 ? 'épuisé' : `bas (${fiche.quantite} unités)`}.`,
       );
     }
 
+    const peutVoirMarge = await this.peutVoirMarge(user.id);
     return {
-      data: stock,
+      data: masquerCouts(
+        { ...fiche, avertissements: avertissement ? [avertissement] : [] },
+        peutVoirMarge,
+      ),
       message: 'Stock mis à jour',
       success: true,
     };
@@ -433,95 +665,154 @@ export class PharmacieService {
     adminUserId: string,
     dto: UpdateStockQuantiteDto,
   ) {
-    await this.accesPharmacie.verifier(structureId, adminUserId);
+    const { user, structure } = await this.accesPharmacie.verifier(
+      structureId,
+      adminUserId,
+    );
+    const motif = dto.motif?.trim() ?? '';
+    if (motif.length < 3) {
+      throw new BadRequestException({
+        message: MESSAGE_MOTIF_REQUIS,
+        code: 'MOTIF_REQUIS',
+      });
+    }
+    const jour = jourConakry(new Date());
 
-    // Ligne verrouillée jusqu'à la fin de la transaction : deux ajustements simultanés
-    // s'appliquent l'un après l'autre, sans mise à jour perdue (D123).
-    const { ancienne, updated, newQuantite } = await this.prisma.$transaction(
-      async (tx) => {
+    const { avant, apres, coefficientBoite, seuilStockBas } =
+      await this.prisma.$transaction(async (tx) => {
+        // Verrou de ligne de la fiche, puis verrou consultatif (D507)
         const lignes = await tx.$queryRaw<
-          { quantite: number; notes: string | null }[]
-        >`SELECT "quantite", "notes" FROM "StockMedicament" WHERE "id" = ${stockId} AND "structureId" = ${structureId} FOR UPDATE`;
+          { id: string; coefficientBoite: number }[]
+        >`SELECT "id", "coefficientBoite" FROM "StockMedicament" WHERE "id" = ${stockId} AND "structureId" = ${structureId} AND "archiveLe" IS NULL FOR UPDATE`;
         if (lignes.length === 0)
           throw new NotFoundException('Stock non trouvé');
-        const { quantite: ancienne, notes } = lignes[0];
 
-        const newQuantite = Math.max(0, ancienne + dto.variation);
+        const { pointDeVente, parametres } =
+          await this.pointDeVenteEtParametres(tx, structure);
+        await this.mouvementsStock.verrouillerFiches(tx, [stockId]);
+        const etat = (await lireEtatsStock(tx, [stockId], jour)).get(
+          stockId,
+        ) as EtatStockFiche;
 
-        const updated = await tx.stockMedicament.update({
-          where: { id: stockId },
-          data: {
-            quantite: newQuantite,
-            disponible: newQuantite > 0,
-            notes: dto.notes?.trim() || notes,
-          },
-          include: {
-            medicament: { select: { id: true, nom: true, categorie: true } },
-          },
+        let lotId: string;
+        let soldeLot: number;
+        if (dto.lotId !== undefined) {
+          const lot = await tx.lotStock.findFirst({
+            where: {
+              id: dto.lotId,
+              stockMedicamentId: stockId,
+              pointDeVenteId: pointDeVente.id,
+            },
+            select: { id: true, agregat: { select: { quantite: true } } },
+          });
+          if (!lot) throw new NotFoundException(MESSAGE_LOT_INTROUVABLE);
+          lotId = lot.id;
+          soldeLot = lot.agregat?.quantite ?? 0;
+        } else if (etat.lots.length === 1) {
+          lotId = etat.lots[0].id;
+          soldeLot = etat.lots[0].quantite;
+        } else {
+          throw new ConflictException({
+            message:
+              etat.lots.length === 0
+                ? MESSAGE_LOT_REQUIS_AUCUN
+                : MESSAGE_LOT_REQUIS_CHOIX,
+            code: 'LOT_REQUIS',
+          });
+        }
+
+        if (soldeLot + dto.variation < 0) {
+          throw new ConflictException({
+            message: messageStockLotNegatif(soldeLot),
+            code: 'STOCK_LOT_NEGATIF',
+          });
+        }
+
+        const notes = dto.notes?.trim();
+        if (notes) {
+          await tx.stockMedicament.update({
+            where: { id: stockId },
+            data: { notes },
+          });
+        }
+
+        const ecrit = await this.mouvementsStock.ecrire(tx, {
+          pointDeVenteId: pointDeVente.id,
+          stockMedicamentId: stockId,
+          lotId,
+          type: 'CORRECTION',
+          quantite: dto.variation,
+          pieceOrigineType: 'AJUSTEMENT',
+          pieceOrigineId: null,
+          motif,
+          auteurId: user.id,
         });
-        return { ancienne, updated, newQuantite };
-      },
-    );
-
-    // Alerte stock bas
-    if (newQuantite < 10 && ancienne >= 10) {
-      const staff = await this.prisma.user.findMany({
-        where: { structureId, role: { in: ['PHARMACIEN', 'STRUCTURE_ADMIN'] } },
-        select: { id: true },
+        return {
+          avant: etat.quantite,
+          apres: ecrit.soldeProduit,
+          coefficientBoite: lignes[0].coefficientBoite,
+          seuilStockBas: parametres.seuilStockBas,
+        };
       });
-      await this.notificationsService.createManyNotifications(
-        staff.map((u) => u.id),
-        {
-          type: 'STOCK_ALERTE',
-          titre: 'Stock critique',
-          message: `Le stock de "${updated.medicament.nom}" est descendu à ${newQuantite} unités.`,
-        },
+
+    const [fiche] = await this.lireFichesStock({ id: stockId }, jour);
+
+    // Alerte au seul franchissement vers bas ou rupture (seuil en boîtes, A4)
+    if (
+      etatStock(avant, coefficientBoite, seuilStockBas) === 'NORMAL' &&
+      etatStock(apres, coefficientBoite, seuilStockBas) !== 'NORMAL'
+    ) {
+      await this.alerterStock(
+        structureId,
+        `Le stock de "${fiche.medicament.nom}" est descendu à ${apres} unités.`,
       );
     }
 
+    const peutVoirMarge = await this.peutVoirMarge(user.id);
     return {
-      data: updated,
-      message: `Stock ${dto.variation > 0 ? 'augmenté' : 'réduit'} (nouvelle quantité : ${newQuantite})`,
+      data: masquerCouts(fiche, peutVoirMarge),
+      message: `Stock ${dto.variation > 0 ? 'augmenté' : 'réduit'} (nouvelle quantité : ${apres})`,
       success: true,
     };
   }
 
   async getStockPharmacie(structureId: string, adminUserId: string) {
-    await this.accesPharmacie.verifier(structureId, adminUserId);
-
-    const stocks = await this.prisma.stockMedicament.findMany({
+    const { user } = await this.accesPharmacie.verifier(
+      structureId,
+      adminUserId,
+    );
+    const jour = jourConakry(new Date());
+    const stocks = await this.lireFichesStock(
+      { structureId, archiveLe: null },
+      jour,
+    );
+    const parametres = await this.prisma.parametresPharmacie.findUnique({
       where: { structureId },
-      include: {
-        medicament: {
-          select: {
-            id: true,
-            nom: true,
-            nomGenerique: true,
-            categorie: true,
-            formes: true,
-            ordonnanceRequise: true,
-          },
-        },
-      },
-      orderBy: { medicament: { nom: 'asc' } },
+      select: { seuilStockBas: true },
     });
-
-    // Alertes stock bas (< 10 unités)
-    const stockBas = stocks.filter((s) => s.quantite > 0 && s.quantite < 10);
-    const rupture = stocks.filter((s) => s.quantite === 0);
+    const seuil = parametres?.seuilStockBas ?? SEUIL_STOCK_BAS;
+    const etat = (s: { quantite: number; coefficientBoite: number }) =>
+      etatStock(s.quantite, s.coefficientBoite, seuil);
+    // Stock bas en boîtes (A4, D476) ; rupture : quantité nulle ou négative (D416)
+    const stockBas = stocks.filter((s) => etat(s) === 'BAS');
+    const rupture = stocks.filter((s) => etat(s) === 'RUPTURE');
+    const peutVoirMarge = await this.peutVoirMarge(user.id);
 
     return {
-      data: {
-        stocks,
-        alertes: {
-          stockBas: stockBas.map((s) => ({
-            id: s.id,
-            nom: s.medicament.nom,
-            quantite: s.quantite,
-          })),
-          rupture: rupture.map((s) => ({ id: s.id, nom: s.medicament.nom })),
+      data: masquerCouts(
+        {
+          stocks,
+          alertes: {
+            stockBas: stockBas.map((s) => ({
+              id: s.id,
+              nom: s.medicament.nom,
+              quantite: s.quantite,
+            })),
+            rupture: rupture.map((s) => ({ id: s.id, nom: s.medicament.nom })),
+          },
         },
-      },
+        peutVoirMarge,
+      ),
       message: `${stocks.length} médicament(s) en stock`,
       success: true,
     };
@@ -532,14 +823,40 @@ export class PharmacieService {
     stockId: string,
     adminUserId: string,
   ) {
-    await this.accesPharmacie.verifier(structureId, adminUserId);
+    const { user } = await this.accesPharmacie.verifier(
+      structureId,
+      adminUserId,
+    );
 
-    const stock = await this.prisma.stockMedicament.findFirst({
-      where: { id: stockId, structureId },
+    // Archivage, jamais de suppression physique (O12, D430) ; idempotent
+    await this.prisma.$transaction(async (tx) => {
+      const fiche = await tx.stockMedicament.findFirst({
+        where: { id: stockId, structureId },
+        select: { id: true, archiveLe: true },
+      });
+      if (!fiche) throw new NotFoundException('Stock non trouvé');
+      if (fiche.archiveLe) return;
+      const archiveLe = new Date();
+      const { count } = await tx.stockMedicament.updateMany({
+        where: { id: stockId, archiveLe: null },
+        data: { archiveLe },
+      });
+      if (count === 1) {
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            action: 'update',
+            entityType: 'StockMedicament',
+            entityId: stockId,
+            ip: null,
+            metadata: {
+              avant: { archiveLe: null },
+              apres: { archiveLe: archiveLe.toISOString() },
+            },
+          },
+        });
+      }
     });
-    if (!stock) throw new NotFoundException('Stock non trouvé');
-
-    await this.prisma.stockMedicament.delete({ where: { id: stockId } });
     return { data: null, message: 'Médicament retiré du stock', success: true };
   }
 
@@ -986,9 +1303,10 @@ export class PharmacieService {
     lng?: number,
     pharmacieId?: string,
   ) {
+    const jour = jourConakry(new Date());
     const where: any = {
-      disponible: true,
-      quantite: { gt: 0 },
+      archiveLe: null,
+      lots: { some: filtreLotVendable(jour) },
       structure: {
         type: 'PHARMACIE',
         isActive: true,
@@ -1041,11 +1359,19 @@ export class PharmacieService {
       },
       orderBy: { structure: { nom: 'asc' } },
     });
+    const etats = await lireEtatsStock(
+      this.prisma,
+      stocks.map((s) => s.id),
+      jour,
+    );
+    const publics = stocks.map((s) =>
+      avecStockPublic(s, etats.get(s.id) as EtatStockFiche),
+    );
 
     // Calculer distance si lat/lng fournis
-    let results = stocks;
+    let results = publics;
     if (lat !== undefined && lng !== undefined) {
-      results = stocks
+      results = publics
         .map((s) => ({
           ...s,
           distanceKm:
@@ -1073,6 +1399,57 @@ export class PharmacieService {
   }
 
   // ─── Helpers ──────────────────────────────────────────────────
+
+  /** Vrai si l'utilisateur a marge:read (masquage des coûts, D466). */
+  private async peutVoirMarge(userId: string): Promise<boolean> {
+    const permissions = await this.permissions.getUserPermissions(userId);
+    return permissions.includes(PERMISSIONS.MARGE_READ);
+  }
+
+  /** Fiches lues au contrat du plan 1.7, triées par nom de médicament. */
+  private async lireFichesStock(
+    where: Prisma.StockMedicamentWhereInput,
+    jour: string,
+  ) {
+    const fiches = await this.prisma.stockMedicament.findMany({
+      where,
+      include: { medicament: { select: SELECT_MEDICAMENT_STOCK } },
+      orderBy: { medicament: { nom: 'asc' } },
+    });
+    const etats = await lireEtatsStock(
+      this.prisma,
+      fiches.map((f) => f.id),
+      jour,
+    );
+    return fiches.map((f) => avecStock(f, etats.get(f.id) as EtatStockFiche));
+  }
+
+  /** Point de vente d'ordre 1 et paramètres, lus sans verrou ; créés seulement s'ils manquent (D507). */
+  private async pointDeVenteEtParametres(
+    tx: Prisma.TransactionClient,
+    structure: { id: string; nom: string },
+  ) {
+    const pointDeVente = await tx.pointDeVente.findUnique({
+      where: { structureId_ordre: { structureId: structure.id, ordre: 1 } },
+    });
+    const parametres = await tx.parametresPharmacie.findUnique({
+      where: { structureId: structure.id },
+    });
+    if (pointDeVente && parametres) return { pointDeVente, parametres };
+    return assurerPointDeVente(tx, structure);
+  }
+
+  /** Destinataires des alertes de stock (règle existante). */
+  private async alerterStock(structureId: string, message: string) {
+    const staff = await this.prisma.user.findMany({
+      where: { structureId, role: { in: ['PHARMACIEN', 'STRUCTURE_ADMIN'] } },
+      select: { id: true },
+    });
+    await this.notificationsService.createManyNotifications(
+      staff.map((u) => u.id),
+      { type: 'STOCK_ALERTE', titre: 'Stock critique', message },
+    );
+  }
 
   // Distance Haversine en km
   private calculateDistance(

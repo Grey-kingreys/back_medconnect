@@ -9,6 +9,7 @@ import { PointsDeVenteController } from './points-de-vente.controller';
 import { PointsDeVenteService } from './points-de-vente.service';
 import { FicheProduitController } from './fiche-produit.controller';
 import { FicheProduitService } from './fiche-produit.service';
+import { MouvementsStockService } from './stock/mouvements-stock.service';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { AuthModule } from 'src/auth/auth.module';
 
@@ -29,6 +30,7 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
     AccesPharmacieService,
     PointsDeVenteService,
     FicheProduitService,
+    MouvementsStockService,
     PrismaService,
   ],
 })

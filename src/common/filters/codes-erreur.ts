@@ -56,6 +56,18 @@ export const CODES_ERREUR = [
   'PRIX_UNITE_SANS_DECONDITIONNEMENT',
   // Coefficient d'une fiche non qualifiée qui a du stock changé sans conversion (400).
   'CONVERSION_REQUISE',
+  // Plusieurs lots (ou aucun) : préciser le lot ou faire un inventaire (409).
+  'LOT_REQUIS',
+  // Correction ou sortie qui rendrait un lot négatif (409).
+  'STOCK_LOT_NEGATIF',
+  // Une boîte de ce lot est déjà entamée dans ce point de vente (409).
+  'CONDITIONNEMENT_DEJA_OUVERT',
+  // Motif obligatoire absent ou trop court (400).
+  'MOTIF_REQUIS',
+  // Date de péremption obligatoire pour créer un lot, sauf « sans péremption » (400).
+  'DATE_PEREMPTION_REQUISE',
+  // Médicament du catalogue déjà utilisé par un lot, un mouvement ou une vente (409).
+  'MEDICAMENT_UTILISE',
 ] as const;
 
 export type CodeErreur = (typeof CODES_ERREUR)[number];

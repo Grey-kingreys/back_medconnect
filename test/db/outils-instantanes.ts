@@ -1,6 +1,7 @@
 // Outils des instantanés de non-régression (PB02) : normalisation des champs
 // volatils, comparaison par projection sur les clés de l'instantané, écriture
 // seulement avec MAJ_INSTANTANES=1 (D458 à D461).
+// Un ajustement de l'attendu n'est permis que pour une divergence nommée par une décision du chef (D506).
 import { HttpException } from '@nestjs/common';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -131,6 +132,7 @@ export function ecartsInstantane(
 export function verifierInstantane(
   nom: string,
   valeurNormalisee: unknown,
+  ajusterAttendu?: (attendu: unknown) => unknown,
 ): void {
   const fichier = path.join(DOSSIER_INSTANTANES, nom + '.json');
   if (process.env.MAJ_INSTANTANES === '1') {
@@ -149,7 +151,7 @@ export function verifierInstantane(
   }
   const attendu = JSON.parse(readFileSync(fichier, 'utf8')) as unknown;
   const ecarts = ecartsInstantane(
-    attendu,
+    ajusterAttendu ? ajusterAttendu(attendu) : attendu,
     JSON.parse(JSON.stringify(valeurNormalisee)) as unknown,
   );
   if (ecarts.length > 0) {

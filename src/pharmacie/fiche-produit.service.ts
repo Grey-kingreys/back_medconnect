@@ -74,7 +74,7 @@ export class FicheProduitService {
       async (tx) => {
         const verrou = await tx.$queryRaw<
           { id: string }[]
-        >`SELECT "id" FROM "StockMedicament" WHERE "id" = ${stockId} AND "structureId" = ${structure.id} FOR UPDATE`;
+        >`SELECT "id" FROM "StockMedicament" WHERE "id" = ${stockId} AND "structureId" = ${structure.id} AND "archiveLe" IS NULL FOR UPDATE`;
         if (verrou.length === 0) {
           throw new NotFoundException(MESSAGE_FICHE_INTROUVABLE);
         }

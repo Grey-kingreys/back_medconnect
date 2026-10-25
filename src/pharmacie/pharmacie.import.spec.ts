@@ -5,6 +5,8 @@ import { FichierImport } from './dto/pharmacie.dto';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { NotificationsService } from 'src/notifications/notifications.service';
 import { AccesPharmacieService } from './acces-pharmacie.service';
+import { MouvementsStockService } from './stock/mouvements-stock.service';
+import type { PermissionsService } from 'src/common/rbac/permissions.service';
 
 /** Forme minimale d'un appel à stockMedicament.upsert observé par les tests. */
 type OperationUpsert = {
@@ -135,6 +137,10 @@ describe('PharmacieService, import Excel du stock', () => {
       prisma as unknown as PrismaService,
       notifications as unknown as NotificationsService,
       new AccesPharmacieService(prisma as unknown as PrismaService),
+      new MouvementsStockService(),
+      {
+        getUserPermissions: () => Promise.resolve([]),
+      } as unknown as PermissionsService,
     );
   });
 

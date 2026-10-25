@@ -10,6 +10,8 @@ import {
   Min,
   Max,
   Length,
+  NotEquals,
+  MaxLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -93,7 +95,10 @@ export class UpsertStockDto {
   @IsString()
   medicamentId: string;
 
-  @ApiProperty({ example: 50 })
+  @ApiProperty({
+    example: 50,
+    description: 'Quantité en stock, en unités minimales',
+  })
   @IsInt({ message: 'La quantité doit être un nombre entier.' })
   @Min(0)
   quantite: number;
@@ -117,12 +122,44 @@ export class UpsertStockDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @ApiPropertyOptional({
+    description:
+      "Vrai pour un médicament sans date de péremption : autorise l'absence de date quand la saisie crée un lot.",
+  })
+  @IsOptional()
+  @IsBoolean()
+  sansPeremption?: boolean;
 }
 
 export class UpdateStockQuantiteDto {
-  @ApiProperty({ example: 10, description: 'Ajouter ou retirer (négatif)' })
+  @ApiProperty({
+    example: -2,
+    description: 'Ajouter ou retirer (négatif), en unités minimales',
+  })
   @IsInt({ message: 'La variation doit être un nombre entier.' })
+  @NotEquals(0, { message: 'La variation ne peut pas être nulle.' })
   variation: number;
+
+  @ApiPropertyOptional({
+    description:
+      "Lot à corriger ; facultatif si le médicament n'a qu'un lot en stock",
+  })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  lotId?: string;
+
+  @ApiPropertyOptional({
+    example: 'Boîte abîmée au rangement',
+    description: 'Motif de la correction, obligatoire (3 à 300 caractères)',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(300, {
+    message: 'Le motif ne doit pas dépasser 300 caractères.',
+  })
+  motif?: string;
 
   @ApiPropertyOptional({ example: 'Livraison du 26/04/2026' })
   @IsOptional()
