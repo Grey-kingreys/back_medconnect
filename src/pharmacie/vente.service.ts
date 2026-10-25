@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -10,6 +9,7 @@ import type { Prisma } from 'generated/prisma/client';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { NotificationsService } from 'src/notifications/notifications.service';
 import { StorageService } from 'src/storage/storage.service';
+import { AccesPharmacieService } from './acces-pharmacie.service';
 import {
   estConflitCleIdempotence,
   lireCleIdempotence,
@@ -69,43 +69,8 @@ export class VenteService {
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
     private readonly storage: StorageService,
+    private readonly accesPharmacie: AccesPharmacieService,
   ) {}
-
-  /** Membre de la pharmacie (ou son administrateur) ; la structure doit être une pharmacie. */
-  private async verifierPharmacie(structureId: string, userId: string) {
-    const [user, structure] = await Promise.all([
-      this.prisma.user.findUnique({
-        where: { id: userId },
-        select: { id: true, nom: true, prenom: true, structureId: true },
-      }),
-      this.prisma.structure.findUnique({
-        where: { id: structureId },
-        select: {
-          id: true,
-          type: true,
-          adminId: true,
-          nom: true,
-          adresse: true,
-          ville: true,
-          telephone: true,
-          logoFile: { select: { key: true } },
-        },
-      }),
-    ]);
-    if (!structure) {
-      throw new NotFoundException('Cette pharmacie est introuvable.');
-    }
-    if (
-      !user ||
-      (user.structureId !== structureId && structure.adminId !== userId) ||
-      structure.type !== 'PHARMACIE'
-    ) {
-      throw new ForbiddenException(
-        "Vous n'avez pas accès aux ventes de cette pharmacie.",
-      );
-    }
-    return { user, structure };
-  }
 
   private pharmacieRecu(structure: {
     id: string;
@@ -171,7 +136,7 @@ export class VenteService {
     enTeteIdempotence?: string,
     ip?: string | null,
   ) {
-    const { user, structure } = await this.verifierPharmacie(
+    const { user, structure } = await this.accesPharmacie.verifier(
       structureId,
       userId,
     );
@@ -498,7 +463,7 @@ export class VenteService {
     userId: string,
     query: ListerVentesQueryDto,
   ) {
-    await this.verifierPharmacie(structureId, userId);
+    await this.accesPharmacie.verifier(structureId, userId);
 
     const jour = query.date ?? jourConakry(new Date());
     const dateValide = new Date(`${jour}T00:00:00.000Z`);
@@ -556,7 +521,10 @@ export class VenteService {
   }
 
   async detailVente(structureId: string, venteId: string, userId: string) {
-    const { structure } = await this.verifierPharmacie(structureId, userId);
+    const { structure } = await this.accesPharmacie.verifier(
+      structureId,
+      userId,
+    );
     const vente = await this.prisma.vente.findFirst({
       where: { id: venteId, structureId },
       include: { lignes: true },
@@ -576,7 +544,10 @@ export class VenteService {
     dto: AnnulerVenteDto,
     ip?: string | null,
   ) {
-    const { structure } = await this.verifierPharmacie(structureId, userId);
+    const { structure } = await this.accesPharmacie.verifier(
+      structureId,
+      userId,
+    );
 
     const { vente, lignesNonRemises } = await this.prisma.$transaction(
       async (tx) => {

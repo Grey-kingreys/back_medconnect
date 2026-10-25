@@ -4,10 +4,9 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
-  BadRequestException,
-  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from 'src/common/services/prisma.service';
+import { AccesPharmacieService } from './acces-pharmacie.service';
 import {
   CreateMedicamentDto,
   UpdateMedicamentDto,
@@ -116,6 +115,7 @@ export class PharmacieService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
+    private readonly accesPharmacie: AccesPharmacieService,
   ) {}
 
   // ─── Catalogue Global (ADMIN/SUPER_ADMIN) ─────────────────────
@@ -363,7 +363,7 @@ export class PharmacieService {
     adminUserId: string,
     dto: UpsertStockDto,
   ) {
-    await this.checkPharmacieAccess(structureId, adminUserId);
+    await this.accesPharmacie.verifier(structureId, adminUserId);
 
     // Vérifier que le médicament existe
     const med = await this.prisma.medicament.findUnique({
@@ -433,7 +433,7 @@ export class PharmacieService {
     adminUserId: string,
     dto: UpdateStockQuantiteDto,
   ) {
-    await this.checkPharmacieAccess(structureId, adminUserId);
+    await this.accesPharmacie.verifier(structureId, adminUserId);
 
     // Ligne verrouillée jusqu'à la fin de la transaction : deux ajustements simultanés
     // s'appliquent l'un après l'autre, sans mise à jour perdue (D123).
@@ -487,7 +487,7 @@ export class PharmacieService {
   }
 
   async getStockPharmacie(structureId: string, adminUserId: string) {
-    await this.checkPharmacieAccess(structureId, adminUserId);
+    await this.accesPharmacie.verifier(structureId, adminUserId);
 
     const stocks = await this.prisma.stockMedicament.findMany({
       where: { structureId },
@@ -532,7 +532,7 @@ export class PharmacieService {
     stockId: string,
     adminUserId: string,
   ) {
-    await this.checkPharmacieAccess(structureId, adminUserId);
+    await this.accesPharmacie.verifier(structureId, adminUserId);
 
     const stock = await this.prisma.stockMedicament.findFirst({
       where: { id: stockId, structureId },
@@ -550,7 +550,7 @@ export class PharmacieService {
     structureId: string,
     adminUserId: string,
   ): Promise<Buffer> {
-    await this.checkPharmacieAccess(structureId, adminUserId);
+    await this.accesPharmacie.verifier(structureId, adminUserId);
 
     const exemple = await this.prisma.medicament.findFirst({
       orderBy: { nom: 'asc' },
@@ -600,7 +600,7 @@ export class PharmacieService {
     fichier?: FichierImport,
     mode: ModeImportStock = 'inventaire',
   ) {
-    await this.checkPharmacieAccess(structureId, adminUserId);
+    await this.accesPharmacie.verifier(structureId, adminUserId);
     const analyse = await this.analyserImportStock(fichier);
     const enStock = await this.lireQuantitesEnStock(
       this.prisma,
@@ -626,7 +626,7 @@ export class PharmacieService {
     fichier?: FichierImport,
     mode: ModeImportStock = 'inventaire',
   ) {
-    await this.checkPharmacieAccess(structureId, adminUserId);
+    await this.accesPharmacie.verifier(structureId, adminUserId);
     const analyse = await this.analyserImportStock(fichier);
 
     // Lecture du stock, calcul et écriture dans la même transaction
@@ -1073,29 +1073,6 @@ export class PharmacieService {
   }
 
   // ─── Helpers ──────────────────────────────────────────────────
-
-  private async checkPharmacieAccess(structureId: string, userId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    const isAuthorizedRole =
-      user?.role === 'STRUCTURE_ADMIN' || user?.role === 'PHARMACIEN';
-    if (!user || user.structureId !== structureId || !isAuthorizedRole) {
-      throw new ForbiddenException(
-        "Vous n'êtes pas autorisé à gérer cette pharmacie",
-      );
-    }
-
-    const structure = await this.prisma.structure.findUnique({
-      where: { id: structureId },
-    });
-    if (!structure) throw new NotFoundException('Structure non trouvée');
-    if (structure.type !== 'PHARMACIE') {
-      throw new BadRequestException(
-        'Cette fonctionnalité est réservée aux pharmacies',
-      );
-    }
-
-    return { user, structure };
-  }
 
   // Distance Haversine en km
   private calculateDistance(

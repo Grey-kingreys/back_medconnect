@@ -4,6 +4,7 @@ import { CatalogueImportService } from './catalogue-import.service';
 import { PharmacieController } from './pharmacie.controller';
 import { VenteController } from './vente.controller';
 import { VenteService } from './vente.service';
+import { AccesPharmacieService } from './acces-pharmacie.service';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { AuthModule } from 'src/auth/auth.module';
 
@@ -16,6 +17,7 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
     PharmacieService,
     CatalogueImportService,
     VenteService,
+    AccesPharmacieService,
     PrismaService,
   ],
 })

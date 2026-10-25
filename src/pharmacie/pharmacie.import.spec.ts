@@ -4,6 +4,7 @@ import { PharmacieService, MIME_XLSX } from './pharmacie.service';
 import { FichierImport } from './dto/pharmacie.dto';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { NotificationsService } from 'src/notifications/notifications.service';
+import { AccesPharmacieService } from './acces-pharmacie.service';
 
 /** Forme minimale d'un appel à stockMedicament.upsert observé par les tests. */
 type OperationUpsert = {
@@ -103,9 +104,12 @@ describe('PharmacieService, import Excel du stock', () => {
         findMany: jest.fn().mockResolvedValue([{ id: USER_ID }]),
       },
       structure: {
-        findUnique: jest
-          .fn()
-          .mockResolvedValue({ id: STRUCTURE_ID, type: 'PHARMACIE' }),
+        findUnique: jest.fn().mockResolvedValue({
+          id: STRUCTURE_ID,
+          type: 'PHARMACIE',
+          adminId: null,
+          isActive: true,
+        }),
       },
       medicament: {
         findFirst: jest.fn().mockResolvedValue({ nom: 'Amoxicilline 500 mg' }),
@@ -130,6 +134,7 @@ describe('PharmacieService, import Excel du stock', () => {
     service = new PharmacieService(
       prisma as unknown as PrismaService,
       notifications as unknown as NotificationsService,
+      new AccesPharmacieService(prisma as unknown as PrismaService),
     );
   });
 

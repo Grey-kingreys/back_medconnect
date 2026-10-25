@@ -2,6 +2,7 @@ import { NotFoundException } from '@nestjs/common';
 import { PharmacieService } from './pharmacie.service';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { NotificationsService } from 'src/notifications/notifications.service';
+import { AccesPharmacieService } from './acces-pharmacie.service';
 
 /**
  * Ajustement manuel de la quantité : la quantité vient de la ligne verrouillée
@@ -16,6 +17,11 @@ describe('PharmacieService, ajustement de quantité', () => {
   let update: jest.Mock;
   let notifications: { createManyNotifications: jest.Mock };
   let service: PharmacieService;
+  let prisma: {
+    user: { findUnique: jest.Mock; findMany: jest.Mock };
+    structure: { findUnique: jest.Mock };
+    $transaction: jest.Mock;
+  };
 
   beforeEach(() => {
     queryRaw = jest.fn();
@@ -27,7 +33,7 @@ describe('PharmacieService, ajustement de quantité', () => {
       }),
     );
     const tx = { $queryRaw: queryRaw, stockMedicament: { update } };
-    const prisma = {
+    prisma = {
       user: {
         findUnique: jest.fn().mockResolvedValue({
           id: USER_ID,
@@ -37,9 +43,12 @@ describe('PharmacieService, ajustement de quantité', () => {
         findMany: jest.fn().mockResolvedValue([{ id: USER_ID }]),
       },
       structure: {
-        findUnique: jest
-          .fn()
-          .mockResolvedValue({ id: STRUCTURE_ID, type: 'PHARMACIE' }),
+        findUnique: jest.fn().mockResolvedValue({
+          id: STRUCTURE_ID,
+          type: 'PHARMACIE',
+          adminId: null,
+          isActive: true,
+        }),
       },
       $transaction: jest.fn((fn: (t: unknown) => Promise<unknown>) => fn(tx)),
     };
@@ -47,6 +56,7 @@ describe('PharmacieService, ajustement de quantité', () => {
     service = new PharmacieService(
       prisma as unknown as PrismaService,
       notifications as unknown as NotificationsService,
+      new AccesPharmacieService(prisma as unknown as PrismaService),
     );
   });
 
@@ -70,6 +80,26 @@ describe('PharmacieService, ajustement de quantité', () => {
       }),
     );
     expect(res.message).toBe('Stock augmenté (nouvelle quantité : 35)');
+  });
+
+  it('un compte ACCUEIL membre de la pharmacie peut ajuster la quantité (enum role non lu)', async () => {
+    prisma.user.findUnique.mockResolvedValueOnce({
+      id: USER_ID,
+      nom: 'Bah',
+      prenom: 'Mariama',
+      role: 'ACCUEIL',
+      structureId: STRUCTURE_ID,
+    });
+    queryRaw.mockResolvedValue([{ quantite: 30, notes: null }]);
+
+    const res = await service.updateStockQuantite(
+      STRUCTURE_ID,
+      STOCK_ID,
+      USER_ID,
+      { variation: 5 },
+    );
+
+    expect(res.success).toBe(true);
   });
 
   it('2. plancher à 0 : une variation trop négative ne descend pas sous 0', async () => {

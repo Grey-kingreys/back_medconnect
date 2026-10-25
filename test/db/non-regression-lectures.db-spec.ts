@@ -4,6 +4,7 @@
 // services ne modifient que le bloc « construction des services » (D462).
 import { NotificationsService } from 'src/notifications/notifications.service';
 import { PharmacieService } from 'src/pharmacie/pharmacie.service';
+import { AccesPharmacieService } from 'src/pharmacie/acces-pharmacie.service';
 import { VenteService } from 'src/pharmacie/vente.service';
 import type { StorageService } from 'src/storage/storage.service';
 import { PrismaService } from 'src/common/services/prisma.service';
@@ -124,8 +125,9 @@ describe('Non-régression des lectures pharmacie (PB02)', () => {
     const stockageFactice = {
       getPublicUrl: (cle: string) => `logo-harnais/${cle}`,
     } as unknown as StorageService;
-    pharmacie = new PharmacieService(prisma, notifications);
-    ventes = new VenteService(prisma, notifications, stockageFactice);
+    const acces = new AccesPharmacieService(prisma);
+    pharmacie = new PharmacieService(prisma, notifications, acces);
+    ventes = new VenteService(prisma, notifications, stockageFactice, acces);
 
     J = resume.aujourdhui;
     jourJ = J.toISOString().slice(0, 10);

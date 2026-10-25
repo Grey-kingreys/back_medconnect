@@ -3,6 +3,7 @@ import { Prisma } from 'generated/prisma/client';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { NotificationsService } from 'src/notifications/notifications.service';
 import { StorageService } from 'src/storage/storage.service';
+import { AccesPharmacieService } from './acces-pharmacie.service';
 import {
   bornesDuJour,
   formaterNumero,
@@ -464,6 +465,7 @@ describe('VenteService (ventes en pharmacie)', () => {
       id: S1,
       type: 'PHARMACIE',
       adminId: 'u-admin',
+      isActive: true,
       nom: 'Pharmacie de Kaloum',
       adresse: 'Avenue de la République',
       ville: 'Conakry',
@@ -474,6 +476,7 @@ describe('VenteService (ventes en pharmacie)', () => {
       id: 's2',
       type: 'PHARMACIE',
       adminId: 'u-admin2',
+      isActive: true,
       nom: 'Autre pharmacie',
       logoFile: null,
     });
@@ -481,6 +484,7 @@ describe('VenteService (ventes en pharmacie)', () => {
       id: 'h1',
       type: 'HOPITAL',
       adminId: 'u-admin3',
+      isActive: true,
       nom: 'Hôpital',
       logoFile: null,
     });
@@ -488,10 +492,12 @@ describe('VenteService (ventes en pharmacie)', () => {
     const stockage = {
       getPublicUrl: (cle: string) => `https://cdn.test/${cle}`,
     };
+    const prisma = base.prisma() as unknown as PrismaService;
     service = new VenteService(
-      base.prisma() as unknown as PrismaService,
+      prisma,
       notifications as unknown as NotificationsService,
       stockage as unknown as StorageService,
+      new AccesPharmacieService(prisma),
     );
   });
 
@@ -911,9 +917,7 @@ describe('VenteService (ventes en pharmacie)', () => {
         vendre(lignes(['a', 1]), {}, undefined, 'u-autre'),
       );
       expect(e.getStatus()).toBe(403);
-      expect(e.message).toBe(
-        "Vous n'avez pas accès aux ventes de cette pharmacie.",
-      );
+      expect(e.message).toBe("Vous n'avez pas accès à cette pharmacie.");
     });
 
     it('structure de type HOPITAL : 403', async () => {

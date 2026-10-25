@@ -12,8 +12,8 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | ID | Tâche | Tier | Statut | Tent. |
 |----|-------|------|--------|-------|
 | PB01 | Harnais de base de test, `npm run test:db` (tasks/PB01-harnais-base-de-test.md) | dur | validé (D456, D457) | 1 |
-| PB02 | Non-régression des alertes et des lectures, instantanés avant recâblage (tasks/PB02-non-regression-lectures.md) | spécifié | à faire | 0 |
-| PB03 | Permissions T1, contrôle d'accès unifié, `masquerCouts`, migration M1 | spécifié | à faire | 0 |
+| PB02 | Non-régression des alertes et des lectures, instantanés avant recâblage (tasks/PB02-non-regression-lectures.md) | spécifié | validé (commit 2004c97) | 1 |
+| PB03 | Permissions T1, contrôle d'accès unifié, `masquerCouts`, migration M1 (tasks/PB03-permissions-acces-unifie.md) | spécifié | validé (D464 à D468, rapports/PB03-chef.md) | 1 |
 | PB04 | Règles pures du domaine et vecteurs de test | dur | à faire | 0 |
 | PB05 | Points de vente, postes et référentiels, migration M2 | spécifié | à faire | 0 |
 | PB06 | Fiche produit étendue, migration M3 | spécifié | à faire | 0 |
