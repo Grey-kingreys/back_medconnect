@@ -19,7 +19,7 @@ import { normaliserTelephone } from 'src/common/telephone/telephone';
  * Consentement d'accès assisté par l'accueil (rôle « Accueil »).
  *
  * Deux flux, un même effet : créer une `AutorisationStructure(patient, structure)`
- * APRÈS une preuve du consentement du patient — jamais accordée unilatéralement par
+ * APRÈS une preuve du consentement du patient, jamais accordée unilatéralement par
  * le personnel (enjeu RGPD / « le patient possède ses données »).
  *
  *  1. **Code court / QR** : le patient génère dans son app un code éphémère (usage
@@ -36,7 +36,7 @@ export class ConsentService {
 
   private readonly CODE_TTL_S = 120; // durée de vie d'un code de partage (QR)
   private readonly OTP_TTL_S = 300; // durée de vie d'un OTP SMS
-  // Alphabet sans caractères ambigus (pas de 0/O, 1/I/L) — lisible et dictable.
+  // Alphabet sans caractères ambigus (pas de 0/O, 1/I/L), lisible et dictable.
   private readonly ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   private readonly CODE_LEN = 6;
 

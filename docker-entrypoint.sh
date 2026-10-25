@@ -19,7 +19,7 @@ if [ "$NODE_ENV" = "development" ]; then
       echo "$CUR_DEPS" > node_modules/.deps-hash
       echo "✅ node_modules synchronisé."
     else
-      echo "📦 Dépendances à jour — install ignoré."
+      echo "📦 Dépendances à jour, install ignoré."
     fi
   fi
 

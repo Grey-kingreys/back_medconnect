@@ -40,7 +40,7 @@ export class SuperAdminSeeder implements OnApplicationBootstrap {
     // un compte privilégié avec des identifiants vides.
     if (!email || !password) {
       this.logger.warn(
-        'SUPER_ADMIN_EMAIL / SUPER_ADMIN_PASSWORD absents — seed du super-admin ignoré.',
+        'SUPER_ADMIN_EMAIL / SUPER_ADMIN_PASSWORD absents : seed du super-admin ignoré.',
       );
       return;
     }
@@ -70,7 +70,9 @@ export class SuperAdminSeeder implements OnApplicationBootstrap {
           `Rôle « Super Administrateur » rattaché au compte existant (${email}).`,
         );
       } else {
-        this.logger.log(`Compte SUPER_ADMIN déjà présent (${email}) — aucune action.`);
+        this.logger.log(
+          `Compte SUPER_ADMIN déjà présent (${email}), aucune action.`,
+        );
       }
       return;
     }
@@ -79,7 +81,7 @@ export class SuperAdminSeeder implements OnApplicationBootstrap {
       // Cas improbable (rôle système non encore seedé) : on crée quand même le
       // compte ; il sera rattaché au prochain démarrage par la branche ci-dessus.
       this.logger.warn(
-        'Rôle système « Super Administrateur » introuvable au boot — compte créé sans appRoleId (rattachement au prochain démarrage).',
+        'Rôle système « Super Administrateur » introuvable au boot, compte créé sans appRoleId (rattachement au prochain démarrage).',
       );
     }
 

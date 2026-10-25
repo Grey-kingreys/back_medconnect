@@ -28,7 +28,7 @@ export class EmailService {
 
   /**
    * Envoie via Resend en respectant le contrat du SDK : `emails.send()` NE LÈVE PAS
-   * sur une erreur d'API (domaine non vérifié, quota dépassé, adresse invalide…) —
+   * sur une erreur d'API (domaine non vérifié, quota dépassé, adresse invalide…),
    * il renvoie `{ data, error }`. Sans vérifier `error`, un échec d'envoi passait
    * totalement inaperçu (log « sent » trompeur, réponse 201). On transforme donc un
    * `error` en exception, que chaque appelant gère déjà (log `_failed`, et re-throw
@@ -108,7 +108,7 @@ export class EmailService {
       await this.deliver({
         from: this.fromEmail,
         to: email,
-        subject: '🔐 Réinitialisation de votre mot de passe — MedConnecte',
+        subject: '🔐 Réinitialisation de votre mot de passe MedConnecte',
         html: this.buildLayout(
           'Réinitialisation de mot de passe',
           `
@@ -148,7 +148,7 @@ export class EmailService {
       await this.deliver({
         from: this.fromEmail,
         to: email,
-        subject: '🔒 Tentatives de connexion suspectes — MedConnecte',
+        subject: '🔒 Tentatives de connexion suspectes sur MedConnecte',
         html: this.buildLayout(
           'Alerte de sécurité',
           `
@@ -194,7 +194,7 @@ export class EmailService {
       await this.deliver({
         from: this.fromEmail,
         to: email,
-        subject: `🏥 Invitation — Configurez votre ${typeLabel} sur MedConnecte`,
+        subject: `🏥 Invitation : configurez votre ${typeLabel} sur MedConnecte`,
         html: this.buildLayout(
           `Bienvenue sur MedConnecte`,
           `
@@ -241,7 +241,7 @@ export class EmailService {
       await this.deliver({
         from: this.fromEmail,
         to: email,
-        subject: `🏥 Votre compte ${roleLabel} sur MedConnecte — ${structureNom}`,
+        subject: `🏥 Votre compte ${roleLabel} sur MedConnecte (${structureNom})`,
         html: this.buildLayout(
           `Votre compte MedConnecte`,
           `
@@ -285,7 +285,7 @@ export class EmailService {
 
     try {
       await this.deliver({
-        from: this.fromEmail, // Domaine vérifié (cf. RESEND_FROM_EMAIL) — sinon 403 Resend.
+        from: this.fromEmail, // Domaine vérifié (cf. RESEND_FROM_EMAIL), sinon 403 Resend.
         to: contactEmail,
         subject: `🚨 ALERTE URGENCE : ${patientPrenom} ${patientNom} a besoin d'aide !`,
         html: this.buildLayout(
@@ -339,7 +339,7 @@ export class EmailService {
 
   /**
    * Coque HTML commune à tous les emails. Choix de design :
-   * - Logo réel de la marque (fond transparent) posé sur une **carte blanche** —
+   * - Logo réel de la marque (fond transparent) posé sur une **carte blanche**,
    *   il ne ressortait pas sur l'ancien bandeau bleu. Servi via `FRONTEND_URL`
    *   (les data-URI/SVG sont bloqués par Gmail/Outlook → image hébergée obligatoire).
    * - Wordmark texte (plus d'emoji dans le titre) + filet dégradé aux teintes du logo.
@@ -390,7 +390,7 @@ export class EmailService {
                   </tr>
                   <tr>
                     <td style="padding:24px 32px;text-align:center;background:#f8fafc;border-top:1px solid #eef2f7">
-                      <p style="margin:0;font-size:12px;color:#64748b">© ${year} MedConnecte — Plateforme de Santé Numérique</p>
+                      <p style="margin:0;font-size:12px;color:#64748b">© ${year} MedConnecte, Plateforme de Santé Numérique</p>
                       <p style="margin:6px 0 0;font-size:12px;color:#94a3b8">Cet email a été envoyé automatiquement, merci de ne pas y répondre.</p>
                     </td>
                   </tr>

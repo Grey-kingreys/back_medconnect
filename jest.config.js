@@ -1,5 +1,5 @@
 /**
- * Configuration Jest — tests unitaires (`*.spec.ts` sous `src/`).
+ * Configuration Jest : tests unitaires (`*.spec.ts` sous `src/`).
  *
  * Les tests e2e ont leur propre config (`test/jest-e2e.json`, lancée par
  * `npm run test:e2e`) car ils démarrent l'app complète et exigent Postgres/Redis.
@@ -7,7 +7,7 @@
  *
  * `moduleDirectories` inclut la racine du projet pour résoudre les imports en
  * *bare specifier* (`src/...`, `generated/prisma/client`) alignés sur `baseUrl: "./"`
- * du tsconfig — sans quoi ts-jest ne les retrouve pas.
+ * du tsconfig, sans quoi ts-jest ne les retrouve pas.
  */
 module.exports = {
   moduleFileExtensions: ['js', 'json', 'ts'],

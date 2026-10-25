@@ -96,7 +96,7 @@ export class CarnetSanteController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Créer/Mettre à jour le profil médical',
-    description: 'Upsert — crée si inexistant, met à jour sinon.',
+    description: 'Upsert : crée si inexistant, met à jour sinon.',
   })
   upsertProfilMedical(
     @Req() req: RequestWithUser,

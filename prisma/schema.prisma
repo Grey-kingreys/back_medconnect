@@ -102,7 +102,7 @@ model User {
   // Structure dont cet user est l'admin
   administeredStructure Structure? @relation("StructureAdmin")
 
-  // Rôle dynamique (RBAC permissions) — coexiste avec `role` (enum) le temps de la transition
+  // Rôle dynamique (RBAC permissions), coexiste avec `role` (enum) le temps de la transition
   appRoleId String?
   appRole   AppRole? @relation("UserAppRole", fields: [appRoleId], references: [id])
 
@@ -145,7 +145,7 @@ model User {
   // Fichiers stockés (R2) dont cet utilisateur est propriétaire
   storedFiles StoredFile[] @relation("UserStoredFiles")
 
-  // Photo de profil (avatar) — fichier R2 du bucket PUBLIC. SetNull si le fichier est supprimé.
+  // Photo de profil (avatar) : fichier R2 du bucket PUBLIC. SetNull si le fichier est supprimé.
   avatarFileId String?     @unique
   avatarFile   StoredFile? @relation("UserAvatar", fields: [avatarFileId], references: [id], onDelete: SetNull)
 
@@ -187,7 +187,7 @@ model Structure {
   // Rôles personnalisés définis par l'admin de cette structure
   appRoles AppRole[] @relation("StructureRoles")
 
-  // Logo — fichier R2 du bucket PUBLIC. SetNull si le fichier est supprimé.
+  // Logo : fichier R2 du bucket PUBLIC. SetNull si le fichier est supprimé.
   logoFileId String?     @unique
   logoFile   StoredFile? @relation("StructureLogo", fields: [logoFileId], references: [id], onDelete: SetNull)
 
@@ -295,7 +295,7 @@ model Ordonnance {
   dateEmission  DateTime @default(now())
   dateExpiration DateTime?
 
-  // Ordonnance scannée (PDF/image) — fichier R2 du bucket PRIVÉ. Lecture via URL présignée.
+  // Ordonnance scannée (PDF/image) : fichier R2 du bucket PRIVÉ. Lecture via URL présignée.
   scanFileId String?     @unique
   scanFile   StoredFile? @relation("OrdonnanceScan", fields: [scanFileId], references: [id], onDelete: SetNull)
 
@@ -316,8 +316,8 @@ model ResultatAnalyse {
   typeAnalyse String   // "Bilan sanguin", "Radiographie", etc.
   laboratoire String?
   resultats   String   // JSON ou texte libre
-  fichierUrl  String?  // ⚠️ DÉPRÉCIÉ (URL brute sans contrôle d'accès) — remplacé par documentFile. À retirer une fois le front migré.
-  // Document d'analyse (PDF/image/DICOM) — fichier R2 du bucket PRIVÉ. Lecture via URL présignée.
+  fichierUrl  String?  // ⚠️ DÉPRÉCIÉ (URL brute sans contrôle d'accès), remplacé par documentFile. À retirer une fois le front migré.
+  // Document d'analyse (PDF/image/DICOM) : fichier R2 du bucket PRIVÉ. Lecture via URL présignée.
   documentFileId String?     @unique
   documentFile   StoredFile? @relation("AnalyseDocument", fields: [documentFileId], references: [id], onDelete: SetNull)
   dateAnalyse DateTime
@@ -385,7 +385,7 @@ model RendezVous {
   patient     User     @relation("PatientRendezVous", fields: [patientId], references: [id], onDelete: Cascade)
   
   // Optionnel : un RDV « avec la structure » (pris par l'accueil) n'est pas encore
-  // affecté à un médecin — un médecin de la structure le prend en charge ensuite.
+  // affecté à un médecin, un médecin de la structure le prend en charge ensuite.
   medecinId   String?
   medecin     User?    @relation("MedecinRendezVous", fields: [medecinId], references: [id], onDelete: SetNull)
 
@@ -628,8 +628,8 @@ model Urgence {
 // ====== STOCKAGE OBJETS (Cloudflare R2) ======
 // Métadonnées des fichiers déposés sur R2 (avatars, logos, ordonnances scannées,
 // résultats d'analyses, imagerie envoyée au diagnostic IA). On ne persiste JAMAIS
-// d'URL présignée (elle expire et fuiterait un accès) — uniquement la `key` R2.
-// Cf. `src/storage/` (StorageModule) — module isolé, migration des usages métier séparée.
+// d'URL présignée (elle expire et fuiterait un accès), uniquement la `key` R2.
+// Cf. `src/storage/` (StorageModule), module isolé, migration des usages métier séparée.
 
 enum StoredFileBucket {
   PUBLIC   // bucket public (cdn.medconnecte.com) : avatars, logos, images d'articles

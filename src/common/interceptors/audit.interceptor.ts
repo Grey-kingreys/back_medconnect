@@ -161,7 +161,7 @@ export class AuditInterceptor implements NestInterceptor {
       });
     } catch (error) {
       this.logger.error(
-        `audit.write_failed — ${entree.action} ${entree.entityType}:${entree.entityId}`,
+        `audit.write_failed : ${entree.action} ${entree.entityType}:${entree.entityId}`,
         error instanceof Error ? error.stack : String(error),
       );
     }

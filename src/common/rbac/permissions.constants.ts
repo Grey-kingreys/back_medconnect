@@ -1,5 +1,5 @@
 /**
- * Catalogue de permissions — SOURCE DE VÉRITÉ UNIQUE (codé en dur).
+ * Catalogue de permissions : SOURCE DE VÉRITÉ UNIQUE (codé en dur).
  *
  * Cf. PLAN-REMEDIATION §2.5. Les structures ne créent pas de permissions : elles les
  * piochent dans ce catalogue pour composer leurs rôles. Ce fichier sert à la fois :
@@ -16,7 +16,7 @@ export const PERMISSIONS = {
   ANALYSE_WRITE: 'analyse:write',
   VACCINATION_WRITE: 'vaccination:write',
   RENDEZVOUS_WRITE: 'rendezvous:write',
-  PATIENT_READ: 'patient:read', // fiche d'orientation (identité, médecin traitant, RDV) — PAS le carnet
+  PATIENT_READ: 'patient:read', // fiche d'orientation (identité, médecin traitant, RDV), PAS le carnet
 
   // 🚨 Urgences
   SOS_RESPOND: 'sos:respond',
@@ -54,7 +54,7 @@ export interface PermissionDef {
   categorie: string;
 }
 
-/** Catalogue complet (libellés FR + catégorie) — seedé dans la table `Permission`. */
+/** Catalogue complet (libellés FR + catégorie), seedé dans la table `Permission`. */
 export const PERMISSION_CATALOG: PermissionDef[] = [
   {
     code: PERMISSIONS.CARNET_READ,
@@ -190,7 +190,7 @@ export const ALL_PERMISSION_CODES: PermissionCode[] = PERMISSION_CATALOG.map(
 );
 
 /**
- * Permissions PLATEFORME — **jamais délégables** à un rôle de structure.
+ * Permissions PLATEFORME : **jamais délégables** à un rôle de structure.
  * Anti-escalade (PLAN §2.5.d) : un admin de structure ne peut pas les accorder.
  */
 export const NON_DELEGABLE_PERMISSIONS: PermissionCode[] = [

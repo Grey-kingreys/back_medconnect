@@ -91,9 +91,9 @@ export class CarnetSanteService {
    * Périmètre patient : QUEL dossier l'acteur peut atteindre (médecin traitant
    * ou structure explicitement autorisée par le patient). Le TYPE d'action
    * (lire / écrire) est porté par les permissions du rôle, vérifiées en amont
-   * par `PermissionsGuard` — les deux contrôles sont complémentaires.
+   * par `PermissionsGuard`, les deux contrôles sont complémentaires.
    *
-   * @returns `isMedecinTraitant` — le médecin traitant voit tout le carnet,
+   * @returns `isMedecinTraitant` : le médecin traitant voit tout le carnet,
    *   une structure autorisée ne voit que ce qu'elle y a elle-même produit.
    * @returns `actorStructureId` : établissement réel de l'acteur en base
    *   (`null` s'il n'en a pas, absent si l'acteur est le patient lui-même).

@@ -19,7 +19,7 @@ import {
 } from './permissions.constants';
 
 /**
- * Provisioning des rôles & permissions (RBAC dynamique — PLAN §2.5.c).
+ * Provisioning des rôles & permissions (RBAC dynamique : PLAN §2.5.c).
  *
  * Au boot (OnApplicationBootstrap, idempotent, comme SuperAdminSeeder) :
  *  1. synchronise le catalogue `Permission` (source de vérité = code),
@@ -77,7 +77,7 @@ export class RolesService implements OnApplicationBootstrap {
 
   /**
    * Crée un rôle s'il n'existe pas (idempotent, par [structureId, nom]).
-   * Les permissions ne sont (ré)appliquées qu'à la création — OU si `resync`
+   * Les permissions ne sont (ré)appliquées qu'à la création, OU si `resync`
    * (réservé aux rôles système : ex. Super Admin doit toujours avoir tout le
    * catalogue, même après l'ajout d'une nouvelle permission). On ne RETIRE jamais
    * de permission → respecte les personnalisations faites par un admin de structure.
@@ -324,7 +324,7 @@ export class RolesService implements OnApplicationBootstrap {
     }
   }
 
-  // ─── Gestion des rôles (admin de structure) — anti-escalade ───
+  // ─── Gestion des rôles (admin de structure) : anti-escalade ───
 
   /** Catalogue des permissions, groupé par catégorie (pour l'UI admin). */
   async listCatalog(): Promise<
