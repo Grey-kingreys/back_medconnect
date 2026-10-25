@@ -7,6 +7,7 @@ import {
   COMPTES_DEMO,
   CONSULTATIONS_DEMO,
   RENDEZ_VOUS_DEMO,
+  STOCKS_DEMO,
   STRUCTURES_DEMO,
   URGENCES_DEMO,
 } from './demo.donnees';
@@ -19,7 +20,10 @@ jest.mock('bcrypt', () => ({
 const FORMAT_CHIFFRE = /^[0-9a-f]{24}:[0-9a-f]{32}:[0-9a-f]*$/i;
 
 type Modele = Record<string, jest.Mock>;
-type PrismaSimule = Record<string, Modele> & { $transaction: jest.Mock };
+type PrismaSimule = Record<string, Modele> & {
+  $transaction: jest.Mock;
+  $queryRaw: jest.Mock;
+};
 
 /**
  * Doublure Prisma : chaque modèle est créé à la demande, chaque méthode est un
@@ -41,6 +45,7 @@ function creerPrisma(): PrismaSimule {
     get(_cible, cle: string | symbol) {
       if (ignore(cle)) return undefined;
       if (cle === '$transaction') return transaction;
+      if (cle === '$queryRaw') return requeteBrute;
       modeles[cle] ??= new Proxy({} as Modele, {
         get(m, nom: string | symbol) {
           if (ignore(nom)) return undefined;
@@ -51,6 +56,7 @@ function creerPrisma(): PrismaSimule {
       return modeles[cle];
     },
   });
+  const requeteBrute = jest.fn().mockResolvedValue([]);
   const transaction = jest.fn((fn: (tx: unknown) => Promise<unknown>) =>
     fn(prisma),
   );
@@ -302,12 +308,73 @@ describe('DemoSeeder', () => {
         new Set(['LANCE', 'PRIS_EN_CHARGE', 'TERMINE']),
       );
 
-      // Stocks : au moins une rupture et un stock faible
-      const stocks = donnees<{ quantite: number; disponible: boolean }[]>(
+      // Stocks : fiches à quantité nulle, stock porté par les lots (D504)
+      const stocks = donnees<Record<string, unknown>[]>(
         prisma.stockMedicament.createMany,
       );
-      expect(stocks.some((s) => s.quantite === 0 && !s.disponible)).toBe(true);
-      expect(stocks.some((s) => s.quantite > 0 && s.quantite < 10)).toBe(true);
+      expect(stocks).toHaveLength(STOCKS_DEMO.length);
+      expect(
+        stocks.every((s) => !('quantite' in s) && !('disponible' in s)),
+      ).toBe(true);
+      const lots = donnees<
+        { id: string; stockMedicamentId: string; quantiteRecue: number }[]
+      >(prisma.lotStock.createMany);
+      expect(lots).toHaveLength(
+        STOCKS_DEMO.filter((s) => s.quantite > 0).length,
+      );
+      expect(lots.length).toBeLessThan(stocks.length); // au moins une rupture
+      expect(lots.some((l) => l.quantiteRecue < 10)).toBe(true); // un stock faible
+    });
+
+    it('création : un lot technique et un mouvement RECEPTION par fiche non vide, jamais de pièce MIGRATION', async () => {
+      await seeder.creerJeuDeDonnees();
+
+      const lots = donnees<
+        {
+          id: string;
+          quantiteRecue: number;
+          lotTechnique: boolean;
+          coutUnitaire: number;
+          coefficientReception: number;
+          pointDeVenteId: string;
+        }[]
+      >(prisma.lotStock.createMany);
+      expect(lots.length).toBeGreaterThan(0);
+      for (const l of lots) {
+        expect(l.lotTechnique).toBe(true);
+        expect(l.coutUnitaire).toBe(0);
+        expect(l.coefficientReception).toBe(1);
+        expect(l.pointDeVenteId).toBe('id-upsert');
+      }
+      const mouvements = donnees<
+        {
+          evenementId: string;
+          lotId: string;
+          quantite: number;
+          type: string;
+          pieceOrigineType: string;
+          motif: string;
+        }[]
+      >(prisma.mouvementStock.createMany);
+      expect(mouvements).toHaveLength(lots.length);
+      mouvements.forEach((m, i) => {
+        expect(m.lotId).toBe(lots[i].id);
+        expect(m.quantite).toBe(lots[i].quantiteRecue);
+        expect(m.type).toBe('RECEPTION');
+        expect(m.pieceOrigineType).toBe('RECEPTION');
+        expect(m.motif).toBe('Stock initial du jeu de démonstration');
+        expect(typeof m.evenementId).toBe('string');
+      });
+      expect(mouvements.some((m) => m.pieceOrigineType === 'MIGRATION')).toBe(
+        false,
+      );
+      const ordre = (mock: jest.Mock) => mock.mock.invocationCallOrder[0];
+      expect(ordre(prisma.stockMedicament.createMany)).toBeLessThan(
+        ordre(prisma.lotStock.createMany),
+      );
+      expect(ordre(prisma.lotStock.createMany)).toBeLessThan(
+        ordre(prisma.mouvementStock.createMany),
+      );
     });
 
     it('réutilise un médicament déjà présent au catalogue', async () => {
@@ -461,6 +528,14 @@ describe('DemoSeeder', () => {
       });
       expect(prisma.parametresPharmacie.deleteMany).toHaveBeenCalled();
       expect(prisma.anomalie.deleteMany).toHaveBeenCalled();
+      expect(prisma.mouvementStock.deleteMany).toHaveBeenCalledWith({
+        where: { pointDeVente: { structureId: { in: ['s-pharma'] } } },
+      });
+      expect(
+        prisma.lotStock.deleteMany.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        prisma.pointDeVente.deleteMany.mock.invocationCallOrder[0],
+      );
       expect(
         prisma.pointDeVente.deleteMany.mock.invocationCallOrder[0],
       ).toBeLessThan(prisma.structure.deleteMany.mock.invocationCallOrder[0]);

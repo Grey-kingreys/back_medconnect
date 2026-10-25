@@ -17,7 +17,7 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | PB04 | Règles pures du domaine et vecteurs de test (tasks/PB04-regles-domaine-vecteurs.md) | dur | validé (D469 à D477, rapports/PB04-chef.md) | 1 |
 | PB05 | Points de vente, postes et référentiels, migration M2 (tasks/PB05-points-de-vente-referentiels.md) | spécifié | validé (D478 à D484, rapports/PB05-chef.md) | 1 |
 | PB06 | Fiche produit étendue, migration M3 (tasks/PB06-fiche-produit-etendue.md) | spécifié | validé (D485 à D492, rapports/PB06-chef.md) | 1 |
-| PB07 | Lots, journal, agrégats, reprise, migration M4 | dur | à faire | 0 |
+| PB07 | Lots, journal, agrégats, reprise, migration M4 (tasks/PB07-lots-journal-agregats-reprise.md, D493 à D505) | dur | validé (D493 à D505, rapports/PB07-chef.md) | 1 |
 | PB08 | Service de mouvements et lectures recâblées | dur | à faire | 0 |
 | PB09 | Tables de caisse et pièces de vente, migrations M5 et M6 | dur | à faire | 0 |
 | PB10 | Postes et sessions de caisse | spécifié | à faire | 0 |
@@ -44,7 +44,7 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 ## Dernières décisions (5 max, historique complet dans decisions.md)
 
 - D456 Prisma n'enveloppe pas une migration en transaction : `BEGIN;`/`COMMIT;` explicites et test statique (plan)
-- D478 `assurerPointDeVente` unique (création, démo, démarrage, accès paresseux) (révisable)
-- D479 `supprimerConfigurationPharmacies` avant toute suppression de structure (révisable)
-- D487 PB06 sans conversion : coefficient d'une fiche non qualifiée avec stock refusé (400 `CONVERSION_REQUISE`) (révisable)
-- D490 Prix à l'unité sur fiche non déconditionnable refusé sur l'état final, jamais effacé implicitement (révisable)
+- D493 Gel du compteur : fiche créée à quantité nulle, `quantite`/`disponible` jamais modifiées après M4 (révisable)
+- D499 Agrégat lot par UPDATE puis INSERT, jamais `ON CONFLICT` (CHECK contrôlé sur la ligne proposée) (convention)
+- D500 Premier mouvement d'un lot dans la transaction qui le crée ; mouvement avant `ConditionnementOuvert` (révisable)
+- D503 Purge du journal réservée à la purge démo (`purgerStockPharmacies`), jamais à la suppression super administrateur (révisable)

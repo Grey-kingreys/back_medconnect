@@ -20,7 +20,11 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "test:db": "jest --config ./test/db/jest-db.json --runInBand",
     "telephones:doublons": "ts-node --transpile-only scripts/telephones-doublons.ts",
-    "structures:rattachements": "ts-node --transpile-only scripts/structures-rattachements.ts"
+    "structures:rattachements": "ts-node --transpile-only scripts/structures-rattachements.ts",
+    "stock:reconstruire": "ts-node --transpile-only scripts/stock-reconstruire.ts",
+    "stock:verifier": "ts-node --transpile-only scripts/stock-verifier.ts",
+    "stock:comparer-compteur": "ts-node --transpile-only scripts/stock-comparer-compteur.ts",
+    "pharmacie:pre-migration": "ts-node --transpile-only scripts/pharmacie-pre-migration.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.726.0",

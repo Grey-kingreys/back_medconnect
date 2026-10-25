@@ -32,6 +32,7 @@ import {
   assurerPointDeVente,
   supprimerConfigurationPharmacies,
 } from 'src/pharmacie/point-de-vente';
+import { purgerStockPharmacies } from 'src/pharmacie/stock/purge-stock';
 
 const MINUTE = 60_000;
 
@@ -175,7 +176,8 @@ export class DemoSeeder implements OnApplicationBootstrap {
    *
    * Périmètre : comptes et structures dont l'email est en `@demo.medconnecte.gn`.
    * Les journaux d'audit de ces comptes sont supprimés explicitement (leur clé
-   * étrangère est en SET NULL), de même que la configuration de caisse des
+   * étrangère est en SET NULL), de même que le journal de stock (lots, mouvements,
+   * agrégats, conditionnements, D503) et la configuration de caisse des
    * pharmacies (points de vente, postes, compteurs, plages, paramètres,
    * fournisseurs, anomalies : clés étrangères en Restrict) ; tout le reste suit les `onDelete: Cascade` du
    * schéma : profil, carnet (consultations, ordonnances, analyses, vaccinations),
@@ -201,6 +203,11 @@ export class DemoSeeder implements OnApplicationBootstrap {
       where: filtre,
       select: { id: true },
     });
+    // Journal de stock des pharmacies démo (lots en Restrict vers les points de vente, D503).
+    await purgerStockPharmacies(
+      tx,
+      structuresDemo.map((s) => s.id),
+    );
     await supprimerConfigurationPharmacies(
       tx,
       structuresDemo.map((s) => s.id),
@@ -347,8 +354,13 @@ export class DemoSeeder implements OnApplicationBootstrap {
     });
 
     // 1 bis. Point de vente, poste de reprise, compteur et paramètres des pharmacies (D478)
+    const idsPointsDeVente = new Map<CleStructure, string>();
     for (const s of STRUCTURES_DEMO.filter((x) => x.type === 'PHARMACIE')) {
-      await assurerPointDeVente(tx, { id: structureId(s.cle), nom: s.nom });
+      const { pointDeVente } = await assurerPointDeVente(tx, {
+        id: structureId(s.cle),
+        nom: s.nom,
+      });
+      idsPointsDeVente.set(s.cle, pointDeVente.id);
     }
 
     // 2. Comptes : professionnels d'abord (cibles de `medecinTraitantId`), puis patients
@@ -434,15 +446,43 @@ export class DemoSeeder implements OnApplicationBootstrap {
       await tx.medicament.create({ data: { id, ...m } });
       idsMedicaments.set(m.nom, id);
     }
+    // Fiches à quantité nulle : le stock vient du journal (gel du compteur, D493).
+    const fiches = STOCKS_DEMO.map((s) => ({ s, id: randomUUID() }));
     await tx.stockMedicament.createMany({
-      data: STOCKS_DEMO.map((s) => ({
+      data: fiches.map(({ s, id }) => ({
+        id,
         medicamentId: trouver(idsMedicaments, s.medicament),
         structureId: structureId(s.pharmacie),
-        quantite: s.quantite,
         prixUnitaire: s.prixUnitaire,
-        disponible: s.quantite > 0,
         dateExpiration: jour(s.expirationJours, 0, 0),
         notes: s.notes ?? null,
+      })),
+    });
+    // Stock initial (D504) : un lot technique et un mouvement RECEPTION par fiche non vide.
+    const lots = fiches
+      .filter(({ s }) => s.quantite > 0)
+      .map(({ s, id }) => ({
+        id: randomUUID(),
+        stockMedicamentId: id,
+        pointDeVenteId: trouver(idsPointsDeVente, s.pharmacie),
+        dateExpiration: jour(s.expirationJours, 0, 0),
+        quantiteRecue: s.quantite,
+        coutUnitaire: 0,
+        coefficientReception: 1,
+        dateReception: maintenant,
+        lotTechnique: true,
+      }));
+    await tx.lotStock.createMany({ data: lots });
+    await tx.mouvementStock.createMany({
+      data: lots.map((l) => ({
+        evenementId: randomUUID(),
+        pointDeVenteId: l.pointDeVenteId,
+        stockMedicamentId: l.stockMedicamentId,
+        lotId: l.id,
+        type: 'RECEPTION' as const,
+        quantite: l.quantiteRecue,
+        pieceOrigineType: 'RECEPTION' as const,
+        motif: 'Stock initial du jeu de démonstration',
       })),
     });
 

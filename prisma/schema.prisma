@@ -461,6 +461,13 @@ model StockMedicament {
 
   updatedAt DateTime @updatedAt
 
+  // Journal de stock (PB07, M4) : quantite et disponible sont gelées par trigger
+  lots                    LotStock[]
+  mouvements              MouvementStock[]
+  agregatsLot             AgregatStockLot[]
+  agregatsProduit         AgregatStockProduit[]
+  conditionnementsOuverts ConditionnementOuvert[]
+
   @@unique([medicamentId, structureId])
 }
 
@@ -580,6 +587,13 @@ model PointDeVente {
   plagesTicket   PlageTicket[]
   anomalies      Anomalie[]
 
+  // Journal de stock (PB07, M4)
+  lots                    LotStock[]
+  mouvementsStock         MouvementStock[]
+  agregatsLot             AgregatStockLot[]
+  agregatsProduit         AgregatStockProduit[]
+  conditionnementsOuverts ConditionnementOuvert[]
+
   @@unique([structureId, ordre])
   @@index([structureId])
 }
@@ -600,7 +614,8 @@ model Poste {
   enregistreParId           String? // sans clé étrangère (D109)
   createdAt                 DateTime     @default(now())
 
-  plagesTicket PlageTicket[]
+  plagesTicket    PlageTicket[]
+  mouvementsStock MouvementStock[]
 
   @@unique([pointDeVenteId, code])
   @@unique([pointDeVenteId, appareilId])
@@ -677,6 +692,8 @@ model Fournisseur {
   actif       Boolean   @default(true)
   createdAt   DateTime  @default(now())
 
+  lots LotStock[]
+
   @@unique([structureId, nom])
 }
 
@@ -697,6 +714,134 @@ model Anomalie {
   commentaireTraitement String?
 
   @@index([pointDeVenteId, statut, creeLe])
+}
+
+// ====== Tranche pharmacie 1 : lots, journal de stock et agrégats (PB07, M4) ======
+
+enum TypeMouvementStock {
+  RECEPTION
+  VENTE
+  RETOUR
+  INVENTAIRE
+  PERTE
+  PEREMPTION
+  TRANSFERT
+  CORRECTION
+}
+
+enum TypePiece {
+  MIGRATION
+  VENTE
+  ANNULATION
+  RECEPTION
+  INVENTAIRE
+  SORTIE_MANUELLE
+  RESOLUTION
+  QUALIFICATION
+  AJUSTEMENT
+}
+
+// Lot d'une fiche dans un point de vente. Figé après insertion par trigger, sauf dateExpiration
+// (correction auditée) et, pour un lot technique seulement, coefficientReception et coutUnitaire (PB13).
+model LotStock {
+  id                   String          @id @default(uuid())
+  stockMedicamentId    String
+  stockMedicament      StockMedicament @relation(fields: [stockMedicamentId], references: [id], onDelete: Restrict)
+  pointDeVenteId       String
+  pointDeVente         PointDeVente    @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  numeroLot            String? // nul pour le lot technique de reprise
+  dateExpiration       DateTime?       @db.Date
+  quantiteRecue        Int // en UM
+  coutUnitaire         Int // GNF par UM, figé ; 0 = inconnu, non valorisable
+  coutAchatBoite       Int? // saisi à la réception, traçabilité
+  coefficientReception Int // UM par boîte à la réception, base du reliquat
+  fournisseurId        String?
+  fournisseur          Fournisseur?    @relation(fields: [fournisseurId], references: [id], onDelete: Restrict)
+  receptionId          String? // clé étrangère vers Reception posée par M5 (PB09)
+  dateReception        DateTime
+  lotTechnique         Boolean         @default(false)
+  auteurId             String? // nul = système, sans clé étrangère (D109)
+  createdAt            DateTime        @default(now())
+
+  mouvements       MouvementStock[]
+  agregat          AgregatStockLot?
+  conditionnements ConditionnementOuvert[]
+
+  @@index([stockMedicamentId, pointDeVenteId, dateExpiration, dateReception])
+  @@index([pointDeVenteId, dateExpiration])
+}
+
+// Journal de stock, append-only : jamais modifié ni supprimé (trigger), sauf purge démo et harnais.
+model MouvementStock {
+  id                String             @id @default(uuid())
+  evenementId       String             @unique // stable : UUID client, UUID serveur, ou migration:<stockId>
+  pointDeVenteId    String
+  pointDeVente      PointDeVente       @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  stockMedicamentId String
+  stockMedicament   StockMedicament    @relation(fields: [stockMedicamentId], references: [id], onDelete: Restrict)
+  lotId             String? // nul seulement pour une sortie provisoire sans lot (O11)
+  lot               LotStock?          @relation(fields: [lotId], references: [id], onDelete: Restrict)
+  type              TypeMouvementStock
+  quantite          Int // signée, en UM
+  pieceOrigineType  TypePiece
+  pieceOrigineId    String?
+  motif             String?
+  auteurId          String? // nul = système, sans clé étrangère (D109)
+  horodatageServeur DateTime           @default(now())
+  horodatageLocal   DateTime?
+  posteId           String?
+  poste             Poste?             @relation(fields: [posteId], references: [id], onDelete: Restrict)
+  sequencePoste     Int?
+
+  @@index([stockMedicamentId, pointDeVenteId])
+  @@index([lotId])
+  @@index([pieceOrigineType, pieceOrigineId])
+}
+
+// Agrégat de lecture reconstructible : solde d'un lot, tenu par trigger, jamais négatif.
+model AgregatStockLot {
+  lotId             String          @id
+  lot               LotStock        @relation(fields: [lotId], references: [id], onDelete: Restrict)
+  stockMedicamentId String
+  stockMedicament   StockMedicament @relation(fields: [stockMedicamentId], references: [id], onDelete: Restrict)
+  pointDeVenteId    String
+  pointDeVente      PointDeVente    @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  quantite          Int
+  misAJourLe        DateTime        @default(now())
+
+  @@index([stockMedicamentId, pointDeVenteId])
+}
+
+// Agrégat de lecture reconstructible : solde d'une fiche dans un point de vente, peut être négatif (O11).
+model AgregatStockProduit {
+  stockMedicamentId String
+  stockMedicament   StockMedicament @relation(fields: [stockMedicamentId], references: [id], onDelete: Restrict)
+  pointDeVenteId    String
+  pointDeVente      PointDeVente    @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  quantite          Int
+  misAJourLe        DateTime        @default(now())
+
+  @@id([stockMedicamentId, pointDeVenteId])
+  @@index([pointDeVenteId, quantite])
+}
+
+// Conditionnement entamé (état dérivé matérialisé) : au plus un ouvert par fiche, lot et point de vente.
+model ConditionnementOuvert {
+  id                       String          @id @default(uuid())
+  stockMedicamentId        String
+  stockMedicament          StockMedicament @relation(fields: [stockMedicamentId], references: [id], onDelete: Restrict)
+  lotId                    String
+  lot                      LotStock        @relation(fields: [lotId], references: [id], onDelete: Restrict)
+  pointDeVenteId           String
+  pointDeVente             PointDeVente    @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  unitesParConditionnement Int // coefficientReception du lot
+  ouvertLe                 DateTime        @default(now())
+  ouvertParId              String? // sans clé étrangère (D109)
+  ouvertParPieceId         String?
+  fermeLe                  DateTime?
+
+  @@unique([stockMedicamentId, lotId, pointDeVenteId], where: raw("\"fermeLe\" IS NULL"))
+  @@index([lotId])
 }
 
 // ====== SECURITE ET ACCES ======
