@@ -14,6 +14,7 @@ import type { TypeCoupure, TypePoste } from 'generated/prisma/enums';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { AccesPharmacieService } from './acces-pharmacie.service';
 import { assurerPointDeVente } from './point-de-vente';
+import { jourConakry } from './vente.service';
 import {
   EnregistrerPosteDto,
   ModifierParametresDto,
@@ -64,6 +65,16 @@ export interface PosteReponse {
   dernierContactLe: Date | null;
   dernierEtat: Prisma.JsonValue | null;
   createdAt: Date;
+}
+
+export interface PosteAvecSession extends PosteReponse {
+  sessionOuverte: {
+    id: string;
+    utilisateurId: string | null;
+    utilisateurNom: string;
+    ouverteLe: Date;
+    jourMetier: string;
+  } | null;
 }
 
 export interface Reponse<T> {
@@ -378,7 +389,7 @@ export class PointsDeVenteService implements OnApplicationBootstrap {
   async listerPostes(
     structureId: string,
     userId: string,
-  ): Promise<Reponse<PosteReponse[]>> {
+  ): Promise<Reponse<PosteAvecSession[]>> {
     const { structure } = await this.accesPharmacie.verifier(
       structureId,
       userId,
@@ -388,10 +399,37 @@ export class PointsDeVenteService implements OnApplicationBootstrap {
         pointDeVente: { structureId: structure.id },
         type: { not: 'TECHNIQUE' },
       },
+      include: {
+        sessionsCaisse: {
+          where: { statut: 'OUVERTE' },
+          select: {
+            id: true,
+            utilisateurId: true,
+            utilisateurNom: true,
+            ouverteLe: true,
+            jourMetier: true,
+          },
+          take: 1,
+        },
+      },
       orderBy: [{ createdAt: 'asc' }, { code: 'asc' }],
     });
     return {
-      data: postes.map(versPosteReponse),
+      data: postes.map((p) => {
+        const s = p.sessionsCaisse[0];
+        return {
+          ...versPosteReponse(p),
+          sessionOuverte: s
+            ? {
+                id: s.id,
+                utilisateurId: s.utilisateurId,
+                utilisateurNom: s.utilisateurNom,
+                ouverteLe: s.ouverteLe,
+                jourMetier: jourConakry(s.jourMetier),
+              }
+            : null,
+        };
+      }),
       message: `${postes.length} poste(s).`,
       success: true,
     };

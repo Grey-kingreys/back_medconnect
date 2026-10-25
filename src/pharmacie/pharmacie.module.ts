@@ -10,6 +10,8 @@ import { PointsDeVenteService } from './points-de-vente.service';
 import { FicheProduitController } from './fiche-produit.controller';
 import { FicheProduitService } from './fiche-produit.service';
 import { MouvementsStockService } from './stock/mouvements-stock.service';
+import { SessionsCaisseController } from './caisse/sessions-caisse.controller';
+import { SessionsCaisseService } from './caisse/sessions-caisse.service';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { AuthModule } from 'src/auth/auth.module';
 
@@ -22,6 +24,7 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
     VenteController,
     PointsDeVenteController,
     FicheProduitController,
+    SessionsCaisseController,
   ],
   providers: [
     PharmacieService,
@@ -31,6 +34,7 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
     PointsDeVenteService,
     FicheProduitService,
     MouvementsStockService,
+    SessionsCaisseService,
     PrismaService,
   ],
 })

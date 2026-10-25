@@ -70,6 +70,22 @@ export const CODES_ERREUR = [
   'MEDICAMENT_UTILISE',
   // Structure qui a des ventes, un journal de stock ou de caisse : suppression refusée, la désactiver (409).
   'STRUCTURE_AVEC_PIECES',
+  // Poste de caisse inconnu, technique, d'une autre pharmacie ou désactivé (409).
+  'POSTE_INCONNU',
+  // Le poste a déjà une caisse ouverte par un autre utilisateur (409).
+  'SESSION_AUTRE_UTILISATEUR',
+  // Session de caisse déjà fermée : comptage, mouvement ou réouverture impossibles (409).
+  'SESSION_FERMEE',
+  // Comptage d'ouverture ou de fermeture déjà enregistré pour cette session (409).
+  'COMPTAGE_DEJA_SAISI',
+  // Fermeture de caisse sans comptage de fermeture (400).
+  'COMPTAGE_FERMETURE_REQUIS',
+  // Écart d'espèces au-delà du seuil de la pharmacie sans commentaire (400).
+  'COMMENTAIRE_ECART_REQUIS',
+  // Mode de paiement inconnu ou désactivé (400).
+  'MODE_PAIEMENT_INCONNU',
+  // Identifiant fourni par le client déjà porté par un autre enregistrement de caisse (409).
+  'IDENTIFIANT_DEJA_UTILISE',
 ] as const;
 
 export type CodeErreur = (typeof CODES_ERREUR)[number];
