@@ -7,6 +7,8 @@ import { VenteService } from './vente.service';
 import { AccesPharmacieService } from './acces-pharmacie.service';
 import { PointsDeVenteController } from './points-de-vente.controller';
 import { PointsDeVenteService } from './points-de-vente.service';
+import { FicheProduitController } from './fiche-produit.controller';
+import { FicheProduitService } from './fiche-produit.service';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { AuthModule } from 'src/auth/auth.module';
 
@@ -14,13 +16,19 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
 
 @Module({
   imports: [AuthModule, NotificationsModule],
-  controllers: [PharmacieController, VenteController, PointsDeVenteController],
+  controllers: [
+    PharmacieController,
+    VenteController,
+    PointsDeVenteController,
+    FicheProduitController,
+  ],
   providers: [
     PharmacieService,
     CatalogueImportService,
     VenteService,
     AccesPharmacieService,
     PointsDeVenteService,
+    FicheProduitService,
     PrismaService,
   ],
 })

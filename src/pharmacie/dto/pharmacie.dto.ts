@@ -3,7 +3,6 @@ import {
   IsOptional,
   IsString,
   IsBoolean,
-  IsNumber,
   IsInt,
   IsArray,
   IsDateString,
@@ -95,7 +94,7 @@ export class UpsertStockDto {
   medicamentId: string;
 
   @ApiProperty({ example: 50 })
-  @IsNumber()
+  @IsInt({ message: 'La quantité doit être un nombre entier.' })
   @Min(0)
   quantite: number;
 

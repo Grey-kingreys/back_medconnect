@@ -449,9 +449,30 @@ model StockMedicament {
   dateExpiration DateTime?
   notes         String?
 
+  // Fiche produit étendue (tranche pharmacie 1, PB06, M3) : prixUnitaire = prix de la boîte (D409)
+  uniteMinimale       UniteMinimale @default(UNITE)
+  coefficientBoite    Int           @default(1)
+  prixUnite           Int?
+  deconditionnable    Boolean       @default(false)
+  toleranceInventaire Int?
+  qualifie            Boolean       @default(false)
+  archiveLe           DateTime?
+  createdAt           DateTime      @default(now())
+
   updatedAt DateTime @updatedAt
 
   @@unique([medicamentId, structureId])
+}
+
+// Unité minimale de vente d'une fiche produit (PB06, D410)
+enum UniteMinimale {
+  COMPRIME
+  GELULE
+  ML
+  SACHET
+  GRAMME
+  AMPOULE
+  UNITE
 }
 
 enum StatutVente {

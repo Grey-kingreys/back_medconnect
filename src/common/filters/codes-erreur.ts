@@ -52,6 +52,10 @@ export const CODES_ERREUR = [
   'ANNULATION_HORS_DELAI',
   // Appareil déjà enregistré comme un autre type de poste de caisse (409).
   'POSTE_TYPE_DIFFERENT',
+  // Prix à l'unité sur une fiche produit qui ne se vend pas à l'unité (400).
+  'PRIX_UNITE_SANS_DECONDITIONNEMENT',
+  // Coefficient d'une fiche non qualifiée qui a du stock changé sans conversion (400).
+  'CONVERSION_REQUISE',
 ] as const;
 
 export type CodeErreur = (typeof CODES_ERREUR)[number];

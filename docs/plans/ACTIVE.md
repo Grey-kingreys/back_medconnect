@@ -16,7 +16,7 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | PB03 | Permissions T1, contrôle d'accès unifié, `masquerCouts`, migration M1 (tasks/PB03-permissions-acces-unifie.md) | spécifié | validé (D464 à D468, rapports/PB03-chef.md) | 1 |
 | PB04 | Règles pures du domaine et vecteurs de test (tasks/PB04-regles-domaine-vecteurs.md) | dur | validé (D469 à D477, rapports/PB04-chef.md) | 1 |
 | PB05 | Points de vente, postes et référentiels, migration M2 (tasks/PB05-points-de-vente-referentiels.md) | spécifié | validé (D478 à D484, rapports/PB05-chef.md) | 1 |
-| PB06 | Fiche produit étendue, migration M3 | spécifié | à faire | 0 |
+| PB06 | Fiche produit étendue, migration M3 (tasks/PB06-fiche-produit-etendue.md) | spécifié | validé (D485 à D492, rapports/PB06-chef.md) | 1 |
 | PB07 | Lots, journal, agrégats, reprise, migration M4 | dur | à faire | 0 |
 | PB08 | Service de mouvements et lectures recâblées | dur | à faire | 0 |
 | PB09 | Tables de caisse et pièces de vente, migrations M5 et M6 | dur | à faire | 0 |
@@ -46,5 +46,5 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 - D456 Prisma n'enveloppe pas une migration en transaction : `BEGIN;`/`COMMIT;` explicites et test statique (plan)
 - D478 `assurerPointDeVente` unique (création, démo, démarrage, accès paresseux) (révisable)
 - D479 `supprimerConfigurationPharmacies` avant toute suppression de structure (révisable)
-- D473 Sélection : reliquats puis FEFO (UNITE), hors reliquat puis reliquats (BOITE), reste provisoire (révisable)
-- D475 Marge : provisoire par ligne, non valorisable par vente, `nombreLignes` ajouté (révisable)
+- D487 PB06 sans conversion : coefficient d'une fiche non qualifiée avec stock refusé (400 `CONVERSION_REQUISE`) (révisable)
+- D490 Prix à l'unité sur fiche non déconditionnable refusé sur l'état final, jamais effacé implicitement (révisable)
