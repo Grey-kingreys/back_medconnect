@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ============================================================
-#  MedConnecte — Backend (NestJS 11 + Prisma 7)
+#  MedConnecte : Backend (NestJS 11 + Prisma 7)
 #  Multi-stage : base → deps → (dev | build → prod)
 # ============================================================
 

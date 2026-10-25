@@ -9,8 +9,15 @@
  * constructeur d'un service (EncryptionService, EmailService…).
  *
  * Choix : validation maison (zéro dépendance) plutôt que Joi/class-validator,
- * pour ne pas alourdir le lock (cf. CLAUDE.md — node_modules = volume Docker).
+ * pour ne pas alourdir le lock (cf. CLAUDE.md : node_modules = volume Docker).
  */
+
+import { FORMAT_VERSION_CONFIG } from '../configuration-publique/versions';
+import {
+  VERSION_DOCUMENT_PAR_DEFAUT,
+  VERSION_PAR_DEFAUT,
+} from '../configuration-publique/configuration-publique.constants';
+import { NUMERO_URGENCE_MEDICALE_PAR_DEFAUT } from './numeros-urgence';
 
 const WEAK_SECRETS = new Set([
   'secret',
@@ -28,6 +35,24 @@ type Rule = {
   default?: string;
 };
 
+function versionValide(v: string): string | null {
+  return FORMAT_VERSION_CONFIG.test(v)
+    ? null
+    : 'doit être une version au format X.Y.Z (ex. 1.4.0)';
+}
+
+function urlValide(v: string): string | null {
+  return v.startsWith('https://') || v.startsWith('http://')
+    ? null
+    : 'doit être une URL (https://...)';
+}
+
+function booleenValide(v: string): string | null {
+  return ['true', 'false'].includes(v.toLowerCase())
+    ? null
+    : "doit valoir 'true' ou 'false'";
+}
+
 const RULES: Rule[] = [
   {
     key: 'DATABASE_URL',
@@ -42,7 +67,7 @@ const RULES: Rule[] = [
     required: true,
     validate: (v) => {
       if (WEAK_SECRETS.has(v.toLowerCase())) {
-        return 'valeur trop faible/par défaut — générez un secret aléatoire (ex. `openssl rand -hex 32`)';
+        return 'valeur trop faible/par défaut : générez un secret aléatoire (ex. `openssl rand -hex 32`)';
       }
       if (v.length < 32) {
         return `doit faire au moins 32 caractères (actuellement ${v.length})`;
@@ -75,7 +100,7 @@ const RULES: Rule[] = [
         ? null
         : 'doit être une URL Redis (redis://… ou rediss://…)',
   },
-  // Compte SUPER_ADMIN initial — créé automatiquement au boot par SuperAdminSeeder
+  // Compte SUPER_ADMIN initial, créé automatiquement au boot par SuperAdminSeeder
   // s'il n'existe pas encore. Obligatoires : pas de mot de passe par défaut faible
   // sur un compte qui a tous les droits.
   {
@@ -91,7 +116,7 @@ const RULES: Rule[] = [
     required: true,
     validate: (v) => {
       if (WEAK_SECRETS.has(v.toLowerCase())) {
-        return 'valeur trop faible/par défaut — choisissez un mot de passe robuste';
+        return 'valeur trop faible/par défaut : choisissez un mot de passe robuste';
       }
       if (v.length < 12) {
         return `doit faire au moins 12 caractères (actuellement ${v.length})`;
@@ -155,6 +180,98 @@ const RULES: Rule[] = [
         ? null
         : "doit valoir 'true' ou 'false'",
   },
+  // Sessions par appareil (TB3). Actives par défaut ; `false` revient à l'ancien
+  // refresh unique par utilisateur (retour arrière, sans redéploiement).
+  {
+    key: 'SESSIONS_MULTI_APPAREILS',
+    required: false,
+    default: 'true',
+    validate: (v) =>
+      ['true', 'false'].includes(v.toLowerCase())
+        ? null
+        : "doit valoir 'true' ou 'false'",
+  },
+  // Application mobile (TB5) : versions et URL par plateforme, lues par GET /app/version et la garde de version. Absentes : 0.0.0, personne n'est bloqué.
+  {
+    key: 'APP_VERSION_MINIMALE_ANDROID',
+    required: false,
+    default: VERSION_PAR_DEFAUT,
+    validate: versionValide,
+  },
+  {
+    key: 'APP_VERSION_RECOMMANDEE_ANDROID',
+    required: false,
+    default: VERSION_PAR_DEFAUT,
+    validate: versionValide,
+  },
+  {
+    key: 'APP_VERSION_MINIMALE_IOS',
+    required: false,
+    default: VERSION_PAR_DEFAUT,
+    validate: versionValide,
+  },
+  {
+    key: 'APP_VERSION_RECOMMANDEE_IOS',
+    required: false,
+    default: VERSION_PAR_DEFAUT,
+    validate: versionValide,
+  },
+  {
+    key: 'APP_URL_TELECHARGEMENT_ANDROID',
+    required: false,
+    validate: urlValide,
+  },
+  {
+    key: 'APP_URL_TELECHARGEMENT_IOS',
+    required: false,
+    validate: urlValide,
+  },
+  // Configuration publique (GET /app/config) : numéro d'urgence, versions des documents légaux, fonctions activées.
+  {
+    key: 'NUMERO_URGENCE_MEDICALE',
+    required: false,
+    default: NUMERO_URGENCE_MEDICALE_PAR_DEFAUT,
+    validate: (v) =>
+      /^\+?[0-9]{2,15}$/.test(v)
+        ? null
+        : 'doit être un numéro de téléphone (chiffres seulement, ex. 15)',
+  },
+  {
+    key: 'VERSION_CGU',
+    required: false,
+    default: VERSION_DOCUMENT_PAR_DEFAUT,
+    validate: (v) =>
+      /^[0-9A-Za-z._-]{1,20}$/.test(v)
+        ? null
+        : 'doit être un numéro de version court (ex. 1.0 ou 2026-10)',
+  },
+  {
+    key: 'VERSION_POLITIQUE_CONFIDENTIALITE',
+    required: false,
+    default: VERSION_DOCUMENT_PAR_DEFAUT,
+    validate: (v) =>
+      /^[0-9A-Za-z._-]{1,20}$/.test(v)
+        ? null
+        : 'doit être un numéro de version court (ex. 1.0 ou 2026-10)',
+  },
+  {
+    key: 'FONCTION_ESPACE_SOIGNANT',
+    required: false,
+    default: 'false',
+    validate: booleenValide,
+  },
+  {
+    key: 'FONCTION_ANNULATION_SOS',
+    required: false,
+    default: 'false',
+    validate: booleenValide,
+  },
+  {
+    key: 'FONCTION_BOUTON_DEMO',
+    required: false,
+    default: 'false',
+    validate: booleenValide,
+  },
 ];
 
 export function validateEnv(
@@ -184,7 +301,7 @@ export function validateEnv(
 
   if (errors.length > 0) {
     throw new Error(
-      `\n❌ Configuration invalide — l'application ne peut pas démarrer.\n` +
+      `\n❌ Configuration invalide : l'application ne peut pas démarrer.\n` +
         `Variables d'environnement à corriger :\n${errors.join('\n')}\n`,
     );
   }

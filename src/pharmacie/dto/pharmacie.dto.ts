@@ -4,14 +4,17 @@ import {
   IsString,
   IsBoolean,
   IsNumber,
+  IsInt,
   IsArray,
   IsDateString,
+  IsIn,
   Min,
+  Max,
   Length,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-// ─── Créer un médicament (catalogue global — ADMIN/SUPER_ADMIN) ──────────────
+// ─── Créer un médicament (catalogue global : ADMIN/SUPER_ADMIN) ──────────────
 
 export class CreateMedicamentDto {
   @ApiProperty({ example: 'Coartem 20mg/120mg' })
@@ -98,8 +101,12 @@ export class UpsertStockDto {
 
   @ApiPropertyOptional({ example: 35000, description: 'Prix en GNF' })
   @IsOptional()
-  @IsNumber()
+  @IsInt({
+    message:
+      'Le prix unitaire doit être un nombre entier de francs guinéens, sans décimales.',
+  })
   @Min(0)
+  @Max(2147483647)
   prixUnitaire?: number;
 
   @ApiPropertyOptional({ example: '2027-12-31' })
@@ -115,7 +122,7 @@ export class UpsertStockDto {
 
 export class UpdateStockQuantiteDto {
   @ApiProperty({ example: 10, description: 'Ajouter ou retirer (négatif)' })
-  @IsNumber()
+  @IsInt({ message: 'La variation doit être un nombre entier.' })
   variation: number;
 
   @ApiPropertyOptional({ example: 'Livraison du 26/04/2026' })
@@ -134,9 +141,26 @@ export interface FichierImport {
   originalname: string;
 }
 
+/** Façon de compter les quantités du fichier : remplacer le stock ou s'y ajouter. */
+export const MODES_IMPORT_STOCK = ['inventaire', 'livraison'] as const;
+export type ModeImportStock = (typeof MODES_IMPORT_STOCK)[number];
+
+/** Champs texte du formulaire d'import du stock (en plus du fichier). */
+export class OptionsImportStockDto {
+  @ApiPropertyOptional({
+    enum: MODES_IMPORT_STOCK,
+    default: 'inventaire',
+    description:
+      "inventaire : la quantité du fichier remplace la quantité en stock. livraison : elle s'y ajoute.",
+  })
+  @IsOptional()
+  @IsIn(MODES_IMPORT_STOCK)
+  mode?: ModeImportStock;
+}
+
 /** Résultat de l'analyse d'une ligne du classeur. */
 export interface LigneImportStock {
-  /** Numéro de la ligne dans Excel (la ligne 1 contient les titres). */
+  /** Numéro de la ligne dans Excel (sous la ligne des titres). */
   ligne: number;
   /** Nom du médicament tel qu'écrit dans le fichier. */
   nom: string;
@@ -151,6 +175,20 @@ export interface LigneImportStock {
   /** Date ISO 8601. */
   dateExpiration?: string;
   notes?: string;
+  /** Quantité en stock avant l'import (0 si le médicament n'y est pas), lignes acceptées seulement. */
+  quantiteAvant?: number;
+  /** Quantité en stock après l'import, selon le mode choisi, lignes acceptées seulement. */
+  quantiteApres?: number;
+}
+
+/** Colonnes du fichier telles que l'import les a comprises, montrées dans l'aperçu. */
+export interface ColonnesLuesImport {
+  /** Numéro de la ligne des titres dans Excel (1 le plus souvent). */
+  ligneTitres: number;
+  /** Titres reconnus, dans l'ordre du fichier, avec la colonne de la plateforme. */
+  reconnues: { titre: string; colonne: string }[];
+  /** Titres non reconnus (ou en double), dont le contenu n'est pas importé. */
+  ignorees: string[];
 }
 
 /** Rapport renvoyé par l'aperçu et par l'import (stock ou catalogue). */
@@ -159,6 +197,8 @@ export interface RapportImport<L> {
   acceptees: number;
   rejetees: number;
   lignes: L[];
+  /** Colonnes reconnues et ignorées, pour vérifier que le fichier a été bien compris. */
+  colonnes: ColonnesLuesImport;
 }
 
 /** Rapport renvoyé par l'aperçu et par l'import du stock. */
@@ -173,7 +213,7 @@ export interface ResultatImportStock extends RapportImportStock {
 
 /** Résultat de l'analyse d'une ligne du classeur du catalogue. */
 export interface LigneImportCatalogue {
-  /** Numéro de la ligne dans Excel (la ligne 1 contient les titres). */
+  /** Numéro de la ligne dans Excel (sous la ligne des titres). */
   ligne: number;
   /** Nom du médicament tel qu'écrit dans le fichier. */
   nom: string;

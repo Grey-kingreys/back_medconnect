@@ -1,4 +1,10 @@
-import { Inject, Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
 import { Response } from 'express';
 import { Redis } from 'ioredis';
 import { REDIS_CLIENT } from '../common/redis/redis.module';
@@ -11,7 +17,7 @@ import { REDIS_CLIENT } from '../common/redis/redis.module';
  *    neutralise le DoS-lockout (un attaquant distant accumule sur SON IP, pas sur
  *    celle de la victime) ; la composante **email** évite d'additionner plusieurs
  *    vrais utilisateurs derrière un même NAT mobile.
- *  - Backoff progressif dès le 2ᵉ échec (délai croissant, plafonné) — ne verrouille
+ *  - Backoff progressif dès le 2ᵉ échec (délai croissant, plafonné), ne verrouille
  *    jamais totalement un utilisateur légitime.
  *  - Blocage dur `429 Retry-After` (15 min) au-delà du seuil élevé (~10 échecs).
  *  - Compteur remis à zéro sur connexion réussie.
@@ -76,7 +82,9 @@ export class LoginThrottleService {
       }
     } catch (err) {
       if (err instanceof HttpException) throw err; // le 429 doit remonter
-      this.logger.warn(`guard() — Redis indisponible, fail-open: ${(err as Error).message}`);
+      this.logger.warn(
+        `guard() : Redis indisponible, fail-open: ${(err as Error).message}`,
+      );
     }
   }
 
@@ -107,7 +115,9 @@ export class LoginThrottleService {
       }
       return false;
     } catch (err) {
-      this.logger.warn(`registerFailure() — Redis indisponible: ${(err as Error).message}`);
+      this.logger.warn(
+        `registerFailure() : Redis indisponible: ${(err as Error).message}`,
+      );
       return false;
     }
   }
@@ -117,7 +127,9 @@ export class LoginThrottleService {
     try {
       await this.redis.del(this.failKey(email, ip), this.blockKey(email, ip));
     } catch (err) {
-      this.logger.warn(`reset() — Redis indisponible: ${(err as Error).message}`);
+      this.logger.warn(
+        `reset() : Redis indisponible: ${(err as Error).message}`,
+      );
     }
   }
 }

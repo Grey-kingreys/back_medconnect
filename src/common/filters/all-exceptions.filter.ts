@@ -8,6 +8,8 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { Prisma } from 'generated/prisma/client';
+import { type CodeErreur, estCodeErreur } from './codes-erreur';
+import type { ChampFautif } from './erreur-validation';
 
 // Messages affichés tels quels par le front (audience non-dev).
 export const MESSAGES = {
@@ -37,9 +39,23 @@ const LIBELLES: Record<number, string> = {
   404: 'Introuvable',
   409: 'Déjà existant',
   413: 'Document trop volumineux',
+  426: 'Mise à jour requise',
   429: 'Trop de tentatives',
   500: 'Erreur interne',
+  503: 'Service indisponible',
 };
+
+// Champs d'une exception recopiés dans `donnees` (liste blanche ; TB10b ajoutera finDelaiAt).
+const DONNEES_AUTORISEES = ['peutRelancerA'] as const;
+
+// Codes dont l'exception porte une liste de lignes concernées, recopiée dans `details` (D119).
+const CODES_AVEC_DETAILS: ReadonlySet<CodeErreur> = new Set<CodeErreur>([
+  'STOCK_INSUFFISANT',
+  'MEDICAMENT_EXPIRE',
+  'PRIX_MANQUANT',
+  'ORDONNANCE_NON_CONFIRMEE',
+  'STOCK_INTROUVABLE',
+]);
 
 // Messages anglais par défaut de Nest et d'Express (libellés HTTP standard).
 const MESSAGES_PAR_DEFAUT = new Set(
@@ -69,6 +85,9 @@ interface CorpsErreur {
   message: string;
   error: string;
   details?: unknown;
+  code?: CodeErreur;
+  champs?: ChampFautif[];
+  donnees?: { peutRelancerA?: string };
 }
 
 /**
@@ -110,42 +129,49 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     if (exception instanceof HttpException) {
       const statut = exception.getStatus();
+      const reponseBrute = exception.getResponse();
+      const code =
+        typeof reponseBrute === 'object'
+          ? (reponseBrute as { code?: unknown }).code
+          : undefined;
+      // 503 voulue par le projet (code du catalogue) : message conservé.
+      if (statut === 503 && estCodeErreur(code)) {
+        const resultat503 = this.corpsHttp(exception, statut);
+        resultat503.code = code;
+        return resultat503;
+      }
       if (statut >= 500) return this.erreurInterne(exception, request);
 
-      const reponse = exception.getResponse();
-      const message =
-        typeof reponse === 'string'
-          ? reponse
-          : (reponse as { message?: unknown }).message;
-      const libelle =
-        typeof reponse === 'object'
-          ? (reponse as { error?: unknown }).error
-          : undefined;
+      // Code machine facultatif porté par l'exception (catalogue codes-erreur.ts).
+      const resultat = this.corpsHttp(exception, statut);
+      if (estCodeErreur(code)) resultat.code = code;
+      else if (statut === 403) resultat.code = 'PERMISSION_REFUSEE';
 
-      // Erreurs de validation du ValidationPipe (message en tableau).
-      if (statut === 400 && Array.isArray(message)) {
-        const resultat = corps(statut, MESSAGES.validation);
-        if (process.env.NODE_ENV !== 'production') resultat.details = message;
-        return resultat;
+      if (typeof reponseBrute === 'object' && reponseBrute !== null) {
+        const brut = reponseBrute as Record<string, unknown>;
+        if (resultat.code === 'VALIDATION' && Array.isArray(brut.champs)) {
+          resultat.champs = assainirChamps(brut.champs);
+          // Un seul champ fautif portant sa règle lisible : elle remplace le message générique.
+          const [seul] = resultat.champs;
+          if (resultat.champs.length === 1 && seul.message) {
+            resultat.message = seul.message;
+          }
+        }
+        if (
+          resultat.code &&
+          CODES_AVEC_DETAILS.has(resultat.code) &&
+          Array.isArray(brut.details)
+        ) {
+          resultat.details = assainirDetails(brut.details);
+        }
+        for (const cle of DONNEES_AUTORISEES) {
+          const valeur = brut[cle];
+          if (typeof valeur === 'string') {
+            resultat.donnees = { ...resultat.donnees, [cle]: valeur };
+          }
+        }
       }
-      if (statut === 429) return corps(statut, MESSAGES.tropDeTentatives);
-      // Route inconnue : « Cannot GET /x » produit par Nest.
-      if (
-        statut === 404 &&
-        typeof message === 'string' &&
-        message.startsWith('Cannot ')
-      ) {
-        return corps(statut, MESSAGES.introuvableRoute);
-      }
-      // Message rédigé par le projet : conservé tel quel.
-      if (
-        typeof message === 'string' &&
-        message !== libelle &&
-        !MESSAGES_PAR_DEFAUT.has(message.toLowerCase())
-      ) {
-        return corps(statut, message);
-      }
-      return corps(statut, messageParStatut(statut));
+      return resultat;
     }
 
     // Corps trop gros rejeté par body-parser (erreur Express, pas HttpException).
@@ -154,6 +180,43 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     return this.erreurInterne(exception, request);
+  }
+
+  private corpsHttp(exception: HttpException, statut: number): CorpsErreur {
+    const reponse = exception.getResponse();
+    const message =
+      typeof reponse === 'string'
+        ? reponse
+        : (reponse as { message?: unknown }).message;
+    const libelle =
+      typeof reponse === 'object'
+        ? (reponse as { error?: unknown }).error
+        : undefined;
+
+    // Erreurs de validation du ValidationPipe (message en tableau).
+    if (statut === 400 && Array.isArray(message)) {
+      const resultat = corps(statut, MESSAGES.validation);
+      if (process.env.NODE_ENV !== 'production') resultat.details = message;
+      return resultat;
+    }
+    if (statut === 429) return corps(statut, MESSAGES.tropDeTentatives);
+    // Route inconnue : « Cannot GET /x » produit par Nest.
+    if (
+      statut === 404 &&
+      typeof message === 'string' &&
+      message.startsWith('Cannot ')
+    ) {
+      return corps(statut, MESSAGES.introuvableRoute);
+    }
+    // Message rédigé par le projet : conservé tel quel.
+    if (
+      typeof message === 'string' &&
+      message !== libelle &&
+      !MESSAGES_PAR_DEFAUT.has(message.toLowerCase())
+    ) {
+      return corps(statut, message);
+    }
+    return corps(statut, messageParStatut(statut));
   }
 
   private erreurInterne(exception: unknown, request: Request): CorpsErreur {
@@ -177,6 +240,46 @@ function corps(statusCode: number, message: string): CorpsErreur {
       LIBELLES[statusCode] ??
       (statusCode >= 500 ? LIBELLES[500] : 'Demande refusée'),
   };
+}
+
+// Ne garde que `champ`, `contraintes` et la règle lisible `message` : aucune autre clé, donc jamais de valeur.
+function assainirChamps(brut: unknown[]): ChampFautif[] {
+  const resultat: ChampFautif[] = [];
+  for (const element of brut) {
+    if (typeof element !== 'object' || element === null) continue;
+    const { champ, contraintes, message } = element as {
+      champ?: unknown;
+      contraintes?: unknown;
+      message?: unknown;
+    };
+    if (typeof champ !== 'string' || !Array.isArray(contraintes)) continue;
+    const entree: ChampFautif = {
+      champ,
+      contraintes: contraintes.filter(
+        (c): c is string => typeof c === 'string',
+      ),
+    };
+    if (typeof message === 'string') entree.message = message;
+    resultat.push(entree);
+  }
+  return resultat;
+}
+
+// Garde au plus 50 lignes et, par ligne, seulement stockId, nom, disponible et demande (bon type).
+function assainirDetails(brut: unknown[]): Record<string, string | number>[] {
+  const resultat: Record<string, string | number>[] = [];
+  for (const element of brut.slice(0, 50)) {
+    if (typeof element !== 'object' || element === null) continue;
+    const source = element as Record<string, unknown>;
+    const ligne: Record<string, string | number> = {};
+    if (typeof source.stockId === 'string') ligne.stockId = source.stockId;
+    if (typeof source.nom === 'string') ligne.nom = source.nom;
+    if (typeof source.disponible === 'number')
+      ligne.disponible = source.disponible;
+    if (typeof source.demande === 'number') ligne.demande = source.demande;
+    resultat.push(ligne);
+  }
+  return resultat;
 }
 
 function messageParStatut(statut: number): string {

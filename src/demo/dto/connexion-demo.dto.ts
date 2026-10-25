@@ -1,7 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsNotEmpty, IsUUID } from 'class-validator';
+import { InfosAppareilDto } from 'src/auth/dto/infos-appareil.dto';
 
-export class ConnexionDemoDto {
+export class ConnexionDemoDto extends InfosAppareilDto {
   @ApiProperty({
     description: 'Identifiant du compte démo, lu dans GET /auth/demo/comptes',
     example: '3f1c2a7e-8d4b-4c1e-9a55-2b7f0c9e6d10',

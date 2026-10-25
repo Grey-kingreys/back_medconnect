@@ -17,6 +17,7 @@ describe('DemoController et DemoService', () => {
   let authService: { connexionDemo: jest.Mock };
   let controller: DemoController;
   const res = { cookie: jest.fn() };
+  const req = { headers: {} };
 
   beforeEach(() => {
     prisma = { user: { findMany: jest.fn().mockResolvedValue([]) } };
@@ -49,7 +50,7 @@ describe('DemoController et DemoService', () => {
           NotFoundException,
         );
         expect(() =>
-          controller.connexion({ userId: ID_DEMO }, res as never),
+          controller.connexion({ userId: ID_DEMO }, res as never, req as never),
         ).toThrow(NotFoundException);
 
         expect(prisma.user.findMany).not.toHaveBeenCalled();
@@ -63,7 +64,7 @@ describe('DemoController et DemoService', () => {
       process.env.DEMO_MODE = ' TRUE ';
     });
 
-    it('liste un compte vitrine par rôle, trié par rôle, avec libellé et description', async () => {
+    it('liste les comptes vitrine, triés par rôle puis par nom, avec libellé et description', async () => {
       prisma.user.findMany.mockResolvedValue([
         {
           id: '1',
@@ -113,6 +114,22 @@ describe('DemoController et DemoService', () => {
           role: 'MEDECIN',
           structure: null,
         },
+        {
+          id: '8',
+          email: 'admin.donka@demo.medconnecte.gn',
+          nom: 'Kouyaté',
+          prenom: 'Lansana',
+          role: 'STRUCTURE_ADMIN',
+          structure: { nom: 'Hôpital National Donka' },
+        },
+        {
+          id: '7',
+          email: 'admin.kaloum@demo.medconnecte.gn',
+          nom: 'Baldé',
+          prenom: 'Djénabou',
+          role: 'STRUCTURE_ADMIN',
+          structure: { nom: 'Pharmacie de Kaloum' },
+        },
       ]);
 
       const out = await controller.listerComptes();
@@ -128,7 +145,13 @@ describe('DemoController et DemoService', () => {
       );
       expect(out.success).toBe(true);
       // Seuls les comptes vitrine sont proposés : Saliou Sow et le compte inconnu sont écartés
-      expect(out.data.map((c) => c.id)).toEqual(['5', '2', '4', '1']);
+      expect(out.data.map((c) => c.id)).toEqual(['5', '2', '4', '7', '8', '1']);
+      expect(out.data.find((c) => c.id === '7')).toMatchObject({
+        structureNom: 'Pharmacie de Kaloum',
+      });
+      expect(out.data.find((c) => c.id === '7')?.description).toMatch(
+        /annulation/,
+      );
 
       const medecin = out.data.find((c) => c.id === '2');
       expect(medecin).toMatchObject({
@@ -147,9 +170,15 @@ describe('DemoController et DemoService', () => {
     });
 
     it('délègue la connexion à AuthService.connexionDemo', async () => {
-      const out = await controller.connexion({ userId: ID_DEMO }, res as never);
+      const out = await controller.connexion(
+        { userId: ID_DEMO },
+        res as never,
+        req as never,
+      );
 
-      expect(authService.connexionDemo).toHaveBeenCalledWith(ID_DEMO, res);
+      expect(authService.connexionDemo).toHaveBeenCalledWith(ID_DEMO, res, {
+        type: 'WEB',
+      });
       expect(out).toEqual({
         success: true,
         data: {},
@@ -161,7 +190,7 @@ describe('DemoController et DemoService', () => {
       authService.connexionDemo.mockRejectedValue(new ForbiddenException());
 
       await expect(
-        controller.connexion({ userId: ID_DEMO }, res as never),
+        controller.connexion({ userId: ID_DEMO }, res as never, req as never),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
   });

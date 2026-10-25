@@ -35,7 +35,7 @@ lerna-debug.log*
 !.vscode/launch.json
 !.vscode/extensions.json
 
-# dotenv environment variable files — dépôt public, on ignore toutes les variantes
+# dotenv environment variable files, dépôt public, on ignore toutes les variantes
 .env
 .env.*
 !.env.example

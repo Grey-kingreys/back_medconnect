@@ -8,6 +8,7 @@ import cookieParser from 'cookie-parser';
 import { Logger } from 'nestjs-pino';
 import { RedisIoAdapter } from './common/redis-io.adapter';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { fabriquerErreurValidation } from './common/filters/erreur-validation';
 
 async function bootstrap() {
   // `bufferLogs` : conserve les logs émis avant que Pino ne soit prêt.
@@ -45,6 +46,7 @@ async function bootstrap() {
       whitelist: true, // Supprime les champs non déclarés dans les DTOs
       forbidNonWhitelisted: true,
       transform: true, // Transforme automatiquement les types
+      exceptionFactory: fabriquerErreurValidation,
     }),
   );
 

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return -- dette de typage préexistante non corrigée */
 import {
   Body,
   Controller,
@@ -25,7 +26,7 @@ import { CreateRoleDto, UpdateRoleDto } from './dto/role.dto';
  * + `PermissionsGuard` (et non plus `@Roles`/`RolesGuard`). Toutes les opérations
  * sont **scopées à la structure de l'appelant** (anti-escalade : impossible de
  * toucher une autre structure, un rôle système, ou d'accorder une permission
- * plateforme — cf. RolesService).
+ * plateforme, cf. RolesService).
  */
 @ApiTags('Rôles & permissions')
 @Controller('roles')
@@ -38,7 +39,7 @@ export class RolesController {
     const structureId = req.user?.structureId;
     if (!structureId) {
       throw new ForbiddenException(
-        "Cette action est réservée aux administrateurs rattachés à une structure.",
+        'Cette action est réservée aux administrateurs rattachés à une structure.',
       );
     }
     return structureId;
@@ -46,7 +47,9 @@ export class RolesController {
 
   @Get('permissions')
   @RequirePermissions(PERMISSIONS.ROLE_MANAGE)
-  @ApiOperation({ summary: 'Catalogue des permissions délégables (groupé par catégorie)' })
+  @ApiOperation({
+    summary: 'Catalogue des permissions délégables (groupé par catégorie)',
+  })
   listPermissions() {
     return this.rolesService.listCatalog();
   }
@@ -67,7 +70,9 @@ export class RolesController {
 
   @Patch(':id')
   @RequirePermissions(PERMISSIONS.ROLE_MANAGE)
-  @ApiOperation({ summary: 'Modifier un rôle de ma structure (nom, description, permissions)' })
+  @ApiOperation({
+    summary: 'Modifier un rôle de ma structure (nom, description, permissions)',
+  })
   update(@Req() req: any, @Param('id') id: string, @Body() dto: UpdateRoleDto) {
     return this.rolesService.updateRole(this.structureIdOf(req), id, dto);
   }

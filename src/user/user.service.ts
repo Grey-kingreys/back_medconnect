@@ -15,10 +15,36 @@ import { EncryptionService } from 'src/common/services/encryption.service';
 import { RolesService } from 'src/common/rbac/roles.service';
 import { StorageService } from 'src/storage/storage.service';
 import {
+  avecTelephoneUnique,
+  exigerTelephone,
+  verifierTelephoneLibre,
+} from 'src/common/telephone/telephone-unicite';
+import { SessionsService } from 'src/auth/sessions.service';
+import {
   CreateUserByAdminDto,
   UpdateUserDto,
   ChangeUserPasswordDto,
 } from './dto/user.dto';
+
+type StructureResume = { id: string; nom: string; type: string };
+
+/**
+ * Structure de rattachement affichée (D202) : celle de User.structureId, sinon celle
+ * dont l'utilisateur est l'administrateur (Structure.adminId), sinon null.
+ */
+function avecStructureResolue<
+  T extends {
+    structure: StructureResume | null;
+    administeredStructure: StructureResume | null;
+  },
+>(
+  utilisateur: T,
+): Omit<T, 'structure' | 'administeredStructure'> & {
+  structure: StructureResume | null;
+} {
+  const { structure, administeredStructure, ...reste } = utilisateur;
+  return { ...reste, structure: structure ?? administeredStructure ?? null };
+}
 
 @Injectable()
 export class UserService {
@@ -30,6 +56,7 @@ export class UserService {
     private readonly encryptionService: EncryptionService,
     private readonly rolesService: RolesService,
     private readonly storage: StorageService,
+    private readonly sessions: SessionsService,
   ) {}
 
   // ─── Photo de profil (avatar, bucket public R2) ───────────────
@@ -100,6 +127,9 @@ export class UserService {
       throw new ConflictException('Un utilisateur avec cet email existe déjà');
     }
 
+    const telephoneE164 = telephone ? exigerTelephone(telephone) : undefined;
+    if (telephoneE164) await verifierTelephoneLibre(this.prisma, telephoneE164);
+
     const hashedPassword = await bcrypt.hash(password, 12);
 
     // Rôle RBAC : résolu pour les rôles système (PATIENT/ADMIN). Pour un rôle de
@@ -114,28 +144,30 @@ export class UserService {
       this.logger.error('Résolution appRole (createByAdmin) échouée', e);
     }
 
-    const user = await this.prisma.user.create({
-      data: {
-        nom: nom.trim(),
-        prenom: prenom.trim(),
-        email: email.toLowerCase(),
-        password: hashedPassword,
-        telephone: telephone?.trim(),
-        role: role as any,
-        appRoleId,
-        isActive: true,
-        specialite: role === 'MEDECIN' ? (dto as any).specialite : undefined,
-      },
-      select: {
-        id: true,
-        email: true,
-        nom: true,
-        prenom: true,
-        role: true,
-        isActive: true,
-        createdAt: true,
-      },
-    });
+    const user = await avecTelephoneUnique(
+      this.prisma.user.create({
+        data: {
+          nom: nom.trim(),
+          prenom: prenom.trim(),
+          email: email.toLowerCase(),
+          password: hashedPassword,
+          telephone: telephoneE164,
+          role: role as any,
+          appRoleId,
+          isActive: true,
+          specialite: role === 'MEDECIN' ? (dto as any).specialite : undefined,
+        },
+        select: {
+          id: true,
+          email: true,
+          nom: true,
+          prenom: true,
+          role: true,
+          isActive: true,
+          createdAt: true,
+        },
+      }),
+    );
 
     this.emailService
       .sendWelcomeEmail(user.email, user.nom, user.prenom)
@@ -162,13 +194,18 @@ export class UserService {
         isActive: true,
         structureId: true,
         structure: { select: { id: true, nom: true, type: true } },
+        administeredStructure: { select: { id: true, nom: true, type: true } },
         createdAt: true,
         updatedAt: true,
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    return { data: users, message: 'Utilisateurs récupérés', success: true };
+    return {
+      data: users.map(avecStructureResolue),
+      message: 'Utilisateurs récupérés',
+      success: true,
+    };
   }
 
   // ─── Récupérer un utilisateur par ID ─────────────────────────
@@ -186,6 +223,7 @@ export class UserService {
         isActive: true,
         structureId: true,
         structure: { select: { id: true, nom: true, type: true } },
+        administeredStructure: { select: { id: true, nom: true, type: true } },
         createdAt: true,
         updatedAt: true,
       },
@@ -197,7 +235,11 @@ export class UserService {
       );
     }
 
-    return { data: user, message: 'Utilisateur trouvé', success: true };
+    return {
+      data: avecStructureResolue(user),
+      message: 'Utilisateur trouvé',
+      success: true,
+    };
   }
 
   // ─── Mettre à jour un utilisateur ────────────────────────────
@@ -223,23 +265,31 @@ export class UserService {
     if (dto.prenom !== undefined) updateData.prenom = dto.prenom.trim();
     if (dto.email !== undefined) updateData.email = dto.email.toLowerCase();
     if (dto.role !== undefined) updateData.role = dto.role;
-    if (dto.telephone !== undefined)
-      updateData.telephone = dto.telephone.trim();
+    if (dto.telephone === null) {
+      // null retire le numéro (D45).
+      updateData.telephone = null;
+    } else if (dto.telephone !== undefined) {
+      const telephoneE164 = exigerTelephone(dto.telephone);
+      await verifierTelephoneLibre(this.prisma, telephoneE164, userId);
+      updateData.telephone = telephoneE164;
+    }
 
-    const updated = await this.prisma.user.update({
-      where: { id: userId },
-      data: updateData,
-      select: {
-        id: true,
-        email: true,
-        nom: true,
-        prenom: true,
-        telephone: true,
-        role: true,
-        isActive: true,
-        updatedAt: true,
-      },
-    });
+    const updated = await avecTelephoneUnique(
+      this.prisma.user.update({
+        where: { id: userId },
+        data: updateData,
+        select: {
+          id: true,
+          email: true,
+          nom: true,
+          prenom: true,
+          telephone: true,
+          role: true,
+          isActive: true,
+          updatedAt: true,
+        },
+      }),
+    );
 
     return {
       data: updated,
@@ -261,6 +311,8 @@ export class UserService {
       data: { isActive: !user.isActive },
       select: { id: true, nom: true, prenom: true, role: true, isActive: true },
     });
+    if (updated.isActive) await this.sessions.reactiverCompte(userId);
+    else await this.sessions.desactiverCompte(userId);
 
     return {
       data: updated,
@@ -314,6 +366,7 @@ export class UserService {
       where: { id: userId },
       data: { password: hashed },
     });
+    await this.sessions.revoquerToutes(userId, 'MOT_DE_PASSE_REINITIALISE');
 
     return {
       data: null,

@@ -5,12 +5,14 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  Req,
   Res,
 } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiHeader, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { AuthService } from 'src/auth/auth.service';
+import { lireInfosClient } from 'src/auth/client';
 import { DemoService } from './demo.service';
 import { ConnexionDemoDto } from './dto/connexion-demo.dto';
 
@@ -52,11 +54,22 @@ export class DemoController {
   @ApiResponse({ status: 200, description: 'Connexion réussie' })
   @ApiResponse({ status: 403, description: 'Compte absent ou non démo' })
   @ApiResponse({ status: 404, description: 'Mode démo inactif' })
+  @ApiHeader({
+    name: 'X-Client',
+    required: false,
+    description:
+      "« mobile » pour l'application mobile : refresh renvoyé dans le JSON (refreshToken, expiresIn, sessionId), sans cookie ; deviceId et plateforme obligatoires. Absent : web, refresh dans le cookie httpOnly.",
+  })
   connexion(
     @Body() dto: ConnexionDemoDto,
     @Res({ passthrough: true }) res: Response,
+    @Req() req: Request,
   ) {
     this.demoService.assurerModeActif();
-    return this.authService.connexionDemo(dto.userId, res);
+    return this.authService.connexionDemo(
+      dto.userId,
+      res,
+      lireInfosClient(req, dto),
+    );
   }
 }

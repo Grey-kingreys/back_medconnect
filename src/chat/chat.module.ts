@@ -6,9 +6,10 @@ import { PrismaService } from '../common/services/prisma.service';
 import { JwtModule } from '@nestjs/jwt';
 
 import { NotificationsModule } from '../notifications/notifications.module';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [JwtModule.register({}), NotificationsModule],
+  imports: [JwtModule.register({}), NotificationsModule, AuthModule],
   controllers: [ChatController],
   providers: [ChatService, ChatGateway, PrismaService],
   exports: [ChatService, ChatGateway],

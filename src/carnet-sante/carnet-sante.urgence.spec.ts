@@ -1,8 +1,9 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, Logger } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import {
   CarnetSanteService,
+  DELAI_FILE_SOS_MS,
   SOS_ANTI_DOUBLON_MINUTES,
 } from './carnet-sante.service';
 import {
@@ -106,7 +107,9 @@ describe('CarnetSanteService - alerte SOS (délai, anti-relance, diffusion)', ()
       const corps = (erreur as ConflictException).getResponse() as {
         message: string;
         peutRelancerA: string;
+        code: string;
       };
+      expect(corps.code).toBe('SOS_DEJA_ACTIF');
       expect(typeof corps.message).toBe('string');
       expect(corps.message).toContain('Clinique X');
       expect(corps.message).toContain('environ 7 minutes');
@@ -171,7 +174,9 @@ describe('CarnetSanteService - alerte SOS (délai, anti-relance, diffusion)', ()
       expect(erreur).toBeInstanceOf(ConflictException);
       const corps = (erreur as ConflictException).getResponse() as {
         message: string;
+        code: string;
       };
+      expect(corps.code).toBe('SOS_DEJA_ACTIF');
       expect(corps.message).toContain('environ 3 minutes');
       expect(prisma.urgence.create).not.toHaveBeenCalled();
     });
@@ -192,6 +197,67 @@ describe('CarnetSanteService - alerte SOS (délai, anti-relance, diffusion)', ()
 
       expect(res.success).toBe(true);
       expect(prisma.urgence.create).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('createUrgence : file indisponible (proche prévenu)', () => {
+    beforeEach(() => {
+      prisma.urgence.create.mockResolvedValue({
+        id: 'nouvelle',
+        patientId: 'p1',
+        createdAt: new Date(),
+        patient: {
+          nom: 'N',
+          prenom: 'P',
+          telephone: null,
+          email: 'patient@exemple.gn',
+          profilMedical: {
+            contactTelephone: '+224620000000',
+            contactEmail: 'proche@exemple.gn',
+            contactNom: 'Proche',
+          },
+        },
+      });
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+      jest.restoreAllMocks();
+    });
+
+    it('réussit et journalise sans coordonnées quand la file échoue', async () => {
+      queueService.enqueueSos.mockRejectedValue(new Error('Redis arrêté'));
+      queueService.enqueueEmergencyEmail.mockRejectedValue(
+        new Error('Redis arrêté'),
+      );
+      const erreurLog = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+
+      const res = await service.createUrgence('p1', {});
+
+      expect(res.success).toBe(true);
+      const messages = erreurLog.mock.calls.map((c) => String(c[0]));
+      expect(messages.some((m) => m.includes('sos.file_indisponible'))).toBe(
+        true,
+      );
+      for (const m of messages) {
+        expect(m).not.toContain('+224620000000');
+        expect(m).not.toContain('proche@exemple.gn');
+      }
+    });
+
+    it('réussit quand la file ne répond jamais (délai borné)', async () => {
+      jest.useFakeTimers();
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      queueService.enqueueSos.mockReturnValue(new Promise(() => {}));
+      queueService.enqueueEmergencyEmail.mockReturnValue(new Promise(() => {}));
+
+      const promesse = service.createUrgence('p1', {});
+      await jest.advanceTimersByTimeAsync(DELAI_FILE_SOS_MS * 2 + 100);
+      const res = await promesse;
+
+      expect(res.success).toBe(true);
     });
   });
 

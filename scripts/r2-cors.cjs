@@ -1,7 +1,7 @@
 /**
  * Configure la politique CORS des buckets Cloudflare R2 pour autoriser l'upload
  * direct (PUT présigné) depuis le navigateur. Sans ça, le PUT cross-origin est
- * bloqué par le navigateur (« Erreur réseau ») — curl n'est pas concerné.
+ * bloqué par le navigateur (« Erreur réseau »), curl n'est pas concerné.
  *
  * Exige un token R2 de niveau ADMIN : le token de l'application est limité aux objets
  * et se heurte à AccessDenied sur la config d'un bucket. Sans token admin, passer par

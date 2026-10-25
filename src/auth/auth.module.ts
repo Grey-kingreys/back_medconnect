@@ -6,6 +6,8 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { EmailService } from 'src/common/services/email.service';
 import { LoginThrottleService } from './login-throttle.service';
+import { SessionsService } from './sessions.service';
+import { RevocationService } from './revocation.service';
 
 @Module({
   imports: [
@@ -16,12 +18,20 @@ import { LoginThrottleService } from './login-throttle.service';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         secret: config.getOrThrow<string>('JWT_SECRET'),
-        signOptions: { expiresIn: '7d' },
+        // Filet de sécurité : tout jeton signé sans durée explicite expire en 15 min (TB3).
+        signOptions: { expiresIn: '15m' },
       }),
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, PrismaService, EmailService, LoginThrottleService],
-  exports: [AuthService, JwtModule],
+  providers: [
+    AuthService,
+    SessionsService,
+    RevocationService,
+    PrismaService,
+    EmailService,
+    LoginThrottleService,
+  ],
+  exports: [AuthService, SessionsService, RevocationService, JwtModule],
 })
 export class AuthModule {}

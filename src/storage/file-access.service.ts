@@ -33,7 +33,7 @@ export interface AccessibleFile {
  * Personne d'autre.
  *
  * Toute génération d'URL de lecture sur le bucket privé est journalisée (qui / quelle
- * clé / quand / IP) — donnée de santé : la traçabilité des accès est requise. L'écriture
+ * clé / quand / IP), donnée de santé : la traçabilité des accès est requise. L'écriture
  * de l'audit ne doit jamais faire échouer la requête (best-effort).
  */
 @Injectable()
@@ -58,7 +58,9 @@ export class FileAccessService {
     const autorise = await this.canReadPrivate(user, file);
     if (!autorise) {
       await this.enregistrerAcces(user.userId, file, ip, 'denied');
-      throw new ForbiddenException("Vous n'êtes pas autorisé à consulter ce document.");
+      throw new ForbiddenException(
+        "Vous n'êtes pas autorisé à consulter ce document.",
+      );
     }
   }
 
@@ -73,13 +75,20 @@ export class FileAccessService {
 
   // ─── Décision d'accès ─────────────────────────────────────────
 
-  private async canReadPrivate(user: RequestUser, file: AccessibleFile): Promise<boolean> {
+  private async canReadPrivate(
+    user: RequestUser,
+    file: AccessibleFile,
+  ): Promise<boolean> {
     // Le propriétaire (patient) accède toujours à ses documents.
     if (file.ownerId === user.userId) return true;
 
     // Rôles administratifs de niveau supérieur (plateforme).
     if (user.role === 'SUPER_ADMIN' || user.role === 'ADMIN') return true;
-    if (await this.permissions.hasPermissions(user.userId, [PERMISSIONS.PLATFORM_ADMIN])) {
+    if (
+      await this.permissions.hasPermissions(user.userId, [
+        PERMISSIONS.PLATFORM_ADMIN,
+      ])
+    ) {
       return true;
     }
 
@@ -99,7 +108,10 @@ export class FileAccessService {
    * que le patient a autorisée (l'appartenance à la structure est revérifiée en base,
    * pas seulement d'après le JWT).
    */
-  private async estDansEquipeDeSoin(user: RequestUser, ownerId: string): Promise<boolean> {
+  private async estDansEquipeDeSoin(
+    user: RequestUser,
+    ownerId: string,
+  ): Promise<boolean> {
     const owner = await this.prisma.user.findUnique({
       where: { id: ownerId },
       select: { medecinTraitantId: true },
@@ -114,7 +126,12 @@ export class FileAccessService {
       });
       if (actor?.structureId === user.structureId) {
         const auth = await this.prisma.autorisationStructure.findUnique({
-          where: { patientId_structureId: { patientId: ownerId, structureId: user.structureId } },
+          where: {
+            patientId_structureId: {
+              patientId: ownerId,
+              structureId: user.structureId,
+            },
+          },
         });
         if (auth) return true;
       }
@@ -143,7 +160,7 @@ export class FileAccessService {
       });
     } catch (error) {
       this.logger.error(
-        `audit.write_failed — ${action} StoredFile:${file.id}`,
+        `audit.write_failed : ${action} StoredFile:${file.id}`,
         error instanceof Error ? error.stack : String(error),
       );
     }

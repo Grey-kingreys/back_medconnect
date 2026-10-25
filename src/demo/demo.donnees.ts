@@ -24,7 +24,9 @@ const email = (local: string) => `${local}${SUFFIXE_EMAIL_DEMO}`;
  * Comptes affichés sur la page de connexion : un seul par rôle, le plus riche en
  * données, tous liés entre eux autour de l'Hôpital National Donka quand c'est
  * possible (la patiente est suivie par le médecin, l'accueil et l'admin sont de
- * la même structure). Les autres comptes démo restent en base et utilisables.
+ * la même structure). Exception : l'administrateur de structure est proposé deux
+ * fois (un hôpital, une pharmacie, pour tester l'annulation d'une vente). Les
+ * autres comptes démo restent en base et utilisables.
  */
 export const COMPTES_VITRINE: readonly string[] = [
   email('aminata.diallo'), // patiente : données dans toutes les catégories
@@ -32,6 +34,7 @@ export const COMPTES_VITRINE: readonly string[] = [
   email('ousmane.keita'), // pharmacie de garde, plus gros stock
   email('accueil.donka'), // accueil de Donka
   email('admin.donka'), // administrateur de Donka
+  email('admin.kaloum'), // administratrice de la pharmacie de Kaloum : stock, ventes et annulation
   email('superadmin'),
 ];
 
@@ -258,7 +261,7 @@ export const COMPTES_DEMO: CompteDemoDef[] = [
     structure: 'pharmaKaloum',
     adminDe: 'pharmaKaloum',
     description:
-      'Administratrice de la Pharmacie de Kaloum : équipe, statut de garde et horaires.',
+      "Administratrice de la Pharmacie de Kaloum (de garde) : stock, ventes du jour, annulation d'une vente, équipe et horaires.",
   },
   {
     cle: 'adminNiger',

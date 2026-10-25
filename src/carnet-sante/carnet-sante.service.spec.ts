@@ -1,4 +1,8 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { CarnetSanteService } from './carnet-sante.service';
@@ -9,7 +13,7 @@ import { UpdateRendezVousStatusDto } from './dto/carnet-sante.dto';
  *
  * Les données de santé ne doivent JAMAIS être supprimées physiquement : chaque
  * suppression est un `update({ data: { deletedAt } })` et chaque lecture exclut les
- * enregistrements déjà supprimés (`deletedAt: null`). Ce filtrage est applicatif —
+ * enregistrements déjà supprimés (`deletedAt: null`). Ce filtrage est applicatif,
  * il n'y a pas de middleware Prisma qui le garantisse (le `$use` global de Prisma <5
  * n'existe plus en Prisma 7). Ces tests verrouillent donc la règle méthode par
  * méthode : un retour à `delete()` les fait échouer.
@@ -17,7 +21,7 @@ import { UpdateRendezVousStatusDto } from './dto/carnet-sante.dto';
  * Seul `prisma` est exercé ; les huit autres dépendances du service sont inertes
  * (les méthodes testées ne les appellent pas).
  */
-describe('CarnetSanteService — soft-delete des données de santé', () => {
+describe('CarnetSanteService : soft-delete des données de santé', () => {
   const modelMock = () => ({
     findFirst: jest.fn(),
     update: jest.fn().mockResolvedValue({}),
@@ -159,6 +163,37 @@ describe('CarnetSanteService : updateRendezVousStatus', () => {
       data: { status: 'ANNULE' },
     });
   });
+
+  it.each(['TERMINE', 'REFUSE', 'ANNULE'])(
+    "refuse au patient d'annuler un rendez-vous au statut %s",
+    async (status) => {
+      prisma.rendezVous.findUnique.mockResolvedValue({ ...rv, status });
+      const erreur = await service
+        .updateRendezVousStatus('rv1', 'ANNULE', 'patient1')
+        .catch((e: unknown) => e);
+      expect(erreur).toBeInstanceOf(ConflictException);
+      const corps = (erreur as ConflictException).getResponse() as {
+        code: string;
+        message: string;
+      };
+      expect(corps.code).toBe('TRANSITION_INTERDITE');
+      expect(typeof corps.message).toBe('string');
+      expect(corps.message.length).toBeGreaterThan(0);
+      expect(prisma.rendezVous.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['PROGRAMME', 'EN_ATTENTE', 'CONFIRME'])(
+    'autorise le patient à annuler un rendez-vous au statut %s',
+    async (status) => {
+      prisma.rendezVous.findUnique.mockResolvedValue({ ...rv, status });
+      await service.updateRendezVousStatus('rv1', 'ANNULE', 'patient1');
+      expect(prisma.rendezVous.update).toHaveBeenCalledWith({
+        where: { id: 'rv1' },
+        data: { status: 'ANNULE' },
+      });
+    },
+  );
 
   it('refuse au patient un autre statut que ANNULE', async () => {
     await expect(

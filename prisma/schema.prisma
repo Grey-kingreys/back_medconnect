@@ -1,6 +1,7 @@
 generator client {
   provider = "prisma-client"
   output   = "../generated/prisma"
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
@@ -73,6 +74,9 @@ model User {
   nom       String
   prenom    String
   telephone String?
+  // Forme E.164 de `telephone`, calculée par le trigger PostgreSQL
+  // "user_telephone_normalise" (TB17). Ne jamais l'écrire depuis l'application.
+  telephoneNormalise String?
   dateNaissance DateTime?
   taille    Int?     // Taille en cm
   poids     Float?   // Poids en kg
@@ -86,6 +90,11 @@ model User {
   refreshToken        String?   @unique
   refreshTokenExpires DateTime?
 
+  // Sessions par appareil (TB3). Les champs refreshToken et refreshTokenExpires
+  // ci-dessus ne servent plus qu'au retour arrière SESSIONS_MULTI_APPAREILS=false,
+  // conservés une version.
+  sessions Session[]
+
   // Lien vers une structure (pour MEDECIN, PHARMACIEN, STRUCTURE_ADMIN)
   structureId String?
   structure   Structure? @relation("StructureMembers", fields: [structureId], references: [id])
@@ -93,7 +102,7 @@ model User {
   // Structure dont cet user est l'admin
   administeredStructure Structure? @relation("StructureAdmin")
 
-  // Rôle dynamique (RBAC permissions) — coexiste avec `role` (enum) le temps de la transition
+  // Rôle dynamique (RBAC permissions), coexiste avec `role` (enum) le temps de la transition
   appRoleId String?
   appRole   AppRole? @relation("UserAppRole", fields: [appRoleId], references: [id])
 
@@ -136,9 +145,12 @@ model User {
   // Fichiers stockés (R2) dont cet utilisateur est propriétaire
   storedFiles StoredFile[] @relation("UserStoredFiles")
 
-  // Photo de profil (avatar) — fichier R2 du bucket PUBLIC. SetNull si le fichier est supprimé.
+  // Photo de profil (avatar) : fichier R2 du bucket PUBLIC. SetNull si le fichier est supprimé.
   avatarFileId String?     @unique
   avatarFile   StoredFile? @relation("UserAvatar", fields: [avatarFileId], references: [id], onDelete: SetNull)
+
+  // Un numéro par compte (TB17) ; les comptes sans numéro restent possibles.
+  @@unique([telephoneNormalise], where: raw("\"telephoneNormalise\" IS NOT NULL"))
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -175,12 +187,16 @@ model Structure {
   // Rôles personnalisés définis par l'admin de cette structure
   appRoles AppRole[] @relation("StructureRoles")
 
-  // Logo — fichier R2 du bucket PUBLIC. SetNull si le fichier est supprimé.
+  // Logo : fichier R2 du bucket PUBLIC. SetNull si le fichier est supprimé.
   logoFileId String?     @unique
   logoFile   StoredFile? @relation("StructureLogo", fields: [logoFileId], references: [id], onDelete: SetNull)
 
   // Stock médicaments (pharmacies)
   medicaments StockMedicament[]
+
+  // Ventes au comptoir et compteur de numérotation (pharmacies)
+  ventes         Vente[]
+  compteursVente CompteurVente[]
 
   // Consultations effectuées dans cette structure
   consultations Consultation[]
@@ -279,7 +295,7 @@ model Ordonnance {
   dateEmission  DateTime @default(now())
   dateExpiration DateTime?
 
-  // Ordonnance scannée (PDF/image) — fichier R2 du bucket PRIVÉ. Lecture via URL présignée.
+  // Ordonnance scannée (PDF/image) : fichier R2 du bucket PRIVÉ. Lecture via URL présignée.
   scanFileId String?     @unique
   scanFile   StoredFile? @relation("OrdonnanceScan", fields: [scanFileId], references: [id], onDelete: SetNull)
 
@@ -300,8 +316,8 @@ model ResultatAnalyse {
   typeAnalyse String   // "Bilan sanguin", "Radiographie", etc.
   laboratoire String?
   resultats   String   // JSON ou texte libre
-  fichierUrl  String?  // ⚠️ DÉPRÉCIÉ (URL brute sans contrôle d'accès) — remplacé par documentFile. À retirer une fois le front migré.
-  // Document d'analyse (PDF/image/DICOM) — fichier R2 du bucket PRIVÉ. Lecture via URL présignée.
+  fichierUrl  String?  // ⚠️ DÉPRÉCIÉ (URL brute sans contrôle d'accès), remplacé par documentFile. À retirer une fois le front migré.
+  // Document d'analyse (PDF/image/DICOM) : fichier R2 du bucket PRIVÉ. Lecture via URL présignée.
   documentFileId String?     @unique
   documentFile   StoredFile? @relation("AnalyseDocument", fields: [documentFileId], references: [id], onDelete: SetNull)
   dateAnalyse DateTime
@@ -339,7 +355,7 @@ model Vaccination {
 model AuditLog {
   id          String   @id @default(uuid())
   userId      String?  // NULL si action système
-  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   action      String   // ex. "create", "update", "delete"
   entityType  String   // ex. "Consultation", "Ordonnance", "Vaccination", "ResultatAnalyse"
@@ -348,6 +364,10 @@ model AuditLog {
   metadata    Json?    // données contextuelles supplémentaires (ex. ancienne/nouvelle valeur)
 
   createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
 }
 
 enum AppointmentStatus {
@@ -365,7 +385,7 @@ model RendezVous {
   patient     User     @relation("PatientRendezVous", fields: [patientId], references: [id], onDelete: Cascade)
   
   // Optionnel : un RDV « avec la structure » (pris par l'accueil) n'est pas encore
-  // affecté à un médecin — un médecin de la structure le prend en charge ensuite.
+  // affecté à un médecin, un médecin de la structure le prend en charge ensuite.
   medecinId   String?
   medecin     User?    @relation("MedecinRendezVous", fields: [medecinId], references: [id], onDelete: SetNull)
 
@@ -419,7 +439,7 @@ model StockMedicament {
   structure     Structure  @relation(fields: [structureId], references: [id], onDelete: Cascade)
 
   quantite      Int        @default(0)
-  prixUnitaire  Float?     // en GNF
+  prixUnitaire  Int?       // en GNF, entier (lot 7, arrondi à la migration)
   disponible    Boolean    @default(true)
   dateExpiration DateTime?
   notes         String?
@@ -427,6 +447,62 @@ model StockMedicament {
   updatedAt DateTime @updatedAt
 
   @@unique([medicamentId, structureId])
+}
+
+enum StatutVente {
+  VALIDEE
+  ANNULEE
+}
+
+// Vente au comptoir d'une pharmacie (lot 7). Jamais supprimée, seulement annulée.
+// vendeurId, annuleeParId et les identifiants des lignes sont sans clé étrangère (D109) :
+// un membre, un stock ou un médicament supprimé ne bloque rien et le reçu reste lisible.
+model Vente {
+  id                 String      @id @default(uuid())
+  structureId        String
+  structure          Structure   @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  numero             String      // V-AAAA-NNNNNN, séquence par pharmacie et par année
+  vendeurId          String
+  vendeurNom         String      // copie « Prénom Nom » au moment de la vente
+  clientNom          String?
+  clientTelephone    String?
+  ordonnanceVerifiee Boolean     @default(false)
+  total              Int         // GNF, entier
+  statut             StatutVente @default(VALIDEE)
+  annuleeLe          DateTime?
+  annuleeParId       String?
+  motifAnnulation    String?
+  cleIdempotence     String?     // jamais renvoyée au client
+  lignes             LigneVente[]
+  createdAt          DateTime    @default(now())
+
+  @@unique([structureId, numero])
+  @@unique([structureId, cleIdempotence])
+  @@index([structureId, createdAt])
+}
+
+model LigneVente {
+  id                String @id @default(uuid())
+  venteId           String
+  vente             Vente  @relation(fields: [venteId], references: [id], onDelete: Cascade)
+  medicamentId      String
+  stockMedicamentId String
+  nomMedicament     String // copie du nom au moment de la vente
+  prixUnitaire      Int    // copie du prix du stock, GNF
+  quantite          Int
+  sousTotal         Int
+
+  @@index([venteId])
+}
+
+// Compteur de numérotation des ventes, par pharmacie et par année (UTC = heure de Conakry).
+model CompteurVente {
+  structureId   String
+  structure     Structure @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  annee         Int
+  dernierNumero Int       @default(0)
+
+  @@id([structureId, annee])
 }
 
 // ====== SECURITE ET ACCES ======
@@ -500,6 +576,13 @@ enum UrgenceStatus {
   ANNULE
 }
 
+// Origine de la position envoyée avec une alerte SOS (TB10b).
+enum SourcePositionUrgence {
+  gps
+  reseau
+  inconnue
+}
+
 model Urgence {
   id        String   @id @default(uuid())
   patientId String
@@ -508,6 +591,18 @@ model Urgence {
   latitude  Float?
   longitude Float?
   message   String?
+
+  // Qualité de la position (TB10b) : rayon d'incertitude en mètres, heure de la mesure
+  // côté téléphone, origine. Toujours enregistrées, même si la position n'a pas servi.
+  precisionMetres    Float?
+  horodatagePosition DateTime?
+  sourcePosition     SourcePositionUrgence?
+
+  // Idempotence (TB10b, D59) : clé envoyée par le client dans Idempotency-Key, et bilan
+  // de diffusion renvoyé tel quel à un rejeu. Jamais renvoyés par les routes SOS (D61).
+  cleIdempotence String?
+  bilanDiffusion Json?
+
   status    UrgenceStatus @default(LANCE)
 
   // Prise en charge : structure qui intervient (SetNull si elle est supprimée,
@@ -526,13 +621,15 @@ model Urgence {
 
   // Lecture de la dernière alerte d'un patient (anti-relance)
   @@index([patientId, createdAt])
+  // Un rejeu (même patient, même clé) retrouve l'alerte d'origine ; NULL n'est jamais en conflit.
+  @@unique([patientId, cleIdempotence])
 }
 
 // ====== STOCKAGE OBJETS (Cloudflare R2) ======
 // Métadonnées des fichiers déposés sur R2 (avatars, logos, ordonnances scannées,
 // résultats d'analyses, imagerie envoyée au diagnostic IA). On ne persiste JAMAIS
-// d'URL présignée (elle expire et fuiterait un accès) — uniquement la `key` R2.
-// Cf. `src/storage/` (StorageModule) — module isolé, migration des usages métier séparée.
+// d'URL présignée (elle expire et fuiterait un accès), uniquement la `key` R2.
+// Cf. `src/storage/` (StorageModule), module isolé, migration des usages métier séparée.
 
 enum StoredFileBucket {
   PUBLIC   // bucket public (cdn.medconnecte.com) : avatars, logos, images d'articles
@@ -594,4 +691,36 @@ model Notification {
   lien      String?          // URL optionnelle vers laquelle naviguer
 
   createdAt DateTime         @default(now())
+}
+
+// ====== SESSIONS PAR APPAREIL (TB3) ======
+
+enum SessionClientType {
+  WEB
+  MOBILE
+}
+
+// Une session = une connexion sur un appareil = une famille de refresh tokens.
+// Le refresh présenté par le client vaut `<id>.<secret>` ; seul le sha256 du secret est stocké.
+model Session {
+  id                  String            @id @default(uuid())
+  userId              String
+  user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientType          SessionClientType
+  platform            String? // android ou ios (mobile seulement)
+  deviceId            String? // identifiant d'appareil envoyé par le mobile
+  deviceName          String?
+  appVersion          String?
+  refreshHash         String // sha256 hex du secret courant
+  previousRefreshHash String? // sha256 hex du secret précédent
+  graceUntil          DateTime? // fin de la fenêtre de grâce du secret précédent
+  graceSecretEnc      String? // secret courant chiffré (EncryptionService), renvoyé pendant la grâce
+  createdAt           DateTime          @default(now())
+  lastUsedAt          DateTime          @default(now())
+  expiresAt           DateTime
+  revokedAt           DateTime?
+  revokedReason       String? // DECONNEXION, REUTILISATION, NOUVELLE_CONNEXION
+
+  @@index([userId])
+  @@index([userId, deviceId])
 }

@@ -15,7 +15,7 @@ import { StorageService } from './storage.service';
  * du module : format des clés (jamais le nom original), whitelist MIME côté serveur,
  * sélection du bon bucket selon la visibilité, TTL des URLs présignées.
  *
- * NB : `getSignedUrl` s'exécute réellement (pure crypto, sans réseau) — il lit la
+ * NB : `getSignedUrl` s'exécute réellement (pure crypto, sans réseau), il lit la
  * config du client (endpoint/credentials) mais n'appelle pas `send()`. Le mock ne
  * couvre donc que les opérations `send()` (Put/Get/Head/Delete).
  */
@@ -50,7 +50,7 @@ describe('StorageService', () => {
       credentials: { accessKeyId: 'test-key', secretAccessKey: 'test-secret' },
     });
     prisma = { storedFile: {} };
-    service = new StorageService(client, config as any, prisma as any);
+    service = new StorageService(client, config as any, prisma);
   });
 
   // ─── Génération de clé ──────────────────────────────────────
@@ -67,7 +67,9 @@ describe('StorageService', () => {
       const mois = String(new Date().getUTCMonth() + 1).padStart(2, '0');
       const annee = new Date().getUTCFullYear();
       expect(key).toMatch(
-        new RegExp(`^analyses/${annee}/${mois}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.pdf$`),
+        new RegExp(
+          `^analyses/${annee}/${mois}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.pdf$`,
+        ),
       );
       // Aucun fragment du nom original ne fuite dans la clé.
       expect(key.toLowerCase()).not.toContain('patient');
@@ -76,13 +78,28 @@ describe('StorageService', () => {
     });
 
     it('dérive l’extension du type MIME, pas du nom de fichier', async () => {
-      const { key } = await service.getSignedUploadUrl('avatars', 'photo.pdf', 'image/png', 'public');
+      const { key } = await service.getSignedUploadUrl(
+        'avatars',
+        'photo.pdf',
+        'image/png',
+        'public',
+      );
       expect(key.endsWith('.png')).toBe(true);
     });
 
     it('génère une clé unique à chaque appel', async () => {
-      const a = await service.getSignedUploadUrl('avatars', 'a.png', 'image/png', 'public');
-      const b = await service.getSignedUploadUrl('avatars', 'a.png', 'image/png', 'public');
+      const a = await service.getSignedUploadUrl(
+        'avatars',
+        'a.png',
+        'image/png',
+        'public',
+      );
+      const b = await service.getSignedUploadUrl(
+        'avatars',
+        'a.png',
+        'image/png',
+        'public',
+      );
       expect(a.key).not.toEqual(b.key);
     });
   });
@@ -92,24 +109,43 @@ describe('StorageService', () => {
   describe('whitelist MIME', () => {
     it('rejette un MIME hors whitelist (privé)', async () => {
       await expect(
-        service.getSignedUploadUrl('docs', 'x.exe', 'application/x-msdownload', 'private'),
+        service.getSignedUploadUrl(
+          'docs',
+          'x.exe',
+          'application/x-msdownload',
+          'private',
+        ),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('rejette un PDF pour un fichier public (réservé aux images)', async () => {
       await expect(
-        service.getSignedUploadUrl('avatars', 'x.pdf', 'application/pdf', 'public'),
+        service.getSignedUploadUrl(
+          'avatars',
+          'x.pdf',
+          'application/pdf',
+          'public',
+        ),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('accepte le DICOM pour un document médical privé', async () => {
-      const { key } = await service.getSignedUploadUrl('imagerie', 'scan', 'application/dicom', 'private');
+      const { key } = await service.getSignedUploadUrl(
+        'imagerie',
+        'scan',
+        'application/dicom',
+        'private',
+      );
       expect(key.endsWith('.dcm')).toBe(true);
     });
 
     it('upload() rejette un MIME non autorisé sans jamais appeler R2', async () => {
       await expect(
-        service.upload({ buffer: Buffer.from('x'), mimetype: 'text/html' }, 'docs', 'private'),
+        service.upload(
+          { buffer: Buffer.from('x'), mimetype: 'text/html' },
+          'docs',
+          'private',
+        ),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(s3mock.commandCalls(PutObjectCommand)).toHaveLength(0);
     });
@@ -119,13 +155,23 @@ describe('StorageService', () => {
 
   describe('sélection du bucket', () => {
     it('signe l’upload public contre le bucket public', async () => {
-      const { url } = await service.getSignedUploadUrl('avatars', 'a.png', 'image/png', 'public');
+      const { url } = await service.getSignedUploadUrl(
+        'avatars',
+        'a.png',
+        'image/png',
+        'public',
+      );
       expect(url.toLowerCase()).toContain(PUBLIC_BUCKET);
       expect(url.toLowerCase()).not.toContain(PRIVATE_BUCKET);
     });
 
     it('signe l’upload privé contre le bucket privé', async () => {
-      const { url } = await service.getSignedUploadUrl('docs', 'a.pdf', 'application/pdf', 'private');
+      const { url } = await service.getSignedUploadUrl(
+        'docs',
+        'a.pdf',
+        'application/pdf',
+        'private',
+      );
       expect(url.toLowerCase()).toContain(PRIVATE_BUCKET);
       expect(url.toLowerCase()).not.toContain(PUBLIC_BUCKET);
     });
@@ -164,7 +210,12 @@ describe('StorageService', () => {
 
   describe('TTL des URLs présignées', () => {
     it('URL d’upload : TTL 600 s', async () => {
-      const { url, expiresIn } = await service.getSignedUploadUrl('docs', 'a.pdf', 'application/pdf', 'private');
+      const { url, expiresIn } = await service.getSignedUploadUrl(
+        'docs',
+        'a.pdf',
+        'application/pdf',
+        'private',
+      );
       expect(expiresIn).toBe(600);
       expect(url).toContain('X-Amz-Expires=600');
     });
@@ -197,16 +248,23 @@ describe('StorageService', () => {
     });
 
     it('retourne false sur 404 (objet absent)', async () => {
-      s3mock
-        .on(HeadObjectCommand)
-        .rejects(Object.assign(new Error('Not Found'), { name: 'NotFound', $metadata: { httpStatusCode: 404 } }));
-      await expect(service.exists('docs/x.pdf', 'private')).resolves.toBe(false);
+      s3mock.on(HeadObjectCommand).rejects(
+        Object.assign(new Error('Not Found'), {
+          name: 'NotFound',
+          $metadata: { httpStatusCode: 404 },
+        }),
+      );
+      await expect(service.exists('docs/x.pdf', 'private')).resolves.toBe(
+        false,
+      );
     });
 
     it('interroge le bon bucket selon la visibilité', async () => {
       s3mock.on(HeadObjectCommand).resolves({});
       await service.exists('avatars/x.png', 'public');
-      expect(s3mock.commandCalls(HeadObjectCommand)[0].args[0].input.Bucket).toBe(PUBLIC_BUCKET);
+      expect(
+        s3mock.commandCalls(HeadObjectCommand)[0].args[0].input.Bucket,
+      ).toBe(PUBLIC_BUCKET);
     });
   });
 

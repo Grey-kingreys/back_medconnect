@@ -11,6 +11,8 @@ import {
   Req,
   HttpCode,
   HttpStatus,
+  ForbiddenException,
+  Headers,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -18,10 +20,12 @@ import {
   ApiBearerAuth,
   ApiParam,
   ApiResponse,
+  ApiHeader,
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { RequestWithUser } from 'src/auth/jwt.strategy';
 import { CarnetSanteService } from './carnet-sante.service';
+import { LimitePermissiveSiRedisIndisponible } from 'src/common/decorators/limite-permissive.decorator';
 import { AuthGuard } from 'src/common/guards/auth.guard';
 import { PermissionsGuard } from 'src/common/rbac/permissions.guard';
 import { RequirePermissions } from 'src/common/rbac/require-permissions.decorator';
@@ -92,7 +96,7 @@ export class CarnetSanteController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Créer/Mettre à jour le profil médical',
-    description: 'Upsert — crée si inexistant, met à jour sinon.',
+    description: 'Upsert : crée si inexistant, met à jour sinon.',
   })
   upsertProfilMedical(
     @Req() req: RequestWithUser,
@@ -288,6 +292,11 @@ export class CarnetSanteController {
 
   @Post('rendez-vous/:id/status')
   @ApiOperation({ summary: "Mettre à jour le statut d'un rendez-vous" })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Annulation impossible depuis le statut actuel (code TRANSITION_INTERDITE).',
+  })
   updateRendezVousStatus(
     @Param('id') id: string,
     @Body() dto: UpdateRendezVousStatusDto,
@@ -344,11 +353,44 @@ export class CarnetSanteController {
   // ─── Urgences (SOS) ──────────────────────────────────────────
 
   @Post('sos')
-  @Throttle({ default: { limit: 5, ttl: 3_600_000 } }) // Anti-spam SOS : ~5/h/user.
+  // Anti-spam SOS : 5 par heure et par utilisateur ; laissé passer si Redis est indisponible.
+  @Throttle({ default: { limit: 5, ttl: 3_600_000 } })
+  @LimitePermissiveSiRedisIndisponible()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Lancer une alerte SOS' })
-  createUrgence(@Req() req: RequestWithUser, @Body() dto: CreateUrgenceDto) {
-    return this.carnetSanteService.createUrgence(req.user.userId, dto);
+  @ApiResponse({
+    status: 403,
+    description: 'Compte non patient (code SOS_ROLE_INTERDIT).',
+  })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Alerte déjà en cours (code SOS_DEJA_ACTIF, donnees.peutRelancerA).',
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: false,
+    description:
+      'Clé unique par alerte (8 à 128 caractères parmi lettres, chiffres, . _ : -), par exemple un UUID. Un renvoi avec la même clé dans les 24 h renvoie la même alerte sans nouvelle diffusion. Clé mal formée : ignorée.',
+  })
+  createUrgence(
+    @Req() req: RequestWithUser,
+    @Body() dto: CreateUrgenceDto,
+    @Headers('idempotency-key') enTeteIdempotence?: string,
+  ) {
+    // Un soignant victime d'un malaise utilise son compte patient (plan mobile, B33).
+    if (req.user.role !== 'PATIENT') {
+      throw new ForbiddenException({
+        message:
+          "L'alerte SOS est réservée aux comptes patients. En cas d'urgence, appelez directement les secours ou connectez-vous avec votre compte patient.",
+        code: 'SOS_ROLE_INTERDIT',
+      });
+    }
+    return this.carnetSanteService.createUrgence(
+      req.user.userId,
+      dto,
+      enTeteIdempotence,
+    );
   }
 
   @Get('sos/en-cours')

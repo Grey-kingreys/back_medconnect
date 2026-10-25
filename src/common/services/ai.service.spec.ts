@@ -1,6 +1,6 @@
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { AiService } from './ai.service';
 
 // HttpService et ConfigService simulés : aucun appel réseau
@@ -40,5 +40,38 @@ describe('AiService : secret partagé avec les services IA', () => {
     for (const appel of post.mock.calls as unknown[][]) {
       expect(appel[2]).toBeUndefined();
     }
+  });
+});
+
+describe('AiService : repli de getEmergencyFirstAid', () => {
+  function creerServiceEnPanne(variables: Record<string, string | undefined>) {
+    const post = jest
+      .fn()
+      .mockReturnValue(throwError(() => new Error('panne')));
+    const httpService = { post } as unknown as HttpService;
+    const configService = {
+      get: (cle: string) => variables[cle],
+    } as unknown as ConfigService;
+    return new AiService(httpService, configService);
+  }
+
+  it('cite le 15 par défaut', async () => {
+    const service = creerServiceEnPanne({});
+    const res = (await service.getEmergencyFirstAid('brûlure')) as {
+      reponse: string;
+    };
+    expect(res.reponse).toContain(
+      'appelez immédiatement le 15 ou les secours locaux',
+    );
+  });
+
+  it('cite le numéro configuré', async () => {
+    const service = creerServiceEnPanne({ NUMERO_URGENCE_MEDICALE: '117' });
+    const res = (await service.getEmergencyFirstAid('brûlure')) as {
+      reponse: string;
+    };
+    expect(res.reponse).toContain(
+      'appelez immédiatement le 117 ou les secours locaux',
+    );
   });
 });

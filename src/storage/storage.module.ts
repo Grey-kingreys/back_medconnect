@@ -8,7 +8,7 @@ import { StorageController } from './storage.controller';
 import { R2_CLIENT } from './storage.constants';
 
 /**
- * Module de stockage objets Cloudflare R2 — isolé et réutilisable.
+ * Module de stockage objets Cloudflare R2 : isolé et réutilisable.
  *
  * Le `S3Client` est instancié UNE seule fois (provider `R2_CLIENT`) puis partagé.
  * `@Global` : `StorageService` est injectable par les modules métier (avatars,
