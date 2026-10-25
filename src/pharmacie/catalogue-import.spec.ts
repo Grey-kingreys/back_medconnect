@@ -112,6 +112,27 @@ describe('CatalogueImportService, import Excel du catalogue', () => {
     expect(data.totalLignes).toBe(1);
   });
 
+  it('reconnaît Désignation, DCI et Famille', async () => {
+    const fichier = await construireFichier(
+      [['Ciprofloxacine 500 mg', 'Ciprofloxacine', 'Antibiotique', 'Bayer']],
+      ['Désignation', 'DCI', 'Famille', 'Laboratoire'],
+    );
+
+    const { data } = await service.apercuImportCatalogue(fichier);
+
+    expect(data.lignes[0]).toMatchObject({
+      statut: 'acceptee',
+      nom: 'Ciprofloxacine 500 mg',
+      nomGenerique: 'Ciprofloxacine',
+    });
+    expect(data.colonnes.reconnues.map((c) => c.colonne)).toEqual([
+      'Nom',
+      'Nom générique',
+      'Catégorie',
+    ]);
+    expect(data.colonnes.ignorees).toEqual(['Laboratoire']);
+  });
+
   it('refuse un fichier sans les colonnes obligatoires en les nommant', async () => {
     const fichier = await construireFichier(
       [['Amoxicilline', 'Antibiotique']],

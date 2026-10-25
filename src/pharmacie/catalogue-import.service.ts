@@ -37,19 +37,62 @@ const COLONNES_IMPORT_CATALOGUE: ColonnesImport<ColonneCatalogue> = {
     'ordonnance',
     'formes',
   ],
+  // Titres des modèles et des listes courantes (minuscules, sans accents ni espaces)
   reconnaitre: (titre) => {
-    if (titre === 'nom' || titre === 'medicament') return 'nom';
-    if (titre.startsWith('nomgenerique')) return 'nomGenerique';
-    if (titre.startsWith('categorie')) return 'categorie';
+    if (
+      [
+        'nom',
+        'medicament',
+        'nomdumedicament',
+        'nomcommercial',
+        'designation',
+        'produit',
+        'libelle',
+      ].includes(titre)
+    ) {
+      return 'nom';
+    }
+    if (
+      titre.startsWith('nomgenerique') ||
+      titre.startsWith('generique') ||
+      titre.startsWith('molecule') ||
+      titre.startsWith('principeactif') ||
+      titre === 'dci'
+    ) {
+      return 'nomGenerique';
+    }
+    if (
+      titre.startsWith('categorie') ||
+      titre.startsWith('famille') ||
+      titre.startsWith('classe')
+    ) {
+      return 'categorie';
+    }
     if (titre.startsWith('description')) return 'description';
-    if (titre.startsWith('ordonnance')) return 'ordonnance';
-    if (titre.startsWith('forme')) return 'formes';
+    if (titre.startsWith('ordonnance') || titre === 'surordonnance') {
+      return 'ordonnance';
+    }
+    if (
+      titre.startsWith('forme') ||
+      titre.startsWith('presentation') ||
+      titre.startsWith('galenique')
+    ) {
+      return 'formes';
+    }
     return undefined;
   },
   obligatoires: [
     ['nom', 'Nom'],
     ['categorie', 'Catégorie'],
   ],
+  libelles: {
+    nom: 'Nom',
+    nomGenerique: 'Nom générique',
+    categorie: 'Catégorie',
+    description: 'Description',
+    ordonnance: 'Ordonnance',
+    formes: 'Formes',
+  },
 };
 
 // Mêmes bornes que CreateMedicamentDto
@@ -168,7 +211,10 @@ export class CatalogueImportService {
     fichier?: FichierImport,
   ): Promise<RapportImportCatalogue> {
     const feuille = await ouvrirFeuilleImport(fichier, FEUILLE_CATALOGUE);
-    const brutes = lireLignesImport(feuille, COLONNES_IMPORT_CATALOGUE);
+    const { brutes, colonnes } = lireLignesImport(
+      feuille,
+      COLONNES_IMPORT_CATALOGUE,
+    );
 
     // Catalogue chargé une seule fois : noms existants et orthographe des catégories
     const existants = await this.prisma.medicament.findMany({
@@ -281,6 +327,7 @@ export class CatalogueImportService {
       acceptees,
       rejetees: lignes.length - acceptees,
       lignes,
+      colonnes,
     };
   }
 

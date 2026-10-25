@@ -45,18 +45,70 @@ type ColonneImport = 'nom' | 'quantite' | 'prix' | 'date' | 'notes';
 /** Colonnes de la feuille « Stock ». */
 const COLONNES_IMPORT_STOCK: ColonnesImport<ColonneImport> = {
   toutes: ['nom', 'quantite', 'prix', 'date', 'notes'],
+  // Titres des modèles et des logiciels de pharmacie courants (minuscules, sans accents ni espaces)
   reconnaitre: (titre) => {
-    if (titre === 'medicament') return 'nom';
-    if (titre === 'quantite') return 'quantite';
-    if (titre.startsWith('prix')) return 'prix';
-    if (titre.startsWith('date')) return 'date';
-    if (titre.startsWith('note')) return 'notes';
+    if (
+      [
+        'medicament',
+        'medicaments',
+        'nom',
+        'nomdumedicament',
+        'nomcommercial',
+        'designation',
+        'produit',
+        'libelle',
+        'article',
+      ].includes(titre)
+    ) {
+      return 'nom';
+    }
+    // « Quantité minimale », « Qté seuil » : un seuil d'alerte, pas la quantité en stock
+    const seuil = /min|max|seuil|alerte|commande/.test(titre);
+    if (
+      !seuil &&
+      (titre.startsWith('quantite') ||
+        titre.startsWith('qte') ||
+        ['qty', 'qt', 'stock', 'stockactuel', 'enstock'].includes(titre))
+    ) {
+      return 'quantite';
+    }
+    if (
+      titre.startsWith('prix') ||
+      titre.startsWith('tarif') ||
+      // « P.U. », « PU (GNF) », « PV TTC »
+      /^p[uv](gnf|fg|ttc|ht)?$/.test(titre)
+    ) {
+      return 'prix';
+    }
+    if (
+      titre.startsWith('date') ||
+      titre.startsWith('peremption') ||
+      titre.startsWith('expiration') ||
+      ['dlu', 'dlc', 'exp'].includes(titre)
+    ) {
+      return 'date';
+    }
+    if (
+      titre.startsWith('note') ||
+      titre.startsWith('remarque') ||
+      titre.startsWith('commentaire') ||
+      titre.startsWith('observation')
+    ) {
+      return 'notes';
+    }
     return undefined;
   },
   obligatoires: [
     ['nom', 'Médicament'],
     ['quantite', 'Quantité'],
   ],
+  libelles: {
+    nom: 'Médicament',
+    quantite: 'Quantité',
+    prix: 'Prix',
+    date: "Date d'expiration",
+    notes: 'Notes',
+  },
 };
 
 @Injectable()
@@ -673,7 +725,10 @@ export class PharmacieService {
     fichier?: FichierImport,
   ): Promise<RapportImportStock> {
     const feuille = await ouvrirFeuilleImport(fichier, 'Stock');
-    const brutes = lireLignesImport(feuille, COLONNES_IMPORT_STOCK);
+    const { brutes, colonnes } = lireLignesImport(
+      feuille,
+      COLONNES_IMPORT_STOCK,
+    );
 
     // Catalogue chargé une seule fois, indexé par nom et nom générique normalisés
     const { data: catalogue } = await this.getMedicaments();
@@ -798,6 +853,7 @@ export class PharmacieService {
       acceptees,
       rejetees: lignes.length - acceptees,
       lignes,
+      colonnes,
     };
   }
 
@@ -834,6 +890,7 @@ export class PharmacieService {
       acceptees,
       rejetees: lignes.length - acceptees,
       lignes,
+      colonnes: rapport.colonnes,
     };
   }
 
