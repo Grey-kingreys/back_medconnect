@@ -16,6 +16,10 @@ import {
   exigerTelephone,
   verifierTelephoneLibre,
 } from 'src/common/telephone/telephone-unicite';
+import {
+  assurerPointDeVente,
+  supprimerConfigurationPharmacies,
+} from 'src/pharmacie/point-de-vente';
 import { CreateStructureDto, CreateSuperAdminDto } from './dto/super-admin.dto';
 
 @Injectable()
@@ -103,6 +107,20 @@ export class SuperAdminService {
         `Seed des rôles par défaut échoué pour la structure ${structure.id}`,
         e,
       );
+    }
+
+    // Point de vente, poste de reprise, compteur et paramètres d'une pharmacie (D478).
+    // Non bloquant : le démarrage suivant ou le premier accès aux routes de caisse le rattrape.
+    if (structure.type === 'PHARMACIE') {
+      try {
+        await this.prisma.$transaction((tx) =>
+          assurerPointDeVente(tx, structure),
+        );
+      } catch {
+        this.logger.error(
+          `superadmin.point_de_vente_echec structureId=${structure.id}`,
+        );
+      }
     }
 
     // Envoyer l'email d'invitation : un échec ne défait pas la création.
@@ -449,6 +467,9 @@ export class SuperAdminService {
           await tx.user.delete({ where: { id: structure.adminId } });
         }
       }
+
+      // Configuration de caisse d'une pharmacie (clés étrangères en Restrict, D479).
+      await supprimerConfigurationPharmacies(tx, [structureId]);
 
       // 3. Supprimer la structure
       await tx.structure.delete({

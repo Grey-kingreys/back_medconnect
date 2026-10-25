@@ -132,6 +132,19 @@ describe('DemoSeeder', () => {
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
+    it('création : un point de vente par pharmacie démo, avec son nom', async () => {
+      expect(await seeder.creerJeuDeDonnees()).toBe(true);
+
+      const pharmacies = STRUCTURES_DEMO.filter((s) => s.type === 'PHARMACIE');
+      expect(prisma.pointDeVente.upsert).toHaveBeenCalledTimes(
+        pharmacies.length,
+      );
+      const noms = (
+        prisma.pointDeVente.upsert.mock.calls as [{ create: { nom: string } }][]
+      ).map(([appel]) => appel.create.nom);
+      expect(noms.sort()).toEqual(pharmacies.map((s) => s.nom).sort());
+    });
+
     it('crée tout le jeu de données dans une seule transaction', async () => {
       expect(await seeder.creerJeuDeDonnees()).toBe(true);
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
@@ -433,6 +446,24 @@ describe('DemoSeeder', () => {
           'Données de démonstration supprimées puis recréées',
         ),
       );
+    });
+
+    it('purge : la configuration de caisse des structures démo part avant les structures', async () => {
+      process.env.DEMO_MODE = 'true';
+      prisma.structure.findMany.mockResolvedValue([{ id: 's-pharma' }]);
+      prisma.user.deleteMany.mockResolvedValue({ count: 0 });
+      prisma.structure.deleteMany.mockResolvedValue({ count: 0 });
+
+      await seeder.reinitialiserJeuDeDonnees();
+
+      expect(prisma.pointDeVente.deleteMany).toHaveBeenCalledWith({
+        where: { structureId: { in: ['s-pharma'] } },
+      });
+      expect(prisma.parametresPharmacie.deleteMany).toHaveBeenCalled();
+      expect(prisma.anomalie.deleteMany).toHaveBeenCalled();
+      expect(
+        prisma.pointDeVente.deleteMany.mock.invocationCallOrder[0],
+      ).toBeLessThan(prisma.structure.deleteMany.mock.invocationCallOrder[0]);
     });
 
     it("ne supprime aucun journal d'audit si aucun compte démo n'existe", async () => {

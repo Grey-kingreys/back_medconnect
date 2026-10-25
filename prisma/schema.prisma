@@ -198,6 +198,11 @@ model Structure {
   ventes         Vente[]
   compteursVente CompteurVente[]
 
+  // Tranche pharmacie 1 : points de vente, paramètres et fournisseurs (PB05)
+  pointsDeVente       PointDeVente[]
+  parametresPharmacie ParametresPharmacie?
+  fournisseurs        Fournisseur[]
+
   // Consultations effectuées dans cette structure
   consultations Consultation[]
 
@@ -503,6 +508,174 @@ model CompteurVente {
   dernierNumero Int       @default(0)
 
   @@id([structureId, annee])
+}
+
+// ====== Tranche pharmacie 1 : points de vente, postes et référentiels (PB05, M2) ======
+
+enum TypePoste {
+  WEB
+  DESKTOP
+  TECHNIQUE
+}
+
+enum TypeCoupure {
+  BILLET
+  PIECE
+}
+
+enum TypeAnomalie {
+  STOCK_NEGATIF
+  ECART_INVENTAIRE
+  CONDITIONNEMENT_CONCURRENT
+  REMONTEE_APRES_CLOTURE
+  ECART_CAISSE
+  FOND_NON_COMPTE
+  PLAGE_EPUISEE
+  PRIX_DIVERGENT
+  ORDONNANCE_NON_CONFIRMEE
+  VENTE_UNITE_INTERDITE
+  PRODUIT_ARCHIVE
+  EVENEMENT_REJETE
+  SEQUENCE_MANQUANTE
+}
+
+enum StatutAnomalie {
+  OUVERTE
+  TRAITEE
+}
+
+// Point de vente d'une pharmacie (un seul en T1, ordre 1). Clés étrangères en Restrict (O12).
+model PointDeVente {
+  id          String    @id @default(uuid())
+  structureId String
+  structure   Structure @relation(fields: [structureId], references: [id], onDelete: Restrict)
+  ordre       Int // numéro d'ordre dans la pharmacie, préfixe des tickets T<ordre>-
+  nom         String // copie du nom de la pharmacie à la création
+  actif       Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  postes         Poste[]
+  compteurTicket CompteurTicket?
+  plagesTicket   PlageTicket[]
+  anomalies      Anomalie[]
+
+  @@unique([structureId, ordre])
+  @@index([structureId])
+}
+
+// Poste de caisse : navigateur (WEB), installation (DESKTOP) ou poste technique REPRISE.
+model Poste {
+  id                        String       @id @default(uuid())
+  pointDeVenteId            String
+  pointDeVente              PointDeVente @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  code                      String // W1, D1, REPRISE : unique par point de vente
+  libelle                   String
+  type                      TypePoste
+  appareilId                String? // installation desktop, ou navigateur et utilisateur (web)
+  actif                     Boolean      @default(true)
+  derniereSequenceAppliquee Int          @default(0)
+  dernierContactLe          DateTime?
+  dernierEtat               Json? // { fileVide, sessionOuverte, versionApp } déclaré à la dernière synchro
+  enregistreParId           String? // sans clé étrangère (D109)
+  createdAt                 DateTime     @default(now())
+
+  plagesTicket PlageTicket[]
+
+  @@unique([pointDeVenteId, code])
+  @@unique([pointDeVenteId, appareilId])
+}
+
+// Seule source des numéros de ticket d'un point de vente.
+model CompteurTicket {
+  pointDeVenteId String       @id
+  pointDeVente   PointDeVente @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  prochainNumero Int          @default(1)
+}
+
+// Plage de numéros de ticket d'un poste desktop. CHECK (fin >= debut) posé par la migration.
+model PlageTicket {
+  id             String       @id @default(uuid())
+  posteId        String
+  poste          Poste        @relation(fields: [posteId], references: [id], onDelete: Restrict)
+  pointDeVenteId String
+  pointDeVente   PointDeVente @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  debut          Int
+  fin            Int // inclus
+  attribueeLe    DateTime     @default(now())
+  attribueeParId String? // sans clé étrangère
+
+  @@index([posteId])
+}
+
+// Paramètres d'une pharmacie (O9), créés avec les défauts.
+model ParametresPharmacie {
+  structureId               String    @id
+  structure                 Structure @relation(fields: [structureId], references: [id], onDelete: Restrict)
+  horizonsPeremptionJours   Int[]     @default([90, 30, 7])
+  seuilEcartCaisse          Int       @default(5000) // GNF
+  seuilAvertissementPrixPct Int       @default(25)
+  seuilStockBas             Int       @default(10) // en boîtes (A4)
+  taillePlageTickets        Int       @default(1000)
+  seuilRechargementPlagePct Int       @default(20)
+  debutFiabiliteMarge       DateTime  @default(now())
+  debutCaisse               DateTime  @default(now()) // jours antérieurs non clôturables
+  updatedAt                 DateTime  @default(now()) @updatedAt
+  misAJourParId             String? // sans clé étrangère
+}
+
+// Modes de paiement (O7), globaux : un nouveau mode = un INSERT, sans migration.
+model ModePaiement {
+  id                 String  @id @default(uuid())
+  code               String  @unique // ESPECES, ORANGE_MONEY, MTN_MOMO
+  libelle            String
+  comptagePhysique   Boolean
+  referenceAutorisee Boolean
+  ordre              Int
+  actif              Boolean @default(true)
+}
+
+// Coupures comptées en caisse (O8 et correction du porteur : billets de 20 000 à 500 GNF).
+model CoupureMonnaie {
+  id            String      @id @default(uuid())
+  devise        String      @default("GNF")
+  valeurFaciale Int
+  type          TypeCoupure
+  ordre         Int
+  actif         Boolean     @default(true)
+
+  @@unique([devise, valeurFaciale])
+}
+
+// Fournisseur d'une pharmacie (minimal : nom et téléphone).
+model Fournisseur {
+  id          String    @id @default(uuid())
+  structureId String
+  structure   Structure @relation(fields: [structureId], references: [id], onDelete: Restrict)
+  nom         String
+  telephone   String?
+  actif       Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  @@unique([structureId, nom])
+}
+
+// File d'anomalies du titulaire : seul objet du domaine dont le statut change.
+model Anomalie {
+  id                    String         @id @default(uuid())
+  pointDeVenteId        String
+  pointDeVente          PointDeVente   @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  type                  TypeAnomalie
+  statut                StatutAnomalie @default(OUVERTE)
+  attribueeAId          String? // sans clé étrangère, nominatif
+  pieceType             String
+  pieceId               String?
+  details               Json // liste blanche de champs, jamais de donnée de santé
+  creeLe                DateTime       @default(now())
+  traiteeLe             DateTime?
+  traiteeParId          String?
+  commentaireTraitement String?
+
+  @@index([pointDeVenteId, statut, creeLe])
 }
 
 // ====== SECURITE ET ACCES ======

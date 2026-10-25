@@ -15,7 +15,7 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | PB02 | Non-régression des alertes et des lectures, instantanés avant recâblage (tasks/PB02-non-regression-lectures.md) | spécifié | validé (commit 2004c97) | 1 |
 | PB03 | Permissions T1, contrôle d'accès unifié, `masquerCouts`, migration M1 (tasks/PB03-permissions-acces-unifie.md) | spécifié | validé (D464 à D468, rapports/PB03-chef.md) | 1 |
 | PB04 | Règles pures du domaine et vecteurs de test (tasks/PB04-regles-domaine-vecteurs.md) | dur | validé (D469 à D477, rapports/PB04-chef.md) | 1 |
-| PB05 | Points de vente, postes et référentiels, migration M2 | spécifié | à faire | 0 |
+| PB05 | Points de vente, postes et référentiels, migration M2 (tasks/PB05-points-de-vente-referentiels.md) | spécifié | validé (D478 à D484, rapports/PB05-chef.md) | 1 |
 | PB06 | Fiche produit étendue, migration M3 | spécifié | à faire | 0 |
 | PB07 | Lots, journal, agrégats, reprise, migration M4 | dur | à faire | 0 |
 | PB08 | Service de mouvements et lectures recâblées | dur | à faire | 0 |
@@ -44,7 +44,7 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 ## Dernières décisions (5 max, historique complet dans decisions.md)
 
 - D456 Prisma n'enveloppe pas une migration en transaction : `BEGIN;`/`COMMIT;` explicites et test statique (plan)
-- D460 Divergences attendues à traiter dans PB08 : périmés exclus de la recherche, date des fiches sans lot (plan)
-- D469 Règles pures sans horloge ni import, refus métier renvoyés, `RangeError` pour l'impossible (révisable)
+- D478 `assurerPointDeVente` unique (création, démo, démarrage, accès paresseux) (révisable)
+- D479 `supprimerConfigurationPharmacies` avant toute suppression de structure (révisable)
 - D473 Sélection : reliquats puis FEFO (UNITE), hors reliquat puis reliquats (BOITE), reste provisoire (révisable)
 - D475 Marge : provisoire par ligne, non valorisable par vente, `nombreLignes` ajouté (révisable)

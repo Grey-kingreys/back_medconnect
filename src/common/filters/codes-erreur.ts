@@ -50,6 +50,8 @@ export const CODES_ERREUR = [
   'VENTE_DEJA_ANNULEE',
   // Vente d'un autre jour, annulation impossible (409).
   'ANNULATION_HORS_DELAI',
+  // Appareil déjà enregistré comme un autre type de poste de caisse (409).
+  'POSTE_TYPE_DIFFERENT',
 ] as const;
 
 export type CodeErreur = (typeof CODES_ERREUR)[number];

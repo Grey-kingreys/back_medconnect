@@ -28,6 +28,10 @@ import {
   URGENCES_DEMO,
   VACCINATIONS_DEMO,
 } from './demo.donnees';
+import {
+  assurerPointDeVente,
+  supprimerConfigurationPharmacies,
+} from 'src/pharmacie/point-de-vente';
 
 const MINUTE = 60_000;
 
@@ -171,7 +175,9 @@ export class DemoSeeder implements OnApplicationBootstrap {
    *
    * Périmètre : comptes et structures dont l'email est en `@demo.medconnecte.gn`.
    * Les journaux d'audit de ces comptes sont supprimés explicitement (leur clé
-   * étrangère est en SET NULL) ; tout le reste suit les `onDelete: Cascade` du
+   * étrangère est en SET NULL), de même que la configuration de caisse des
+   * pharmacies (points de vente, postes, compteurs, plages, paramètres,
+   * fournisseurs, anomalies : clés étrangères en Restrict) ; tout le reste suit les `onDelete: Cascade` du
    * schéma : profil, carnet (consultations, ordonnances, analyses, vaccinations),
    * rendez-vous, auto-diagnostics, urgences, notifications, conversations et
    * messages, autorisations, fichiers, stocks et rôles propres aux structures.
@@ -190,6 +196,15 @@ export class DemoSeeder implements OnApplicationBootstrap {
     }
     // Comptes d'abord : `Structure.adminId` passe à null, puis les structures partent.
     const comptesSupprimes = await tx.user.deleteMany({ where: filtre });
+    // Configuration de caisse des pharmacies démo (clés étrangères en Restrict, D479).
+    const structuresDemo = await tx.structure.findMany({
+      where: filtre,
+      select: { id: true },
+    });
+    await supprimerConfigurationPharmacies(
+      tx,
+      structuresDemo.map((s) => s.id),
+    );
     const structuresSupprimees = await tx.structure.deleteMany({
       where: filtre,
     });
@@ -330,6 +345,11 @@ export class DemoSeeder implements OnApplicationBootstrap {
         isConfigured: true,
       })),
     });
+
+    // 1 bis. Point de vente, poste de reprise, compteur et paramètres des pharmacies (D478)
+    for (const s of STRUCTURES_DEMO.filter((x) => x.type === 'PHARMACIE')) {
+      await assurerPointDeVente(tx, { id: structureId(s.cle), nom: s.nom });
+    }
 
     // 2. Comptes : professionnels d'abord (cibles de `medecinTraitantId`), puis patients
     const versUtilisateur = (c: CompteDemoDef, i: number) => ({
