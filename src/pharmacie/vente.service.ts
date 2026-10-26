@@ -26,7 +26,7 @@ import {
   SessionsCaisseService,
 } from './caisse/sessions-caisse.service';
 import { calculerLigne, type UniteVente } from './domaine/prix';
-import { bornesDuJour, jourConakry } from './jour-metier';
+import { jourConakry } from './jour-metier';
 import { masquerCouts } from './masquer-couts';
 import { assurerPointDeVente } from './point-de-vente';
 import { MESSAGE_LOT_INTROUVABLE } from './pharmacie.service';
@@ -40,11 +40,16 @@ import {
   jourVersDate,
   lireLotsCandidats,
 } from './stock/lecture-stock';
+import { estDoublonSur } from './stock/erreurs-base';
 import {
   allouerLignes,
   cleLigneVente,
+  deriverAnnulation,
   formaterNumeroTicket,
+  lignesInverses,
+  numeroAnnulation,
   passagesStockBas,
+  paiementsInverses,
   preparerPaiements,
   type LigneAAllouer,
 } from './vente-regles';
@@ -62,6 +67,22 @@ const OPTIONS_TRANSACTION_VENTE = { maxWait: 5_000, timeout: 15_000 };
 export const PREFIXE_APPAREIL_WEB_DEFAUT = 'web-defaut:';
 export const MESSAGE_MOTIF_SORTIE_REQUIS =
   'Indiquez le motif de la sortie de ce lot (3 caractères au moins).';
+export const MESSAGE_VENTE_DEJA_ANNULEE = 'Cette vente a déjà été annulée.';
+export const MESSAGE_PIECE_NON_ANNULABLE =
+  'Cette pièce est une annulation ou une régularisation : elle ne peut pas être annulée.';
+export const MESSAGE_VENTE_REGULARISEE =
+  'Cette vente a déjà une pièce de régularisation : elle ne peut plus être annulée.';
+export const MESSAGE_VENTE_HISTORIQUE_NON_ANNULABLE =
+  "Cette vente date d'avant la mise en place de la caisse : elle ne peut pas être annulée. Corrigez le stock du médicament si besoin.";
+export const MESSAGE_POSTE_AUTRE_POINT_DE_VENTE =
+  "Ce poste de caisse n'appartient pas au point de vente de cette vente.";
+
+export function messageVenteAnnulee(
+  numero: string,
+  numeroPiece: string,
+): string {
+  return `Vente ${numero} annulée (${numeroPiece}). Les quantités ont été remises en stock et le remboursement est enregistré dans votre caisse.`;
+}
 
 export function messageVenteUniteInterdite(noms: string[]): string {
   return noms.length === 1
@@ -93,11 +114,24 @@ export function formaterNumero(annee: number, n: number): string {
   return `V-${annee}-${String(n).padStart(6, '0')}`;
 }
 
+/** Pièce liée (annulation ou régularisation) lue pour dériver le statut (D550). */
+const SELECT_PIECE_LIEE = {
+  id: true,
+  numero: true,
+  typePiece: true,
+  motifAnnulation: true,
+  createdAt: true,
+  vendeurId: true,
+  vendeurNom: true,
+} satisfies Prisma.VenteSelect;
+
 /** Lecture complète d'une vente : lignes, allocations, paiements et poste. */
 const INCLUDE_VENTE = {
   lignes: { include: { allocations: true } },
   paiements: { include: { modePaiement: true } },
   poste: { select: { id: true, code: true } },
+  venteOrigine: { select: { id: true, numero: true } },
+  pieceLiee: { select: SELECT_PIECE_LIEE },
 } satisfies Prisma.VenteInclude;
 type VenteComplete = Prisma.VenteGetPayload<{ include: typeof INCLUDE_VENTE }>;
 
@@ -108,6 +142,13 @@ export interface PharmacieRecu {
   ville: string | null;
   telephone: string | null;
   logoUrl: string | null;
+}
+
+interface LigneSession {
+  statut: string;
+  pointDeVenteId: string;
+  jourMetier: Date | string;
+  ordre: number;
 }
 
 interface LignePassage {
@@ -190,19 +231,20 @@ export class VenteService {
       }
       return a.modePaiement.code < b.modePaiement.code ? -1 : 1;
     });
+    const etat = deriverAnnulation(vente, vente.pieceLiee);
     return {
       id: vente.id,
       numero: vente.numero,
-      statut: vente.statut,
+      statut: etat.statut,
       createdAt: vente.createdAt,
       total: vente.total,
       ordonnanceVerifiee: vente.ordonnanceVerifiee,
       clientNom: vente.clientNom,
       clientTelephone: vente.clientTelephone,
       vendeur: { id: vente.vendeurId, nom: vente.vendeurNom },
-      annuleeLe: vente.annuleeLe,
-      annuleeParId: vente.annuleeParId,
-      motifAnnulation: vente.motifAnnulation,
+      annuleeLe: etat.annuleeLe,
+      annuleeParId: etat.annuleeParId,
+      motifAnnulation: etat.motifAnnulation,
       typePiece: vente.typePiece,
       numeroTicket: vente.numeroTicket,
       jourMetier: dateVersJour(vente.jourMetier),
@@ -220,8 +262,11 @@ export class VenteService {
         montantRecu: p.montantRecu,
         rendu: p.montantRecu === null ? null : p.montantRecu - p.montant,
       })),
-      // Remplie par PB12 (pièce d'annulation).
-      annulation: null,
+      annulation: etat.annulation,
+      venteOrigine: vente.venteOrigine
+        ? { id: vente.venteOrigine.id, numero: vente.venteOrigine.numero }
+        : null,
+      motif: etat.motif,
       lignes: vente.lignes.map((l) => ({
         id: l.id,
         stockId: l.stockMedicamentId,
@@ -553,56 +598,24 @@ export class VenteService {
           where: { structureId },
           orderBy: { ordre: 'asc' },
         })) ?? (await assurerPointDeVente(tx, structure)).pointDeVente;
-      const appareilId = PREFIXE_APPAREIL_WEB_DEFAUT + user.id;
-      const existant = await tx.poste.findFirst({
-        where: { pointDeVenteId: pointDeVente.id, appareilId },
-      });
-      posteId = (
-        existant ??
-        (
-          await assurerPoste(tx, {
-            pointDeVenteId: pointDeVente.id,
-            type: 'WEB',
-            appareilId,
-            user,
-            ip,
-          })
-        ).poste
-      ).id;
+      posteId = await this.posteParDefaut(tx, pointDeVente.id, user, ip);
     }
 
     // 8. Session de caisse
-    interface LigneSession {
-      statut: string;
-      pointDeVenteId: string;
-      jourMetier: Date | string;
-      ordre: number;
-    }
-    const ouvrirEtVerrouiller = async () => {
-      const { session, ouverteMaintenant } =
-        await this.sessionsCaisse.ouvrirDansTransaction(tx, {
-          structureId,
-          userId: user.id,
-          utilisateurNom,
-          posteId: posteId,
-        });
-      const lignes = await tx.$queryRaw<LigneSession[]>`
-        SELECT s."statut"::text AS "statut", s."pointDeVenteId", s."jourMetier", pv."ordre"
-        FROM "SessionCaisse" s JOIN "PointDeVente" pv ON pv."id" = s."pointDeVenteId"
-        WHERE s."id" = ${session.id} FOR UPDATE OF s`;
-      return { session, ouverteMaintenant, ligne: lignes[0] };
-    };
-    let ouverte = await ouvrirEtVerrouiller();
-    if (!ouverte.ligne || ouverte.ligne.statut !== 'OUVERTE') {
-      // Fermée entre-temps : le poste est verrouillé, on en ouvre une nouvelle.
-      ouverte = await ouvrirEtVerrouiller();
-    }
-    const ouverteAutomatiquement = ouverte.ouverteMaintenant;
-    const sessionId = ouverte.session.id;
-    const posteCode = ouverte.session.poste.code;
-    const pointDeVenteId = ouverte.ligne.pointDeVenteId;
-    const ordre = ouverte.ligne.ordre;
-    const jourMetier = new Date(ouverte.ligne.jourMetier);
+    const ouverte = await this.ouvrirSessionVerrouillee(tx, {
+      structureId,
+      userId: user.id,
+      utilisateurNom,
+      posteId,
+    });
+    const {
+      sessionId,
+      posteCode,
+      pointDeVenteId,
+      ordre,
+      jourMetier,
+      ouverteAutomatiquement,
+    } = ouverte;
 
     // 9. Numéro de ticket
     const [{ numero: numeroTicket }] = await tx.$queryRaw<
@@ -858,6 +871,75 @@ export class VenteService {
     return { vente: complete, passages, ouverteAutomatiquement };
   }
 
+  /** Poste web par défaut de l'utilisateur dans ce point de vente, créé à la volée (D536). */
+  private async posteParDefaut(
+    tx: Prisma.TransactionClient,
+    pointDeVenteId: string,
+    user: { id: string; prenom: string },
+    ip?: string | null,
+  ): Promise<string> {
+    const appareilId = PREFIXE_APPAREIL_WEB_DEFAUT + user.id;
+    const existant = await tx.poste.findFirst({
+      where: { pointDeVenteId, appareilId },
+    });
+    return (
+      existant ??
+      (
+        await assurerPoste(tx, {
+          pointDeVenteId,
+          type: 'WEB',
+          appareilId,
+          user,
+          ip,
+        })
+      ).poste
+    ).id;
+  }
+
+  /**
+   * Session OUVERTE de l'utilisateur sur ce poste, ouverte si besoin, verrouillée
+   * (ordre D527 : poste, puis session) ; fermée entre-temps : une seule réouverture.
+   */
+  private async ouvrirSessionVerrouillee(
+    tx: Prisma.TransactionClient,
+    entree: {
+      structureId: string;
+      userId: string;
+      utilisateurNom: string;
+      posteId: string;
+    },
+  ): Promise<{
+    sessionId: string;
+    posteCode: string;
+    pointDeVenteId: string;
+    ordre: number;
+    jourMetier: Date;
+    ouverteAutomatiquement: boolean;
+  }> {
+    const ouvrirEtVerrouiller = async () => {
+      const { session, ouverteMaintenant } =
+        await this.sessionsCaisse.ouvrirDansTransaction(tx, entree);
+      const lignes = await tx.$queryRaw<LigneSession[]>`
+        SELECT s."statut"::text AS "statut", s."pointDeVenteId", s."jourMetier", pv."ordre"
+        FROM "SessionCaisse" s JOIN "PointDeVente" pv ON pv."id" = s."pointDeVenteId"
+        WHERE s."id" = ${session.id} FOR UPDATE OF s`;
+      return { session, ouverteMaintenant, ligne: lignes[0] };
+    };
+    let ouverte = await ouvrirEtVerrouiller();
+    if (!ouverte.ligne || ouverte.ligne.statut !== 'OUVERTE') {
+      // Fermée entre-temps : le poste est verrouillé, on en ouvre une nouvelle.
+      ouverte = await ouvrirEtVerrouiller();
+    }
+    return {
+      sessionId: ouverte.session.id,
+      posteCode: ouverte.session.poste.code,
+      pointDeVenteId: ouverte.ligne.pointDeVenteId,
+      ordre: ouverte.ligne.ordre,
+      jourMetier: new Date(ouverte.ligne.jourMetier),
+      ouverteAutomatiquement: ouverte.ouverteMaintenant,
+    };
+  }
+
   /** Alerte de stock bas aux pharmaciens ; n'échoue jamais la vente. */
   private async alerterStockBas(
     structureId: string,
@@ -906,8 +988,7 @@ export class VenteService {
       });
     }
     const page = query.page ?? 1;
-    const { debut, fin } = bornesDuJour(jour);
-    const filtre = { structureId, createdAt: { gte: debut, lt: fin } };
+    const filtre = { structureId, jourMetier: jourVersDate(jour) };
 
     const [nombre, somme, ventes] = await Promise.all([
       this.prisma.vente.count({ where: filtre }),
@@ -920,7 +1001,11 @@ export class VenteService {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * VENTES_PAR_PAGE,
         take: VENTES_PAR_PAGE,
-        include: { lignes: { select: { quantite: true } } },
+        include: {
+          lignes: { select: { quantite: true } },
+          venteOrigine: { select: { id: true, numero: true } },
+          pieceLiee: { select: SELECT_PIECE_LIEE },
+        },
       }),
     ]);
 
@@ -932,16 +1017,28 @@ export class VenteService {
         page,
         parPage: VENTES_PAR_PAGE,
         totalPages: Math.max(1, Math.ceil(nombre / VENTES_PAR_PAGE)),
-        ventes: ventes.map((v) => ({
-          id: v.id,
-          numero: v.numero,
-          createdAt: v.createdAt,
-          statut: v.statut,
-          total: v.total,
-          nombreArticles: v.lignes.reduce((n, l) => n + l.quantite, 0),
-          vendeur: { id: v.vendeurId, nom: v.vendeurNom },
-          clientNom: v.clientNom,
-        })),
+        ventes: ventes.map((v) => {
+          const etat = deriverAnnulation(v, v.pieceLiee);
+          return {
+            id: v.id,
+            numero: v.numero,
+            createdAt: v.createdAt,
+            statut: etat.statut,
+            total: v.total,
+            nombreArticles: v.lignes.reduce((n, l) => n + l.quantite, 0),
+            vendeur: { id: v.vendeurId, nom: v.vendeurNom },
+            clientNom: v.clientNom,
+            typePiece: v.typePiece,
+            numeroTicket: v.numeroTicket,
+            jourMetier: dateVersJour(v.jourMetier),
+            venteOrigine: v.venteOrigine
+              ? { id: v.venteOrigine.id, numero: v.venteOrigine.numero }
+              : null,
+            annulation: etat.annulation
+              ? { id: etat.annulation.id, numero: etat.annulation.numero }
+              : null,
+          };
+        }),
       },
       message: `${nombre} vente(s) le ${jour}.`,
       success: true,
@@ -976,101 +1073,216 @@ export class VenteService {
     dto: AnnulerVenteDto,
     ip?: string | null,
   ) {
-    const { structure } = await this.accesPharmacie.verifier(
+    const { user, structure } = await this.accesPharmacie.verifier(
       structureId,
       userId,
     );
+    const pharmacie = this.pharmacieRecu(structure);
     const peutVoirMarge = await this.peutVoirMarge(userId);
+    const utilisateurNom = `${user.prenom} ${user.nom}`.trim();
+    const motif = dto.motif.trim();
 
-    const { vente, lignesNonRemises } = await this.prisma.$transaction(
-      async (tx) => {
-        const maintenant = new Date();
-        const courante = await tx.vente.findFirst({
+    const dejaAnnulee = () =>
+      new ConflictException({
+        message: MESSAGE_VENTE_DEJA_ANNULEE,
+        code: 'VENTE_DEJA_ANNULEE',
+      });
+    const nonAnnulable = (message: string) =>
+      new ConflictException({ message, code: 'PIECE_NON_ANNULABLE' });
+
+    let resultat: {
+      vente: VenteComplete;
+      numeroPiece: string;
+      pieceId: string;
+    };
+    try {
+      resultat = await this.prisma.$transaction(async (tx) => {
+        // 1. Origine
+        const origine = await tx.vente.findFirst({
           where: { id: venteId, structureId },
-          include: INCLUDE_VENTE,
-        });
-        if (!courante)
-          throw new NotFoundException('Cette vente est introuvable.');
-
-        const dejaAnnulee = new ConflictException({
-          message: 'Cette vente a déjà été annulée.',
-          code: 'VENTE_DEJA_ANNULEE',
-        });
-        if (courante.statut === 'ANNULEE') throw dejaAnnulee;
-        if (jourConakry(courante.createdAt) !== jourConakry(maintenant)) {
-          throw new ConflictException({
-            message:
-              "Une vente ne peut être annulée que le jour même. Celle-ci date d'un autre jour.",
-            code: 'ANNULATION_HORS_DELAI',
-          });
-        }
-
-        // Passage conditionnel : une annulation simultanée ne remet pas le stock deux fois.
-        const { count } = await tx.vente.updateMany({
-          where: { id: venteId, structureId, statut: 'VALIDEE' },
-          data: {
-            statut: 'ANNULEE',
-            annuleeLe: maintenant,
-            annuleeParId: userId,
-            motifAnnulation: dto.motif,
+          include: {
+            lignes: { include: { allocations: true } },
+            paiements: true,
+            pieceLiee: { select: { id: true, typePiece: true } },
+            sessionCaisse: { select: { technique: true } },
           },
         });
-        if (count === 0) throw dejaAnnulee;
-
-        let nonRemises = 0;
-        const triees = [...courante.lignes].sort((a, b) =>
-          a.stockMedicamentId < b.stockMedicamentId
-            ? -1
-            : a.stockMedicamentId > b.stockMedicamentId
-              ? 1
-              : 0,
-        );
-        for (const l of triees) {
-          const remise = await tx.stockMedicament.updateMany({
-            where: { id: l.stockMedicamentId, structureId },
-            data: { quantite: { increment: l.quantite }, disponible: true },
-          });
-          if (remise.count === 0) nonRemises += 1;
+        if (!origine) {
+          throw new NotFoundException('Cette vente est introuvable.');
+        }
+        if (origine.typePiece !== 'VENTE') {
+          throw nonAnnulable(MESSAGE_PIECE_NON_ANNULABLE);
+        }
+        if (
+          origine.statut === 'ANNULEE' ||
+          origine.pieceLiee?.typePiece === 'ANNULATION'
+        ) {
+          throw dejaAnnulee();
+        }
+        if (origine.pieceLiee) {
+          throw nonAnnulable(MESSAGE_VENTE_REGULARISEE);
+        }
+        if (origine.sessionCaisse.technique) {
+          throw nonAnnulable(MESSAGE_VENTE_HISTORIQUE_NON_ANNULABLE);
         }
 
+        // 2. Poste et session de l'auteur (verrous : poste, session)
+        const posteId =
+          dto.posteId ??
+          (await this.posteParDefaut(tx, origine.pointDeVenteId, user, ip));
+        const session = await this.ouvrirSessionVerrouillee(tx, {
+          structureId,
+          userId: user.id,
+          utilisateurNom,
+          posteId,
+        });
+        if (session.pointDeVenteId !== origine.pointDeVenteId) {
+          throw new ConflictException({
+            message: MESSAGE_POSTE_AUTRE_POINT_DE_VENTE,
+            code: 'POSTE_INCONNU',
+          });
+        }
+
+        // 3. Verrou de l'origine : deux annulations simultanées sont sérialisées (D545).
+        await tx.$queryRaw`SELECT "id" FROM "Vente" WHERE "id" = ${origine.id} FOR UPDATE`;
+        const liee = await tx.vente.findUnique({
+          where: { venteOrigineId: origine.id },
+          select: { typePiece: true },
+        });
+        if (liee) {
+          throw liee.typePiece === 'ANNULATION'
+            ? dejaAnnulee()
+            : nonAnnulable(MESSAGE_VENTE_REGULARISEE);
+        }
+
+        // 4. Verrous des fiches
+        await this.mouvementsStock.verrouillerFiches(
+          tx,
+          origine.lignes.map((l) => l.stockMedicamentId),
+        );
+
+        // 5. Calcul des opposés
+        const lignes = lignesInverses(origine.lignes);
+        const paiements = paiementsInverses(origine.paiements, origine.total);
+        const total = origine.total === 0 ? 0 : -origine.total;
+        const numero = numeroAnnulation(origine.numero);
+
+        // 6. Pièce d'annulation
+        const piece = await tx.vente.create({
+          data: {
+            structureId,
+            pointDeVenteId: session.pointDeVenteId,
+            posteId,
+            sessionCaisseId: session.sessionId,
+            typePiece: 'ANNULATION',
+            venteOrigineId: origine.id,
+            numero,
+            numeroTicket: null,
+            jourMetier: session.jourMetier,
+            vendeurId: user.id,
+            vendeurNom: utilisateurNom,
+            clientNom: origine.clientNom,
+            clientTelephone: origine.clientTelephone,
+            ordonnanceVerifiee: origine.ordonnanceVerifiee,
+            total,
+            motifAnnulation: motif,
+            lignes: {
+              create: lignes.map((l) => ({
+                medicamentId: l.medicamentId,
+                stockMedicamentId: l.stockMedicamentId,
+                nomMedicament: l.nomMedicament,
+                prixUnitaire: l.prixUnitaire,
+                quantite: l.quantite,
+                sousTotal: l.sousTotal,
+                uniteAffichee: l.uniteAffichee,
+                nombreAffiche: l.nombreAffiche,
+                coefficientApplique: l.coefficientApplique,
+                allocations: {
+                  create: l.allocations.map((a) => ({
+                    lotId: a.lotId,
+                    numeroLot: a.numeroLot,
+                    dateExpiration: a.dateExpiration,
+                    quantite: a.quantite,
+                    coutUnitaire: a.coutUnitaire,
+                    lotTechnique: a.lotTechnique,
+                    statut: a.statut,
+                    sortieManuelle: false,
+                    motif: null,
+                    auteurId: user.id,
+                  })),
+                },
+              })),
+            },
+          },
+          select: { id: true },
+        });
+
+        // 7. Remboursement dans la session de l'auteur
+        await tx.paiement.createMany({
+          data: paiements.map((p) => ({
+            venteId: piece.id,
+            sessionCaisseId: session.sessionId,
+            modePaiementId: p.modePaiementId,
+            montant: p.montant,
+            referenceExterne: null,
+            montantRecu: null,
+          })),
+        });
+
+        // 8. Mouvements de stock : retour dans les lots d'origine
+        for (const l of lignes) {
+          for (const a of l.allocations) {
+            await this.mouvementsStock.ecrire(tx, {
+              pointDeVenteId: session.pointDeVenteId,
+              stockMedicamentId: l.stockMedicamentId,
+              lotId: a.lotId,
+              type: 'CORRECTION',
+              quantite: -a.quantite,
+              pieceOrigineType: 'ANNULATION',
+              pieceOrigineId: piece.id,
+              motif,
+              auteurId: user.id,
+              posteId,
+            });
+          }
+        }
+
+        // 9. Audit (jamais le motif ni le client)
         await tx.auditLog.create({
           data: {
-            userId,
+            userId: user.id,
             action: 'annuler',
             entityType: 'Vente',
-            entityId: venteId,
+            entityId: origine.id,
             ip: ip ?? null,
             metadata: {
-              numero: courante.numero,
-              total: courante.total,
-              lignesNonRemises: nonRemises,
+              numero: origine.numero,
+              total: origine.total,
+              pieceId: piece.id,
+              numeroPiece: numero,
+              sessionCaisseId: session.sessionId,
+              sessionOuverteAutomatiquement: session.ouverteAutomatiquement,
             },
           },
         });
 
-        const apres = await tx.vente.findFirst({
-          where: { id: venteId, structureId },
+        // 10. Relecture de l'origine
+        const vente = await tx.vente.findUniqueOrThrow({
+          where: { id: origine.id },
           include: INCLUDE_VENTE,
         });
-        if (!apres) throw new NotFoundException('Cette vente est introuvable.');
-        return { vente: apres, lignesNonRemises: nonRemises };
-      },
-      OPTIONS_TRANSACTION_VENTE,
-    );
+        return { vente, numeroPiece: numero, pieceId: piece.id };
+      }, OPTIONS_TRANSACTION_VENTE);
+    } catch (erreur) {
+      if (estDoublonSur(erreur, 'Vente')) throw dejaAnnulee();
+      throw erreur;
+    }
 
-    this.logger.log(`vente.annulee venteId=${vente.id}`);
-    const message =
-      lignesNonRemises === 0
-        ? `Vente ${vente.numero} annulée. Les quantités ont été remises en stock.`
-        : lignesNonRemises === 1
-          ? `Vente ${vente.numero} annulée. 1 médicament n'était plus dans le stock et n'y a pas été remis.`
-          : `Vente ${vente.numero} annulée. ${lignesNonRemises} médicaments n'étaient plus dans le stock et n'y ont pas été remis.`;
+    const { vente, numeroPiece, pieceId } = resultat;
+    this.logger.log(`vente.annulee venteId=${vente.id} pieceId=${pieceId}`);
     return {
-      data: masquerCouts(
-        this.presenterVente(vente, this.pharmacieRecu(structure)),
-        peutVoirMarge,
-      ),
-      message,
+      data: masquerCouts(this.presenterVente(vente, pharmacie), peutVoirMarge),
+      message: messageVenteAnnulee(vente.numero, numeroPiece),
       success: true,
     };
   }

@@ -57,7 +57,7 @@ export class VenteController {
   @ApiResponse({
     status: 201,
     description:
-      "Vente enregistrée (ou rejouée avec rejeu: true). data : id, numero, statut, createdAt, total, ordonnanceVerifiee, clientNom, clientTelephone, vendeur { id, nom }, annuleeLe, annuleeParId, motifAnnulation, typePiece, numeroTicket, jourMetier, provisoire, poste { id, code }, session { id, ouverteAutomatiquement }, paiements [ { id, mode, libelle, montant, reference, montantRecu, rendu } ], annulation, lignes [ { id, stockId, medicamentId, nomMedicament, prixUnitaire, quantite, sousTotal, uniteAffichee, nombreAffiche, coefficientApplique, allocations [ ... ] } ], pharmacie { id, nom, adresse, ville, telephone, logoUrl }. Les coûts ne sont renvoyés qu'avec la permission marge:read.",
+      "Vente enregistrée (ou rejouée avec rejeu: true). data : id, numero, statut, createdAt, total, ordonnanceVerifiee, clientNom, clientTelephone, vendeur { id, nom }, annuleeLe, annuleeParId, motifAnnulation, typePiece, numeroTicket, jourMetier, provisoire, poste { id, code }, session { id, ouverteAutomatiquement }, paiements [ { id, mode, libelle, montant, reference, montantRecu, rendu } ], annulation, venteOrigine, motif, lignes [ { id, stockId, medicamentId, nomMedicament, prixUnitaire, quantite, sousTotal, uniteAffichee, nombreAffiche, coefficientApplique, allocations [ ... ] } ], pharmacie { id, nom, adresse, ville, telephone, logoUrl }. Les coûts ne sont renvoyés qu'avec la permission marge:read.",
   })
   @ApiResponse({
     status: 400,
@@ -95,7 +95,7 @@ export class VenteController {
   @ApiOperation({
     summary: 'Lister les ventes d’un jour',
     description:
-      'Ventes du jour (défaut : aujourd’hui), avec le total des ventes validées et le nombre de ventes.',
+      'Pièces du jour métier (défaut : aujourd’hui), ventes et annulations, avec le total signé des pièces validées et leur nombre.',
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiResponse({ status: 400, description: 'Date invalide (VALIDATION).' })
@@ -130,20 +130,25 @@ export class VenteController {
   }
 
   @Post(':structureId/ventes/:venteId/annuler')
-  @RequirePermissions(PERMISSIONS.VENTE_ANNULER)
+  @RequirePermissions(PERMISSIONS.VENTE_ANNULER, PERMISSIONS.CAISSE_UTILISER)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Annuler une vente du jour',
+    summary: 'Annuler une vente',
     description:
-      'Remet les quantités en stock. Réservé à la permission vente:annuler, le jour même de la vente.',
+      "Crée une pièce d'annulation qui pointe la vente : lignes, lots et paiements opposés, quantités remises dans les lots d'origine, remboursement enregistré dans la caisse de l'auteur (ouverte automatiquement si besoin) et rattaché au jour de cette caisse. Aucune limite de date. Réservé aux permissions vente:annuler et caisse:utiliser.",
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiParam({ name: 'venteId', description: 'Identifiant de la vente' })
+  @ApiResponse({
+    status: 200,
+    description:
+      "Vente d'origine, avec statut ANNULEE et annulation { id, numero, motif, le, par { id, nom } }. Les coûts ne sont renvoyés qu'avec la permission marge:read.",
+  })
   @ApiResponse({ status: 404, description: 'Vente introuvable.' })
   @ApiResponse({
     status: 409,
     description:
-      'Vente déjà annulée (VENTE_DEJA_ANNULEE) ou d’un autre jour (ANNULATION_HORS_DELAI).',
+      'Vente déjà annulée (VENTE_DEJA_ANNULEE), pièce non annulable : annulation, régularisation ou vente d’avant la caisse (PIECE_NON_ANNULABLE), poste inconnu ou d’un autre point de vente (POSTE_INCONNU), caisse d’un autre utilisateur (SESSION_AUTRE_UTILISATEUR).',
   })
   annulerVente(
     @Req() req: RequestWithUser,

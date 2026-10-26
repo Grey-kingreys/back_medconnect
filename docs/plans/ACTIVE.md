@@ -22,7 +22,7 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | PB09 | Tables de caisse et pièces de vente, migrations M5 et M6 (tasks/PB09-caisse-pieces-de-vente.md, D514 à D525) | dur | validé (D514 à D525, rapports/PB09-chef.md) | 1 |
 | PB10 | Postes et sessions de caisse (tasks/PB10-sessions-de-caisse.md, D526 à D533) | spécifié | validé (D526 à D533, rapports/PB10-chef.md) | 1 |
 | PB11 | Vente recâblée sur lots, prix et caisse (tasks/PB11-vente-recablee.md, D534 à D543) | dur | validé (D534 à D543, rapports/PB11-chef.md) | 1 |
-| PB12 | Annulation par écriture inverse et jour métier | spécifié | à faire | 0 |
+| PB12 | Annulation par écriture inverse et jour métier (tasks/PB12-annulation-ecriture-inverse.md, D544 à D554) | spécifié | validé (D544 à D554, rapports/PB12-chef.md) | 1 |
 | PB13 | Qualification d'une fiche | spécifié | à faire | 0 |
 | PB14 | Réceptions, fournisseurs, lots et import livraison | spécifié | à faire | 0 |
 | PB15 | Inventaire, sorties manuelles, anomalies et import inventaire | spécifié | à faire | 0 |
@@ -43,8 +43,8 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 
 ## Dernières décisions (5 max, historique complet dans decisions.md)
 
-- D456 Prisma n'enveloppe pas une migration en transaction : `BEGIN;`/`COMMIT;` explicites et test statique (plan)
-- D493 Gel du compteur : fiche créée à quantité nulle, `quantite`/`disponible` jamais modifiées après M4 (révisable)
-- D500 Premier mouvement d'un lot dans la transaction qui le crée ; mouvement avant `ConditionnementOuvert` (révisable)
-- D506 Divergences D460 par exceptions nommées dans le test PB02, instantanés jamais régénérés (révisable)
-- D507 `MouvementsStockService` seul écrivain ; verrou de ligne de la fiche puis verrou consultatif `$executeRaw` trié (révisable)
+- D545 Annulation : verrous poste, session, vente d'origine (`FOR UPDATE`), fiches ; P2002 sur `Vente` traduit en 409 `VENTE_DEJA_ANNULEE` (révisable)
+- D547 Pièce ANNULATION : `A-<numero>`, session et jour métier de l'auteur, lignes, allocations, paiements opposés, mouvements `CORRECTION` sur les lots d'origine (révisable)
+- D550 Statut et champs d'annulation dérivés de la pièce liée, colonnes gelées jamais écrites ; `venteOrigine` et `motif` sur toute pièce (révisable)
+- D551 Liste des ventes par `jourMetier`, annulations comprises, `totalJour` signé (révisable)
+- D554 `assurerPoste` verrouille le point de vente en `FOR NO KEY UPDATE` : plus d'attente des insertions à clé étrangère, interblocage écarté (révisable)

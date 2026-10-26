@@ -230,3 +230,193 @@ export function passagesStockBas(
     )
     .map((f) => ({ nom: f.nom, apres: f.apres }));
 }
+
+export type TypePieceVente = 'VENTE' | 'ANNULATION' | 'REGULARISATION';
+export type StatutVente = 'VALIDEE' | 'ANNULEE';
+export type StatutAllocation = 'DEFINITIVE' | 'PROVISOIRE' | 'REMPLACEE';
+
+/** Numéro d'une pièce d'annulation : A-<numero de l'origine> (D423). */
+export function numeroAnnulation(numeroOrigine: string): string {
+  return `A-${numeroOrigine}`;
+}
+
+/** Opposé d'un entier, jamais -0. */
+function oppose(x: number): number {
+  return x === 0 ? 0 : -x;
+}
+
+export interface AllocationOrigine {
+  lotId: string | null;
+  numeroLot: string | null;
+  dateExpiration: Date | null;
+  quantite: number;
+  coutUnitaire: number;
+  lotTechnique: boolean;
+  statut: StatutAllocation;
+}
+export interface LigneOrigine {
+  medicamentId: string;
+  stockMedicamentId: string;
+  nomMedicament: string;
+  prixUnitaire: number;
+  quantite: number;
+  sousTotal: number;
+  uniteAffichee: UniteVente;
+  nombreAffiche: number;
+  coefficientApplique: number;
+  allocations: AllocationOrigine[];
+}
+export interface AllocationInverse {
+  lotId: string | null;
+  numeroLot: string | null;
+  dateExpiration: Date | null;
+  quantite: number;
+  coutUnitaire: number;
+  lotTechnique: boolean;
+  statut: 'DEFINITIVE' | 'PROVISOIRE';
+}
+export interface LigneInverse extends Omit<LigneOrigine, 'allocations'> {
+  allocations: AllocationInverse[];
+}
+
+/**
+ * Lignes opposées d'une pièce d'origine (D547) : mêmes lots, quantités opposées,
+ * allocations remplacées ignorées. Objets construits champ par champ : aucun
+ * identifiant de la pièce d'origine ne doit atteindre une écriture.
+ */
+export function lignesInverses(
+  lignes: readonly LigneOrigine[],
+): LigneInverse[] {
+  return lignes.map((l, index) => {
+    const retenues = l.allocations.filter((a) => a.statut !== 'REMPLACEE');
+    const somme = retenues.reduce((n, a) => n + a.quantite, 0);
+    if (retenues.length === 0 || somme !== l.quantite) {
+      throw new RangeError(
+        `Ligne ${index + 1} : allocations incohérentes, annulation impossible.`,
+      );
+    }
+    return {
+      medicamentId: l.medicamentId,
+      stockMedicamentId: l.stockMedicamentId,
+      nomMedicament: l.nomMedicament,
+      prixUnitaire: l.prixUnitaire,
+      quantite: oppose(l.quantite),
+      sousTotal: oppose(l.sousTotal),
+      uniteAffichee: l.uniteAffichee,
+      nombreAffiche: oppose(l.nombreAffiche),
+      coefficientApplique: l.coefficientApplique,
+      allocations: retenues.map((a) => ({
+        lotId: a.lotId,
+        numeroLot: a.numeroLot,
+        dateExpiration: a.dateExpiration,
+        quantite: oppose(a.quantite),
+        coutUnitaire: a.coutUnitaire,
+        lotTechnique: a.lotTechnique,
+        statut: a.statut === 'PROVISOIRE' ? 'PROVISOIRE' : 'DEFINITIVE',
+      })),
+    };
+  });
+}
+
+export interface PaiementOrigine {
+  modePaiementId: string;
+  montant: number;
+}
+export interface PaiementInverse {
+  modePaiementId: string;
+  montant: number;
+  referenceExterne: null;
+  montantRecu: null;
+}
+
+/** Paiements opposés, un par paiement d'origine ; leur somme doit valoir le total de l'origine. */
+export function paiementsInverses(
+  paiements: readonly PaiementOrigine[],
+  totalOrigine: number,
+): PaiementInverse[] {
+  const somme = paiements.reduce((n, p) => n + p.montant, 0);
+  if (paiements.length === 0 || somme !== totalOrigine) {
+    throw new RangeError(
+      'Paiements d’origine incohérents, annulation impossible.',
+    );
+  }
+  return paiements.map((p) => ({
+    modePaiementId: p.modePaiementId,
+    montant: oppose(p.montant),
+    referenceExterne: null,
+    montantRecu: null,
+  }));
+}
+
+export interface PieceLieeLue {
+  id: string;
+  numero: string;
+  typePiece: TypePieceVente;
+  motifAnnulation: string | null;
+  createdAt: Date;
+  vendeurId: string;
+  vendeurNom: string;
+}
+export interface PieceAnnulable {
+  typePiece: TypePieceVente;
+  statut: StatutVente;
+  annuleeLe: Date | null;
+  annuleeParId: string | null;
+  motifAnnulation: string | null;
+}
+export interface AnnulationExposee {
+  id: string;
+  numero: string;
+  motif: string;
+  le: Date;
+  par: { id: string; nom: string };
+}
+export interface EtatAnnulation {
+  statut: StatutVente;
+  annuleeLe: Date | null;
+  annuleeParId: string | null;
+  motifAnnulation: string | null;
+  motif: string | null;
+  annulation: AnnulationExposee | null;
+}
+
+/** Statut et champs d'annulation dérivés de la pièce liée (D550) ; les colonnes gelées ne sont jamais écrites. */
+export function deriverAnnulation(
+  piece: PieceAnnulable,
+  liee: PieceLieeLue | null,
+): EtatAnnulation {
+  if (piece.typePiece === 'ANNULATION') {
+    return {
+      statut: 'VALIDEE',
+      annuleeLe: null,
+      annuleeParId: null,
+      motifAnnulation: null,
+      motif: piece.motifAnnulation,
+      annulation: null,
+    };
+  }
+  if (liee !== null && liee.typePiece === 'ANNULATION') {
+    return {
+      statut: 'ANNULEE',
+      annuleeLe: liee.createdAt,
+      annuleeParId: liee.vendeurId,
+      motifAnnulation: liee.motifAnnulation,
+      motif: null,
+      annulation: {
+        id: liee.id,
+        numero: liee.numero,
+        motif: liee.motifAnnulation ?? '',
+        le: liee.createdAt,
+        par: { id: liee.vendeurId, nom: liee.vendeurNom },
+      },
+    };
+  }
+  return {
+    statut: piece.statut,
+    annuleeLe: piece.annuleeLe,
+    annuleeParId: piece.annuleeParId,
+    motifAnnulation: piece.motifAnnulation,
+    motif: null,
+    annulation: null,
+  };
+}

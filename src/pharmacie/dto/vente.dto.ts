@@ -173,6 +173,16 @@ export class AnnulerVenteDto {
   @Transform(rognerTexte)
   @Length(3, 300)
   motif: string;
+
+  @ApiPropertyOptional({
+    description:
+      "Poste de caisse d'où sort le remboursement ; absent : poste web de l'utilisateur, créé à la volée",
+  })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  posteId?: string;
 }
 
 export class ListerVentesQueryDto {

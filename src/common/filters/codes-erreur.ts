@@ -46,9 +46,9 @@ export const CODES_ERREUR = [
   'ORDONNANCE_NON_CONFIRMEE',
   // Ligne de stock absente de cette pharmacie (404), lignes dans `details`.
   'STOCK_INTROUVABLE',
-  // Vente déjà annulée (409).
+  // Vente déjà annulée : une pièce d'annulation existe (409).
   'VENTE_DEJA_ANNULEE',
-  // Vente d'un autre jour, annulation impossible (409).
+  // Ancien refus d'annulation d'une vente d'un autre jour (409) : plus jamais renvoyé depuis PB12, conservé (code stable).
   'ANNULATION_HORS_DELAI',
   // Appareil déjà enregistré comme un autre type de poste de caisse (409).
   'POSTE_TYPE_DIFFERENT',
@@ -94,6 +94,8 @@ export const CODES_ERREUR = [
   'SORTIE_MANUELLE_REQUISE',
   // Somme des paiements différente du montant de la vente (400).
   'PAIEMENTS_INCOHERENTS',
+  // Pièce qui ne peut pas être annulée : annulation, régularisation, vente déjà régularisée ou vente d'avant la caisse (409).
+  'PIECE_NON_ANNULABLE',
 ] as const;
 
 export type CodeErreur = (typeof CODES_ERREUR)[number];

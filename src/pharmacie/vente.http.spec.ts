@@ -42,6 +42,10 @@ describe('Ventes en pharmacie (HTTP)', () => {
       codes: ['vente:read', 'vente:write', 'vente:annuler', 'caisse:utiliser'],
     },
     sanscaisse: { type: 'PHARMACIE', codes: ['vente:read', 'vente:write'] },
+    annuleursanscaisse: {
+      type: 'PHARMACIE',
+      codes: ['vente:read', 'vente:annuler'],
+    },
   };
   const prisma = {
     user: {
@@ -196,6 +200,31 @@ describe('Ventes en pharmacie (HTTP)', () => {
     );
   });
 
+  it('2d. vente:annuler sans caisse:utiliser : annulation refusée (403 PERMISSION_REFUSEE)', async () => {
+    const res = await request(serveur())
+      .post('/pharmacie/s1/ventes/v1/annuler')
+      .set('x-essai-user', 'annuleursanscaisse')
+      .send({ motif: 'Erreur de quantité' });
+    expect(res.status).toBe(403);
+    expect((res.body as { code?: string }).code).toBe('PERMISSION_REFUSEE');
+    expect(annulerVente).not.toHaveBeenCalled();
+  });
+
+  it('2e. annulation avec posteId : transmis au service', async () => {
+    const res = await request(serveur())
+      .post('/pharmacie/s1/ventes/v1/annuler')
+      .set('x-essai-user', 'admin')
+      .send({ motif: 'Erreur de quantité', posteId: 'p1' });
+    expect(res.status).toBe(200);
+    expect(annulerVente).toHaveBeenCalledWith(
+      's1',
+      'v1',
+      'admin',
+      { motif: 'Erreur de quantité', posteId: 'p1' },
+      expect.anything(),
+    );
+  });
+
   describe('3. corps invalides : 400 VALIDATION', () => {
     const cas: [string, 'post' | 'get' | 'annuler', object, string][] = [
       ['lignes vide', 'post', { lignes: [] }, 'lignes'],
@@ -248,6 +277,12 @@ describe('Ventes en pharmacie (HTTP)', () => {
       ],
       ['posteId vide', 'post', { ...corpsValide, posteId: '' }, 'posteId'],
       ['motif de 2 caractères', 'annuler', { motif: 'ab' }, 'motif'],
+      [
+        'annulation posteId vide',
+        'annuler',
+        { motif: 'Erreur de quantité', posteId: '' },
+        'posteId',
+      ],
       ['date 22-10-2026', 'get', {}, 'date'],
     ];
 

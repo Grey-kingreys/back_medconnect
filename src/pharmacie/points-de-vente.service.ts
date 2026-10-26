@@ -165,7 +165,9 @@ export async function assurerPoste(
   const { pointDeVenteId, type, appareilId, user, ip } = entree;
 
   // Verrou : deux enregistrements simultanés du même appareil sont sérialisés.
-  await tx.$queryRaw`SELECT "id" FROM "PointDeVente" WHERE "id" = ${pointDeVenteId} FOR UPDATE`;
+  // NO KEY UPDATE et non UPDATE : les insertions qui pointent ce PV (vente, session,
+  // mouvement) n'attendent pas la fin de cette transaction (pas d'interblocage, D554).
+  await tx.$queryRaw`SELECT "id" FROM "PointDeVente" WHERE "id" = ${pointDeVenteId} FOR NO KEY UPDATE`;
 
   const existant = await tx.poste.findFirst({
     where: { pointDeVenteId, appareilId },

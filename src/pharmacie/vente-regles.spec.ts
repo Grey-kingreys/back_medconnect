@@ -2,9 +2,15 @@ import type { LotCandidat } from './domaine/selection-lots';
 import {
   allouerLignes,
   cleLigneVente,
+  deriverAnnulation,
   formaterNumeroTicket,
+  lignesInverses,
+  numeroAnnulation,
+  paiementsInverses,
   passagesStockBas,
   preparerPaiements,
+  type AllocationOrigine,
+  type LigneOrigine,
   type ModeConnu,
 } from './vente-regles';
 
@@ -401,5 +407,284 @@ describe('passagesStockBas', () => {
     ]);
     expect(passagesStockBas([fiche(5, 0)], 0)).toHaveLength(1);
     expect(passagesStockBas([fiche(3, -2)], 10)).toEqual([]);
+  });
+});
+
+function ligneOrigine(
+  o: Partial<LigneOrigine> & { allocations: AllocationOrigine[] },
+): LigneOrigine {
+  return {
+    medicamentId: 'med',
+    stockMedicamentId: 'stk',
+    nomMedicament: 'Produit',
+    prixUnitaire: 600,
+    quantite: 1,
+    sousTotal: 600,
+    uniteAffichee: 'UNITE',
+    nombreAffiche: 1,
+    coefficientApplique: 1,
+    ...o,
+  };
+}
+
+function allocOrigine(
+  lotId: string | null,
+  quantite: number,
+  o: Partial<AllocationOrigine> = {},
+): AllocationOrigine {
+  return {
+    lotId,
+    numeroLot: lotId,
+    dateExpiration: null,
+    quantite,
+    coutUnitaire: 0,
+    lotTechnique: false,
+    statut: 'DEFINITIVE',
+    ...o,
+  };
+}
+
+describe('numeroAnnulation', () => {
+  it('préfixe le numéro de la pièce d’origine par A-', () => {
+    expect(numeroAnnulation('T1-0000042')).toBe('A-T1-0000042');
+    expect(numeroAnnulation('V-2026-000003')).toBe('A-V-2026-000003');
+  });
+});
+
+describe('lignesInverses', () => {
+  it('inverse une ligne à l’unité sur deux lots', () => {
+    const date = new Date('2026-07-15T00:00:00.000Z');
+    const resultat = lignesInverses([
+      ligneOrigine({
+        quantite: 15,
+        sousTotal: 9000,
+        nombreAffiche: 15,
+        allocations: [
+          allocOrigine('L30', 10, { coutUnitaire: 400, dateExpiration: date }),
+          allocOrigine('L90', 5, { coutUnitaire: 450 }),
+        ],
+      }),
+    ]);
+    expect(resultat).toEqual([
+      {
+        medicamentId: 'med',
+        stockMedicamentId: 'stk',
+        nomMedicament: 'Produit',
+        prixUnitaire: 600,
+        quantite: -15,
+        sousTotal: -9000,
+        uniteAffichee: 'UNITE',
+        nombreAffiche: -15,
+        coefficientApplique: 1,
+        allocations: [
+          {
+            lotId: 'L30',
+            numeroLot: 'L30',
+            dateExpiration: date,
+            quantite: -10,
+            coutUnitaire: 400,
+            lotTechnique: false,
+            statut: 'DEFINITIVE',
+          },
+          {
+            lotId: 'L90',
+            numeroLot: 'L90',
+            dateExpiration: null,
+            quantite: -5,
+            coutUnitaire: 450,
+            lotTechnique: false,
+            statut: 'DEFINITIVE',
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('conserve la provisoire et ignore la remplacée', () => {
+    const [a, b] = lignesInverses([
+      ligneOrigine({
+        quantite: 5,
+        allocations: [
+          allocOrigine('A', 2),
+          allocOrigine(null, 3, { statut: 'PROVISOIRE' }),
+        ],
+      }),
+      ligneOrigine({
+        quantite: 4,
+        allocations: [
+          allocOrigine(null, 4, { statut: 'REMPLACEE' }),
+          allocOrigine('B', 4),
+        ],
+      }),
+    ]);
+    expect(a.allocations.map((x) => [x.lotId, x.quantite, x.statut])).toEqual([
+      ['A', -2, 'DEFINITIVE'],
+      [null, -3, 'PROVISOIRE'],
+    ]);
+    expect(b.allocations.map((x) => [x.lotId, x.quantite, x.statut])).toEqual([
+      ['B', -4, 'DEFINITIVE'],
+    ]);
+  });
+
+  it('oppose le nombre affiché d’une vente à la boîte et garde le coefficient', () => {
+    const [l] = lignesInverses([
+      ligneOrigine({
+        quantite: 40,
+        nombreAffiche: 2,
+        coefficientApplique: 20,
+        uniteAffichee: 'BOITE',
+        prixUnitaire: 500,
+        sousTotal: 20000,
+        allocations: [allocOrigine('A', 40)],
+      }),
+    ]);
+    expect(l.quantite).toBe(-40);
+    expect(l.nombreAffiche).toBe(-2);
+    expect(l.coefficientApplique).toBe(20);
+    expect(l.sousTotal).toBe(-20000);
+    expect(l.quantite).toBe(l.nombreAffiche * l.coefficientApplique);
+  });
+
+  it('refuse les allocations incohérentes avec le numéro de la ligne', () => {
+    expect(() => lignesInverses([ligneOrigine({ allocations: [] })])).toThrow(
+      new RangeError(
+        'Ligne 1 : allocations incohérentes, annulation impossible.',
+      ),
+    );
+    expect(() =>
+      lignesInverses([
+        ligneOrigine({ quantite: 5, allocations: [allocOrigine('A', 5)] }),
+        ligneOrigine({ quantite: 5, allocations: [allocOrigine('A', 3)] }),
+      ]),
+    ).toThrow(
+      new RangeError(
+        'Ligne 2 : allocations incohérentes, annulation impossible.',
+      ),
+    );
+  });
+});
+
+describe('paiementsInverses', () => {
+  it('oppose chaque paiement d’un paiement partagé', () => {
+    expect(
+      paiementsInverses(
+        [
+          { modePaiementId: 'esp', montant: 1000 },
+          { modePaiementId: 'om', montant: 2000 },
+        ],
+        3000,
+      ),
+    ).toEqual([
+      {
+        modePaiementId: 'esp',
+        montant: -1000,
+        referenceExterne: null,
+        montantRecu: null,
+      },
+      {
+        modePaiementId: 'om',
+        montant: -2000,
+        referenceExterne: null,
+        montantRecu: null,
+      },
+    ]);
+  });
+
+  it('refuse une liste vide ou une somme différente du total', () => {
+    expect(() => paiementsInverses([], 0)).toThrow(RangeError);
+    expect(() =>
+      paiementsInverses(
+        [
+          { modePaiementId: 'esp', montant: 1000 },
+          { modePaiementId: 'om', montant: 1500 },
+        ],
+        3000,
+      ),
+    ).toThrow(RangeError);
+  });
+});
+
+describe('deriverAnnulation', () => {
+  const d = new Date('2026-10-26T10:00:00.000Z');
+  const vente = {
+    typePiece: 'VENTE' as const,
+    statut: 'VALIDEE' as const,
+    annuleeLe: null,
+    annuleeParId: null,
+    motifAnnulation: null,
+  };
+  const liee = {
+    id: 'p1',
+    numero: 'A-T1-0000001',
+    typePiece: 'ANNULATION' as const,
+    motifAnnulation: 'Erreur de quantité',
+    createdAt: d,
+    vendeurId: 'u2',
+    vendeurNom: 'Fatoumata Camara',
+  };
+
+  it('dérive l’annulation d’une vente de sa pièce liée', () => {
+    expect(deriverAnnulation(vente, liee)).toEqual({
+      statut: 'ANNULEE',
+      annuleeLe: d,
+      annuleeParId: 'u2',
+      motifAnnulation: 'Erreur de quantité',
+      motif: null,
+      annulation: {
+        id: 'p1',
+        numero: 'A-T1-0000001',
+        motif: 'Erreur de quantité',
+        le: d,
+        par: { id: 'u2', nom: 'Fatoumata Camara' },
+      },
+    });
+  });
+
+  it('présente la pièce d’annulation elle-même comme validée', () => {
+    const etat = deriverAnnulation(
+      {
+        typePiece: 'ANNULATION',
+        statut: 'VALIDEE',
+        annuleeLe: null,
+        annuleeParId: null,
+        motifAnnulation: 'Erreur de quantité',
+      },
+      null,
+    );
+    expect(etat.statut).toBe('VALIDEE');
+    expect(etat.motifAnnulation).toBeNull();
+    expect(etat.motif).toBe('Erreur de quantité');
+    expect(etat.annulation).toBeNull();
+  });
+
+  it('recopie les colonnes d’une vente historique annulée', () => {
+    expect(
+      deriverAnnulation(
+        {
+          typePiece: 'VENTE',
+          statut: 'ANNULEE',
+          annuleeLe: d,
+          annuleeParId: 'u2',
+          motifAnnulation: 'Erreur de saisie',
+        },
+        null,
+      ),
+    ).toEqual({
+      statut: 'ANNULEE',
+      annuleeLe: d,
+      annuleeParId: 'u2',
+      motifAnnulation: 'Erreur de saisie',
+      motif: null,
+      annulation: null,
+    });
+  });
+
+  it('ignore une pièce liée de régularisation', () => {
+    const etat = deriverAnnulation(vente, {
+      ...liee,
+      typePiece: 'REGULARISATION',
+    });
+    expect(etat.statut).toBe('VALIDEE');
+    expect(etat.annulation).toBeNull();
   });
 });
