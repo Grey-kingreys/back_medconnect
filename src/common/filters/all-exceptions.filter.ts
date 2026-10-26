@@ -55,7 +55,17 @@ const CODES_AVEC_DETAILS: ReadonlySet<CodeErreur> = new Set<CodeErreur>([
   'PRIX_MANQUANT',
   'ORDONNANCE_NON_CONFIRMEE',
   'STOCK_INTROUVABLE',
+  'VENTE_UNITE_INTERDITE',
+  'PRIX_UNITE_MANQUANT',
+  'SORTIE_MANUELLE_REQUISE',
 ]);
+
+interface LotDetail {
+  lotId: string;
+  numeroLot: string | null;
+  dateExpiration: string;
+  quantite: number;
+}
 
 // Messages anglais par défaut de Nest et d'Express (libellés HTTP standard).
 const MESSAGES_PAR_DEFAUT = new Set(
@@ -266,17 +276,39 @@ function assainirChamps(brut: unknown[]): ChampFautif[] {
 }
 
 // Garde au plus 50 lignes et, par ligne, seulement stockId, nom, disponible et demande (bon type).
-function assainirDetails(brut: unknown[]): Record<string, string | number>[] {
-  const resultat: Record<string, string | number>[] = [];
+function assainirDetails(
+  brut: unknown[],
+): Record<string, string | number | LotDetail[]>[] {
+  const resultat: Record<string, string | number | LotDetail[]>[] = [];
   for (const element of brut.slice(0, 50)) {
     if (typeof element !== 'object' || element === null) continue;
     const source = element as Record<string, unknown>;
-    const ligne: Record<string, string | number> = {};
+    const ligne: Record<string, string | number | LotDetail[]> = {};
     if (typeof source.stockId === 'string') ligne.stockId = source.stockId;
     if (typeof source.nom === 'string') ligne.nom = source.nom;
     if (typeof source.disponible === 'number')
       ligne.disponible = source.disponible;
     if (typeof source.demande === 'number') ligne.demande = source.demande;
+    if (Array.isArray(source.lots)) {
+      const lots: LotDetail[] = [];
+      for (const lot of (source.lots as unknown[]).slice(0, 50)) {
+        if (typeof lot !== 'object' || lot === null) continue;
+        const l = lot as Record<string, unknown>;
+        if (
+          typeof l.lotId !== 'string' ||
+          typeof l.dateExpiration !== 'string' ||
+          typeof l.quantite !== 'number'
+        )
+          continue;
+        lots.push({
+          lotId: l.lotId,
+          numeroLot: typeof l.numeroLot === 'string' ? l.numeroLot : null,
+          dateExpiration: l.dateExpiration,
+          quantite: l.quantite,
+        });
+      }
+      ligne.lots = lots;
+    }
     resultat.push(ligne);
   }
   return resultat;

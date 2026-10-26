@@ -11,7 +11,7 @@ import { PrismaService } from 'src/common/services/prisma.service';
 import { PermissionsService } from 'src/common/rbac/permissions.service';
 import { PERMISSIONS } from 'src/common/rbac/permissions.constants';
 import { assurerPointDeVente } from './point-de-vente';
-import { jourConakry } from './vente.service';
+import { jourConakry } from './jour-metier';
 import { masquerCouts } from './masquer-couts';
 import { etatStock } from './domaine/quantites';
 import { avertissementEcartPrix } from './domaine/prix';

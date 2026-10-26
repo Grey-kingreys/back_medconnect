@@ -36,9 +36,9 @@ export const CODES_ERREUR = [
   'JETON_INVALIDE',
   // Mot de passe actuel incorrect lors d'un changement de mot de passe (400), la session reste valide.
   'MOT_DE_PASSE_ACTUEL_INCORRECT',
-  // Stock insuffisant pour au moins une ligne de la vente (409), lignes dans `details`.
+  // Ancien refus de vente faute de stock (409) : plus jamais renvoyé depuis PB11, conservé (code stable).
   'STOCK_INSUFFISANT',
-  // Médicament périmé dans la vente (400), lignes dans `details`.
+  // Ancien refus de vente d'un médicament périmé (400) : plus jamais renvoyé depuis PB11 (remplacé par SORTIE_MANUELLE_REQUISE), conservé (code stable).
   'MEDICAMENT_EXPIRE',
   // Médicament sans prix dans la vente (400), lignes dans `details`.
   'PRIX_MANQUANT',
@@ -86,6 +86,14 @@ export const CODES_ERREUR = [
   'MODE_PAIEMENT_INCONNU',
   // Identifiant fourni par le client déjà porté par un autre enregistrement de caisse (409).
   'IDENTIFIANT_DEJA_UTILISE',
+  // Vente à l'unité d'un médicament qui se vend uniquement à la boîte (400), lignes dans `details`.
+  'VENTE_UNITE_INTERDITE',
+  // Vente à l'unité d'un médicament sans prix à l'unité (400), lignes dans `details`.
+  'PRIX_UNITE_MANQUANT',
+  // Il ne reste que des lots périmés pour couvrir la vente : choisir un lot et un motif (409), lignes et lots dans `details`.
+  'SORTIE_MANUELLE_REQUISE',
+  // Somme des paiements différente du montant de la vente (400).
+  'PAIEMENTS_INCOHERENTS',
 ] as const;
 
 export type CodeErreur = (typeof CODES_ERREUR)[number];

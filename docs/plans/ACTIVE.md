@@ -21,7 +21,7 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | PB08 | Service de mouvements et lectures recâblées (tasks/PB08-mouvements-lectures-recablees.md, D506 à D513) | dur | validé (D506 à D513, rapports/PB08-chef.md) | 1 |
 | PB09 | Tables de caisse et pièces de vente, migrations M5 et M6 (tasks/PB09-caisse-pieces-de-vente.md, D514 à D525) | dur | validé (D514 à D525, rapports/PB09-chef.md) | 1 |
 | PB10 | Postes et sessions de caisse (tasks/PB10-sessions-de-caisse.md, D526 à D533) | spécifié | validé (D526 à D533, rapports/PB10-chef.md) | 1 |
-| PB11 | Vente recâblée | dur | à faire | 0 |
+| PB11 | Vente recâblée sur lots, prix et caisse (tasks/PB11-vente-recablee.md, D534 à D543) | dur | validé (D534 à D543, rapports/PB11-chef.md) | 1 |
 | PB12 | Annulation par écriture inverse et jour métier | spécifié | à faire | 0 |
 | PB13 | Qualification d'une fiche | spécifié | à faire | 0 |
 | PB14 | Réceptions, fournisseurs, lots et import livraison | spécifié | à faire | 0 |

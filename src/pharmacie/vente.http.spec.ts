@@ -33,11 +33,15 @@ describe('Ventes en pharmacie (HTTP)', () => {
       type: 'HOPITAL',
       codes: ['vente:read', 'vente:write', 'vente:annuler', 'carnet:read'],
     },
-    pharmacien: { type: 'PHARMACIE', codes: ['vente:read', 'vente:write'] },
+    pharmacien: {
+      type: 'PHARMACIE',
+      codes: ['vente:read', 'vente:write', 'caisse:utiliser'],
+    },
     admin: {
       type: 'PHARMACIE',
-      codes: ['vente:read', 'vente:write', 'vente:annuler'],
+      codes: ['vente:read', 'vente:write', 'vente:annuler', 'caisse:utiliser'],
     },
+    sanscaisse: { type: 'PHARMACIE', codes: ['vente:read', 'vente:write'] },
   };
   const prisma = {
     user: {
@@ -160,6 +164,23 @@ describe('Ventes en pharmacie (HTTP)', () => {
     );
   });
 
+  it('2c. sans caisse:utiliser : création refusée (403 PERMISSION_REFUSEE), liste acceptée', async () => {
+    const creation = await request(serveur())
+      .post('/pharmacie/s1/ventes')
+      .set('x-essai-user', 'sanscaisse')
+      .send(corpsValide);
+    expect(creation.status).toBe(403);
+    expect((creation.body as { code?: string }).code).toBe(
+      'PERMISSION_REFUSEE',
+    );
+    expect(creerVente).not.toHaveBeenCalled();
+
+    const liste = await request(serveur())
+      .get('/pharmacie/s1/ventes')
+      .set('x-essai-user', 'sanscaisse');
+    expect(liste.status).toBe(200);
+  });
+
   it('2b. administrateur : annulation acceptée (200), motif nettoyé', async () => {
     const res = await request(serveur())
       .post('/pharmacie/s1/ventes/v1/annuler')
@@ -196,6 +217,36 @@ describe('Ventes en pharmacie (HTTP)', () => {
         { ...corpsValide, prixUnitaire: 1 },
         'prixUnitaire',
       ],
+      [
+        'unite PLAQUETTE',
+        'post',
+        { lignes: [{ stockId: 'st1', quantite: 1, unite: 'PLAQUETTE' }] },
+        'lignes',
+      ],
+      [
+        'sortieManuelle sans lotId',
+        'post',
+        {
+          lignes: [
+            { stockId: 'st1', quantite: 1, sortieManuelle: { motif: 'abc' } },
+          ],
+        },
+        'lignes',
+      ],
+      ['paiements []', 'post', { ...corpsValide, paiements: [] }, 'paiements'],
+      [
+        'paiement montant 0',
+        'post',
+        { ...corpsValide, paiements: [{ mode: 'ESPECES', montant: 0 }] },
+        'paiements',
+      ],
+      [
+        'paiement mode absent',
+        'post',
+        { ...corpsValide, paiements: [{ montant: 1000 }] },
+        'paiements',
+      ],
+      ['posteId vide', 'post', { ...corpsValide, posteId: '' }, 'posteId'],
       ['motif de 2 caractères', 'annuler', { motif: 'ab' }, 'motif'],
       ['date 22-10-2026', 'get', {}, 'date'],
     ];
@@ -228,11 +279,54 @@ describe('Ventes en pharmacie (HTTP)', () => {
     });
   });
 
-  it('4. 409 STOCK_INSUFFISANT : la réponse porte details filtré', async () => {
+  it('3b. corps complet valide : motif et référence nettoyés', async () => {
+    const res = await request(serveur())
+      .post('/pharmacie/s1/ventes')
+      .set('x-essai-user', 'pharmacien')
+      .send({
+        lignes: [
+          {
+            stockId: 'st1',
+            quantite: 6,
+            unite: 'UNITE',
+            sortieManuelle: { lotId: 'l1', motif: '  Client informé  ' },
+          },
+        ],
+        paiements: [
+          { mode: 'ESPECES', montant: 3000, montantRecu: 5000 },
+          { mode: 'ORANGE_MONEY', montant: 600, reference: ' OM-1 ' },
+        ],
+        posteId: 'p1',
+      });
+    expect(res.status).toBe(201);
+    expect(creerVente).toHaveBeenCalledWith(
+      's1',
+      'pharmacien',
+      {
+        lignes: [
+          {
+            stockId: 'st1',
+            quantite: 6,
+            unite: 'UNITE',
+            sortieManuelle: { lotId: 'l1', motif: 'Client informé' },
+          },
+        ],
+        paiements: [
+          { mode: 'ESPECES', montant: 3000, montantRecu: 5000 },
+          { mode: 'ORANGE_MONEY', montant: 600, reference: 'OM-1' },
+        ],
+        posteId: 'p1',
+      },
+      undefined,
+      expect.anything(),
+    );
+  });
+
+  it('4. 409 SORTIE_MANUELLE_REQUISE : details et lots filtrés', async () => {
     creerVente.mockRejectedValue(
       new ConflictException({
-        message: 'Le stock ne suffit plus pour « Doliprane » : il en reste 0.',
-        code: 'STOCK_INSUFFISANT',
+        message: 'Il ne reste que des lots périmés pour « Doliprane ».',
+        code: 'SORTIE_MANUELLE_REQUISE',
         details: [
           {
             stockId: 'st1',
@@ -240,6 +334,15 @@ describe('Ventes en pharmacie (HTTP)', () => {
             disponible: 0,
             demande: 2,
             interne: 'à ne pas exposer',
+            lots: [
+              {
+                lotId: 'l1',
+                numeroLot: 'A12',
+                dateExpiration: '2026-01-01',
+                quantite: 10,
+                coutUnitaire: 300,
+              },
+            ],
           },
         ],
       }),
@@ -252,12 +355,27 @@ describe('Ventes en pharmacie (HTTP)', () => {
 
     expect(res.status).toBe(409);
     expect(res.body).toMatchObject({
-      code: 'STOCK_INSUFFISANT',
+      code: 'SORTIE_MANUELLE_REQUISE',
       details: [
-        { stockId: 'st1', nom: 'Doliprane', disponible: 0, demande: 2 },
+        {
+          stockId: 'st1',
+          nom: 'Doliprane',
+          disponible: 0,
+          demande: 2,
+          lots: [
+            {
+              lotId: 'l1',
+              numeroLot: 'A12',
+              dateExpiration: '2026-01-01',
+              quantite: 10,
+            },
+          ],
+        },
       ],
     });
-    expect(JSON.stringify(res.body)).not.toContain('interne');
+    const texte = JSON.stringify(res.body);
+    expect(texte).not.toContain('interne');
+    expect(texte).not.toContain('coutUnitaire');
   });
 
   it('liste et détail : la permission vente:read suffit', async () => {

@@ -13,7 +13,7 @@ import { PrismaService } from 'src/common/services/prisma.service';
 import { AccesPharmacieService } from '../acces-pharmacie.service';
 import { assurerPointDeVente } from '../point-de-vente';
 import type { Reponse } from '../points-de-vente.service';
-import { jourConakry } from '../vente.service';
+import { jourConakry } from '../jour-metier';
 import { CODE_ESPECES, totalComptage } from '../domaine/caisse';
 import {
   commentaireEcartRequis,

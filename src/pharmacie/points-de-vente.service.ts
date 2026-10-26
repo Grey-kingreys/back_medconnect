@@ -14,7 +14,7 @@ import type { TypeCoupure, TypePoste } from 'generated/prisma/enums';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { AccesPharmacieService } from './acces-pharmacie.service';
 import { assurerPointDeVente } from './point-de-vente';
-import { jourConakry } from './vente.service';
+import { jourConakry } from './jour-metier';
 import {
   EnregistrerPosteDto,
   ModifierParametresDto,
@@ -144,6 +144,68 @@ function libelleParDefaut(
         : 'Navigateur'
       : `Poste ${code}`;
   return libelle.slice(0, 60);
+}
+
+/**
+ * Poste d'un appareil dans un point de vente : renvoyé s'il existe (même type),
+ * sinon créé et audité ; verrou du PV (D482). Utilisé par l'enregistrement d'un
+ * poste et par la vente sans poste (D536).
+ */
+export async function assurerPoste(
+  tx: Prisma.TransactionClient,
+  entree: {
+    pointDeVenteId: string;
+    type: TypePosteEnregistrable;
+    appareilId: string;
+    libelle?: string;
+    user: { id: string; prenom: string };
+    ip?: string | null;
+  },
+): Promise<{ poste: Poste; cree: boolean }> {
+  const { pointDeVenteId, type, appareilId, user, ip } = entree;
+
+  // Verrou : deux enregistrements simultanés du même appareil sont sérialisés.
+  await tx.$queryRaw`SELECT "id" FROM "PointDeVente" WHERE "id" = ${pointDeVenteId} FOR UPDATE`;
+
+  const existant = await tx.poste.findFirst({
+    where: { pointDeVenteId, appareilId },
+  });
+  if (existant) {
+    if (existant.type !== type) {
+      throw new ConflictException({
+        message: MESSAGE_POSTE_TYPE_DIFFERENT,
+        code: 'POSTE_TYPE_DIFFERENT',
+      });
+    }
+    return { poste: existant, cree: false };
+  }
+
+  const rang =
+    (await tx.poste.count({
+      where: { pointDeVenteId, type },
+    })) + 1;
+  const code = (type === 'WEB' ? 'W' : 'D') + String(rang);
+  const nouveau = await tx.poste.create({
+    data: {
+      pointDeVenteId,
+      code,
+      libelle: entree.libelle ?? libelleParDefaut(type, code, user.prenom),
+      type,
+      appareilId,
+      enregistreParId: user.id,
+    },
+  });
+  await tx.auditLog.create({
+    data: {
+      userId: user.id,
+      action: 'create',
+      entityType: 'Poste',
+      entityId: nouveau.id,
+      ip: ip ?? null,
+      metadata: { code, type },
+    },
+  });
+  return { poste: nouveau, cree: true };
 }
 
 @Injectable()
@@ -333,51 +395,14 @@ export class PointsDeVenteService implements OnApplicationBootstrap {
           orderBy: { ordre: 'asc' },
         })) ?? (await assurerPointDeVente(tx, structure)).pointDeVente;
 
-      // Verrou : deux enregistrements simultanés du même appareil sont sérialisés.
-      await tx.$queryRaw`SELECT "id" FROM "PointDeVente" WHERE "id" = ${pointDeVente.id} FOR UPDATE`;
-
-      const existant = await tx.poste.findFirst({
-        where: {
-          pointDeVenteId: pointDeVente.id,
-          appareilId: dto.appareilId,
-        },
+      return assurerPoste(tx, {
+        pointDeVenteId: pointDeVente.id,
+        type: dto.type,
+        appareilId: dto.appareilId,
+        libelle: dto.libelle,
+        user,
+        ip,
       });
-      if (existant) {
-        if (existant.type !== dto.type) {
-          throw new ConflictException({
-            message: MESSAGE_POSTE_TYPE_DIFFERENT,
-            code: 'POSTE_TYPE_DIFFERENT',
-          });
-        }
-        return { poste: existant, cree: false };
-      }
-
-      const rang =
-        (await tx.poste.count({
-          where: { pointDeVenteId: pointDeVente.id, type: dto.type },
-        })) + 1;
-      const code = (dto.type === 'WEB' ? 'W' : 'D') + String(rang);
-      const nouveau = await tx.poste.create({
-        data: {
-          pointDeVenteId: pointDeVente.id,
-          code,
-          libelle: dto.libelle ?? libelleParDefaut(dto.type, code, user.prenom),
-          type: dto.type,
-          appareilId: dto.appareilId,
-          enregistreParId: user.id,
-        },
-      });
-      await tx.auditLog.create({
-        data: {
-          userId: user.id,
-          action: 'create',
-          entityType: 'Poste',
-          entityId: nouveau.id,
-          ip: ip ?? null,
-          metadata: { code, type: dto.type },
-        },
-      });
-      return { poste: nouveau, cree: true };
     });
     return {
       data: { ...versPosteReponse(poste), cree },

@@ -126,6 +126,77 @@ describe('AllExceptionsFilter', () => {
     ]);
   });
 
+  it('recopie les lots périmés assainis du 409 SORTIE_MANUELLE_REQUISE', () => {
+    filtre.catch(
+      new ConflictException({
+        message: 'Il ne reste que des lots périmés.',
+        code: 'SORTIE_MANUELLE_REQUISE',
+        details: [
+          {
+            stockId: 's1',
+            nom: 'Doliprane',
+            disponible: 0,
+            demande: 2,
+            interne: 'x',
+            lots: [
+              {
+                lotId: 'l1',
+                numeroLot: 'A12',
+                dateExpiration: '2026-01-01',
+                quantite: 10,
+                coutUnitaire: 300,
+              },
+              {
+                lotId: 'l2',
+                numeroLot: 7,
+                dateExpiration: '2026-02-01',
+                quantite: 4,
+              },
+              { lotId: 3 },
+            ],
+          },
+        ],
+      }),
+      host,
+    );
+    expect(corpsRenvoye().details).toEqual([
+      {
+        stockId: 's1',
+        nom: 'Doliprane',
+        disponible: 0,
+        demande: 2,
+        lots: [
+          {
+            lotId: 'l1',
+            numeroLot: 'A12',
+            dateExpiration: '2026-01-01',
+            quantite: 10,
+          },
+          {
+            lotId: 'l2',
+            numeroLot: null,
+            dateExpiration: '2026-02-01',
+            quantite: 4,
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('garde details pour le 400 VENTE_UNITE_INTERDITE', () => {
+    filtre.catch(
+      new BadRequestException({
+        message: 'Ce médicament se vend uniquement à la boîte.',
+        code: 'VENTE_UNITE_INTERDITE',
+        details: [{ stockId: 's1', nom: 'Doliprane', secret: 'x' }],
+      }),
+      host,
+    );
+    expect(corpsRenvoye().details).toEqual([
+      { stockId: 's1', nom: 'Doliprane' },
+    ]);
+  });
+
   it('ne recopie pas details sans code de vente', () => {
     filtre.catch(
       new BadRequestException({

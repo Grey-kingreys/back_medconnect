@@ -40,39 +40,39 @@ export class VenteController {
   constructor(private readonly venteService: VenteService) {}
 
   @Post(':structureId/ventes')
-  @RequirePermissions(PERMISSIONS.VENTE_WRITE)
+  @RequirePermissions(PERMISSIONS.VENTE_WRITE, PERMISSIONS.CAISSE_UTILISER)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Enregistrer une vente au comptoir',
     description:
-      'Le serveur vérifie chaque ligne, retire les quantités du stock et enregistre la vente en une seule opération. Le prix vient du stock.',
+      'Le serveur vérifie chaque ligne, prend les quantités dans les lots (reliquat puis péremption la plus proche), ouvre la caisse du vendeur si besoin, enregistre les paiements et la vente en une seule opération. Les deux prix (boîte, unité) viennent de la fiche du médicament, jamais du client. Sans paiements, la vente est réglée en espèces.',
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiHeader({
     name: 'Idempotency-Key',
     required: false,
     description:
-      'Clé unique par panier (8 à 128 caractères parmi lettres, chiffres, . _ : -), par exemple un UUID. Un renvoi avec la même clé dans les 24 h renvoie la même vente sans second retrait du stock. Clé mal formée : ignorée.',
+      'Clé unique par panier (8 à 128 caractères parmi lettres, chiffres, . _ : -), par exemple un UUID. Un renvoi avec la même clé renvoie la même vente, sans limite de durée. Clé mal formée : ignorée.',
   })
   @ApiResponse({
     status: 201,
     description:
-      'Vente enregistrée (ou rejouée avec rejeu: true). data : id, numero, statut, createdAt, total, ordonnanceVerifiee, clientNom, clientTelephone, vendeur { id, nom }, annuleeLe, annuleeParId, motifAnnulation, lignes [ { id, stockId, medicamentId, nomMedicament, prixUnitaire, quantite, sousTotal } ], pharmacie { id, nom, adresse, ville, telephone, logoUrl } (champs absents à null, logoUrl = URL publique du logo ou null).',
+      "Vente enregistrée (ou rejouée avec rejeu: true). data : id, numero, statut, createdAt, total, ordonnanceVerifiee, clientNom, clientTelephone, vendeur { id, nom }, annuleeLe, annuleeParId, motifAnnulation, typePiece, numeroTicket, jourMetier, provisoire, poste { id, code }, session { id, ouverteAutomatiquement }, paiements [ { id, mode, libelle, montant, reference, montantRecu, rendu } ], annulation, lignes [ { id, stockId, medicamentId, nomMedicament, prixUnitaire, quantite, sousTotal, uniteAffichee, nombreAffiche, coefficientApplique, allocations [ ... ] } ], pharmacie { id, nom, adresse, ville, telephone, logoUrl }. Les coûts ne sont renvoyés qu'avec la permission marge:read.",
   })
   @ApiResponse({
     status: 400,
     description:
-      'Corps invalide (VALIDATION), médicament périmé (MEDICAMENT_EXPIRE), sans prix (PRIX_MANQUANT) ou sur ordonnance non confirmée (ORDONNANCE_NON_CONFIRMEE). Lignes concernées dans details.',
+      'Corps invalide (VALIDATION), vente à l’unité interdite (VENTE_UNITE_INTERDITE), sans prix à l’unité (PRIX_UNITE_MANQUANT), sans prix (PRIX_MANQUANT), ordonnance non confirmée (ORDONNANCE_NON_CONFIRMEE), motif absent (MOTIF_REQUIS), paiements incohérents (PAIEMENTS_INCOHERENTS) ou mode inconnu (MODE_PAIEMENT_INCONNU). Lignes concernées dans details.',
   })
   @ApiResponse({
     status: 404,
     description:
-      'Ligne de stock absente de la pharmacie (STOCK_INTROUVABLE, lignes dans details).',
+      'Ligne de stock absente de la pharmacie (STOCK_INTROUVABLE, lignes dans details) ou lot introuvable.',
   })
   @ApiResponse({
     status: 409,
     description:
-      'Stock insuffisant (STOCK_INSUFFISANT, details : stockId, nom, disponible, demande).',
+      'Il ne reste que des lots périmés (SORTIE_MANUELLE_REQUISE, lots dans details), lot épuisé (STOCK_LOT_NEGATIF), poste inconnu (POSTE_INCONNU), caisse d’un autre utilisateur (SESSION_AUTRE_UTILISATEUR) ou appareil d’un autre type (POSTE_TYPE_DIFFERENT).',
   })
   creerVente(
     @Req() req: RequestWithUser,

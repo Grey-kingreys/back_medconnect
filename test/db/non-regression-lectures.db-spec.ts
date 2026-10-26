@@ -5,6 +5,7 @@
 import { NotificationsService } from 'src/notifications/notifications.service';
 import { PharmacieService } from 'src/pharmacie/pharmacie.service';
 import { AccesPharmacieService } from 'src/pharmacie/acces-pharmacie.service';
+import { SessionsCaisseService } from 'src/pharmacie/caisse/sessions-caisse.service';
 import { VenteService } from 'src/pharmacie/vente.service';
 import { MouvementsStockService } from 'src/pharmacie/stock/mouvements-stock.service';
 import type { PermissionsService } from 'src/common/rbac/permissions.service';
@@ -190,7 +191,15 @@ describe('Non-régression des lectures pharmacie (PB02)', () => {
       new MouvementsStockService(),
       permissionsFactices,
     );
-    ventes = new VenteService(prisma, notifications, stockageFactice, acces);
+    ventes = new VenteService(
+      prisma,
+      notifications,
+      stockageFactice,
+      acces,
+      permissionsFactices,
+      new MouvementsStockService(),
+      new SessionsCaisseService(prisma, acces, permissionsFactices),
+    );
 
     J = resume.aujourdhui;
     jourJ = J.toISOString().slice(0, 10);
