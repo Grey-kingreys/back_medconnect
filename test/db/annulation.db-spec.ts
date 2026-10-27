@@ -703,7 +703,10 @@ describe('Annulation par pièce inverse et jour métier, sur base de test (PB12)
     })) as unknown as ReponseListe;
     expect(listeJour.data.nombre).toBe(listeAvant.data.nombre + 1);
     expect(listeJour.data.totalJour).toBe(listeAvant.data.totalJour - 1000);
-    expect(listeJour.data.ventes[0]).toMatchObject({
+    // Pièce retrouvée par son identifiant : le jeu « format actuel » place une vente à J + 11 h, avant elle dans le tri jusqu'à 11 h UTC
+    expect(
+      listeJour.data.ventes.find((v) => v.id === pieces[0].id),
+    ).toMatchObject({
       id: pieces[0].id,
       typePiece: 'ANNULATION',
       total: -1000,
