@@ -36,6 +36,10 @@ import {
   lireLotsCandidats,
 } from '../stock/lecture-stock';
 import { MouvementsStockService } from '../stock/mouvements-stock.service';
+import {
+  resoudreProvisoires,
+  type ResolutionEcrite,
+} from '../stock/resolution-provisoires';
 import type {
   CorrigerLotDto,
   CreerFournisseurDto,
@@ -75,6 +79,8 @@ export const MESSAGE_FICHE_NON_QUALIFIEE =
   "Le nombre d'unités par boîte de ce médicament n'est pas encore confirmé : vérifiez sa fiche avant de compter en boîtes.";
 export const MESSAGE_RECEPTION_REJOUEE =
   'Cette réception était déjà enregistrée.';
+export const MESSAGE_VENTES_RATTACHEES =
+  'Les ventes faites en attente de ce stock ont été rattachées aux lots reçus.';
 export function messageReceptionEnregistree(nombreLots: number): string {
   return nombreLots === 1
     ? 'Réception enregistrée : 1 lot.'
@@ -114,6 +120,8 @@ export interface ReceptionEcrite {
     soldeProduitApres: number;
   }[];
   avertissements: AvertissementReception[];
+  /** Ventes faites sans stock rattachées aux lots reçus ; vide pour un rejeu. */
+  resolutions: ResolutionEcrite[];
 }
 
 const OPTIONS_TRANSACTION_RECEPTION = { maxWait: 10_000, timeout: 30_000 };
@@ -181,7 +189,10 @@ export interface ElementLot {
   coutUnitaire: number;
 }
 
-type ClientLecture = Pick<Prisma.TransactionClient, 'reception'>;
+type ClientLecture = Pick<
+  Prisma.TransactionClient,
+  'reception' | 'allocationLot' | 'mouvementStock'
+>;
 
 function elementLot(c: LotCandidat, jour: string): ElementLot {
   return {
@@ -247,6 +258,7 @@ export class ReceptionsService {
             cree: false,
             lignes: [],
             avertissements: [],
+            resolutions: [],
           };
         }
         throw new ConflictException({
@@ -464,6 +476,15 @@ export class ReceptionsService {
       });
     }
 
+    // 11b. Ventes faites sans stock rattachées aux lots reçus (D576)
+    const resolutions = await resoudreProvisoires(tx, this.mouvementsStock, {
+      pointDeVenteId,
+      stockMedicamentIds: ids,
+      pieceId: reception.id,
+      auteurId: userId,
+      jour,
+    });
+
     // 12. Audit (aucun coût, aucune référence de bon)
     await tx.auditLog.create({
       data: {
@@ -476,6 +497,10 @@ export class ReceptionsService {
           nombreLignes: entree.lignes.length,
           fournisseurId: entree.fournisseurId,
           quantiteTotale: pretes.reduce((s, p) => s + p.quantiteUm, 0),
+          // Absent sans résolution : les audits antérieurs gardent la même forme
+          ...(resolutions.length > 0
+            ? { nombreResolutions: resolutions.length }
+            : {}),
         },
       },
     });
@@ -490,7 +515,13 @@ export class ReceptionsService {
         message: MESSAGE_FICHE_NON_QUALIFIEE,
       }));
 
-    return { receptionId: reception.id, cree: true, lignes, avertissements };
+    return {
+      receptionId: reception.id,
+      cree: true,
+      lignes,
+      avertissements,
+      resolutions,
+    };
   }
 
   async enregistrer(
@@ -543,6 +574,7 @@ export class ReceptionsService {
         cree: false,
         lignes: [],
         avertissements: [],
+        resolutions: [],
       };
     }
 
@@ -560,7 +592,8 @@ export class ReceptionsService {
         peutVoirMarge,
       ),
       message: ecrite.cree
-        ? messageReceptionEnregistree(ecrite.lignes.length)
+        ? messageReceptionEnregistree(ecrite.lignes.length) +
+          (ecrite.resolutions.length > 0 ? ` ${MESSAGE_VENTES_RATTACHEES}` : '')
         : MESSAGE_RECEPTION_REJOUEE,
       success: true as const,
     };
@@ -620,6 +653,54 @@ export class ReceptionsService {
       }
       return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
     });
+    const allocations = await client.allocationLot.findMany({
+      where: { remplaceeParPieceId: receptionId },
+      select: {
+        id: true,
+        quantite: true,
+        ligneVente: {
+          select: {
+            stockMedicamentId: true,
+            nomMedicament: true,
+            vente: { select: { id: true, numero: true } },
+          },
+        },
+      },
+    });
+    const resolutions: ResolutionEcrite[] = [];
+    for (const a of allocations) {
+      const somme = await client.mouvementStock.aggregate({
+        _sum: { quantite: true },
+        where: {
+          pieceOrigineType: 'RESOLUTION',
+          pieceOrigineId: receptionId,
+          lotId: { not: null },
+          evenementId: { startsWith: `resolution:${a.id}:` },
+        },
+      });
+      const quantiteResolue = -(somme._sum.quantite ?? 0);
+      resolutions.push({
+        allocationId: a.id,
+        venteId: a.ligneVente.vente.id,
+        numeroVente: a.ligneVente.vente.numero,
+        stockId: a.ligneVente.stockMedicamentId,
+        nom: a.ligneVente.nomMedicament,
+        quantiteProvisoire: a.quantite,
+        quantiteResolue,
+        resteProvisoire: a.quantite - quantiteResolue,
+      });
+    }
+    resolutions.sort((a, b) =>
+      a.numeroVente !== b.numeroVente
+        ? a.numeroVente < b.numeroVente
+          ? -1
+          : 1
+        : a.allocationId < b.allocationId
+          ? -1
+          : a.allocationId > b.allocationId
+            ? 1
+            : 0,
+    );
     return {
       id: r.id,
       reference: r.reference,
@@ -628,6 +709,7 @@ export class ReceptionsService {
       auteurId: r.auteurId,
       fournisseur: r.fournisseur,
       lots,
+      resolutions,
     };
   }
 

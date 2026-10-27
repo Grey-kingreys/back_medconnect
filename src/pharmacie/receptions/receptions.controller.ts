@@ -78,7 +78,7 @@ export class ReceptionsController {
   @ApiOperation({
     summary: 'Enregistrer une réception de médicaments',
     description:
-      "Une réception et un lot par ligne. Quantité : nombreBoites (multiplié par le nombre d'unités par boîte de la fiche) ou quantiteUnites. Coût par unité = coût d'achat de la boîte divisé par ce nombre, arrondi au GNF, figé sur le lot. Date de péremption obligatoire sauf sansPeremption (400 DATE_PEREMPTION_REQUISE), jamais passée (400 DATE_PEREMPTION_PASSEE). 404 STOCK_INTROUVABLE, 404 fournisseur, 409 IDENTIFIANT_DEJA_UTILISE. Coûts retirés sans marge:read.",
+      "Une réception et un lot par ligne. Quantité : nombreBoites (multiplié par le nombre d'unités par boîte de la fiche) ou quantiteUnites. Coût par unité = coût d'achat de la boîte divisé par ce nombre, arrondi au GNF, figé sur le lot. Date de péremption obligatoire sauf sansPeremption (400 DATE_PEREMPTION_REQUISE), jamais passée (400 DATE_PEREMPTION_PASSEE). 404 STOCK_INTROUVABLE, 404 fournisseur, 409 IDENTIFIANT_DEJA_UTILISE. Coûts retirés sans marge:read. Les ventes faites sans stock sur ces médicaments sont rattachées aux lots (FEFO, lots non périmés) : allocation provisoire remplacée, mouvements de pièce RESOLUTION, réponse resolutions.",
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   enregistrer(

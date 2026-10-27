@@ -1184,10 +1184,20 @@ export class VenteService {
           origine.lignes.map((l) => l.stockMedicamentId),
         );
 
+        // 4a. Allocations relues sous les verrous des fiches : une réception a pu résoudre une provisoire (D578)
+        const allocationsRelues = await tx.allocationLot.findMany({
+          where: { ligneVenteId: { in: origine.lignes.map((l) => l.id) } },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        });
+        const lignesOrigine = origine.lignes.map((l) => ({
+          ...l,
+          allocations: allocationsRelues.filter((a) => a.ligneVenteId === l.id),
+        }));
+
         // 4b. Vente antérieure à une multiplication du stock (D561)
         const lotsAlloues = [
           ...new Set(
-            origine.lignes
+            lignesOrigine
               .flatMap((l) => l.allocations)
               .map((a) => a.lotId)
               .filter((id): id is string => id !== null),
@@ -1208,7 +1218,7 @@ export class VenteService {
         }
 
         // 5. Calcul des opposés
-        const lignes = lignesInverses(origine.lignes);
+        const lignes = lignesInverses(lignesOrigine);
         const paiements = paiementsInverses(origine.paiements, origine.total);
         const total = origine.total === 0 ? 0 : -origine.total;
         const numero = numeroAnnulation(origine.numero);

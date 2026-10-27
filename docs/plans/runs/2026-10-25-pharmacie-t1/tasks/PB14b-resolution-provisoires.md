@@ -261,3 +261,5 @@ Chemin de l'artefact + preuve (commande lancée, résultat en une ligne). Ou un 
 ## Validation
 
 <!-- commande relancée par l'orchestrateur | résultat en une ligne | hash du commit -->
+
+docker compose exec -T backend npx tsc --noEmit, eslint (7 fichiers), npm test, npm run test:db | 0 erreur, 0 erreur, 83 suites et 948 tests, 20 suites et 227 tests | commit « feat(pharmacie): résolution des allocations provisoires à la réception (PB14b) » (rapports/PB14b-chef.md)
