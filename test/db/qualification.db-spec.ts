@@ -4,6 +4,7 @@ import { PrismaService } from 'src/common/services/prisma.service';
 import type { StorageService } from 'src/storage/storage.service';
 import { NotificationsService } from 'src/notifications/notifications.service';
 import { AccesPharmacieService } from 'src/pharmacie/acces-pharmacie.service';
+import { InventairesService } from 'src/pharmacie/inventaires/inventaires.service';
 import { SessionsCaisseService } from 'src/pharmacie/caisse/sessions-caisse.service';
 import {
   FicheProduitService,
@@ -146,6 +147,7 @@ describe('Qualification d une fiche, sur base de test (PB13)', () => {
       mouvements,
       permissions,
       new ReceptionsService(prisma, acces, mouvements, permissions),
+      new InventairesService(prisma, acces, mouvements),
     );
     const pvs = await sql(
       'SELECT "id" FROM "PointDeVente" WHERE "structureId" = $1 AND "ordre" = 1',

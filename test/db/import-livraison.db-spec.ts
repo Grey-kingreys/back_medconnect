@@ -7,13 +7,14 @@ import { NotificationsService } from 'src/notifications/notifications.service';
 import { AccesPharmacieService } from 'src/pharmacie/acces-pharmacie.service';
 import { SessionsCaisseService } from 'src/pharmacie/caisse/sessions-caisse.service';
 import {
-  MESSAGE_IMPORT_INVENTAIRE_INDISPONIBLE,
+  MESSAGE_IMPORT_INVENTAIRE_INTERDIT,
   MESSAGE_IMPORT_LIVRAISON_INTERDIT,
   messageAlerteImportLivraison,
   MIME_XLSX,
   PharmacieService,
 } from 'src/pharmacie/pharmacie.service';
 import { ReceptionsService } from 'src/pharmacie/receptions/receptions.service';
+import { InventairesService } from 'src/pharmacie/inventaires/inventaires.service';
 import { verifierStock } from 'src/pharmacie/stock/commandes-stock';
 import { MouvementsStockService } from 'src/pharmacie/stock/mouvements-stock.service';
 import type { FichierImport } from 'src/pharmacie/dto/pharmacie.dto';
@@ -147,6 +148,7 @@ describe('Import livraison vers réception, sur base de test (PB14c)', () => {
       mouvements,
       permissions,
       receptions,
+      new InventairesService(prisma, acces, mouvements),
     );
     pv1 = await pointDeVente(PHARMACIE);
   });
@@ -414,7 +416,7 @@ describe('Import livraison vers réception, sur base de test (PB14c)', () => {
     expect(await nombreReceptions()).toBe(avant);
   });
 
-  it('inventaire refusé sans rien écrire', async () => {
+  it('inventaire sans inventaire:write refusé sans rien écrire', async () => {
     const f = await nouvelleFiche();
     const fichier = await construireFichier([[f.nom, 4, null, jour(200)]]);
     const receptionsAvant = await nombreReceptions();
@@ -432,10 +434,9 @@ describe('Import livraison vers réception, sur base de test (PB14c)', () => {
     );
 
     for (const r of [importe, apercu]) {
-      expect(r.statut).toBe(409);
+      expect(r.statut).toBe(403);
       expect(r.corps).toMatchObject({
-        code: 'IMPORT_INVENTAIRE_INDISPONIBLE',
-        message: MESSAGE_IMPORT_INVENTAIRE_INDISPONIBLE,
+        message: MESSAGE_IMPORT_INVENTAIRE_INTERDIT,
       });
     }
     expect(await nombreReceptions()).toBe(receptionsAvant);

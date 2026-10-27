@@ -224,7 +224,10 @@ Chemin de l'artefact + preuve (commande lancée, résultat en une ligne). Ou un 
 ## Historique
 
 <!-- une ligne par tentative : AAAA-MM-JJ | tier | résultat | raison si échec -->
+2026-10-27 | spécifié (Sonnet) | PASS du vérificateur, deux remarques (constante morte, lot unique épuisé non ciblé) | aucune
+2026-10-27 | chef Opus | D600 appliquée (ciblerLot, lotsEnStockFefo), constante MESSAGE_IMPORT_INVENTAIRE_INDISPONIBLE retirée | aucune
 
 ## Validation
 
 <!-- commande relancée par l'orchestrateur | résultat en une ligne | hash du commit -->
+docker compose exec -T backend npx tsc --noEmit ; npx eslint ; npm test ; npm run test:db | 0 erreur ; 88 suites, 984 réussis ; 24 suites, 291 réussis | voir rapports/PB15c-chef.md

@@ -43,6 +43,7 @@ import {
   UpdateStockQuantiteDto,
   FichierImport,
   OptionsImportStockDto,
+  ModeleImportStockDto,
 } from './dto/pharmacie.dto';
 
 // Schéma Swagger du formulaire d'envoi du classeur (stock et catalogue)
@@ -343,19 +344,26 @@ export class PharmacieController {
   @ApiOperation({
     summary: "Télécharger le modèle Excel d'import du stock",
     description:
-      "Classeur .xlsx : feuille « Stock » (Médicament, Quantité (boîtes), Prix de la boîte (GNF), Date d'expiration (AAAA-MM-JJ), Lot, Coût d'achat de la boîte (GNF), Notes) avec une ligne d'exemple, et feuille « Mode d'emploi ».",
+      "Classeur .xlsx. mode=livraison (défaut) : feuille « Stock » (Médicament, Quantité (boîtes), Prix de la boîte (GNF), Date d'expiration (AAAA-MM-JJ), Lot, Coût d'achat de la boîte (GNF), Notes). mode=inventaire : feuille « Stock » (Médicament, Quantité comptée (boîtes), Unités en plus (boîte entamée), Lot, Date d'expiration (AAAA-MM-JJ)). Une ligne d'exemple et une feuille « Mode d'emploi ».",
   })
   async getModeleImportStock(
     @Param('structureId') structureId: string,
     @Req() req: RequestWithUser,
+    @Query() options: ModeleImportStockDto,
   ): Promise<StreamableFile> {
+    const mode = options.mode ?? 'livraison';
     const contenu = await this.pharmacieService.getModeleImportStock(
       structureId,
       req.user.userId,
+      mode,
     );
     return new StreamableFile(contenu, {
       type: MIME_XLSX,
-      disposition: 'attachment; filename="modele-import-stock.xlsx"',
+      disposition: `attachment; filename="${
+        mode === 'inventaire'
+          ? 'modele-inventaire-stock.xlsx'
+          : 'modele-import-stock.xlsx'
+      }"`,
     });
   }
 
@@ -371,7 +379,7 @@ export class PharmacieController {
   @ApiOperation({
     summary: "Aperçu de l'import Excel du stock",
     description:
-      "Analyse le classeur (champ multipart `fichier`, .xlsx, 2 Mo et 1000 lignes max) sans rien écrire. Champ multipart `mode` : livraison seulement (reception:write) ; inventaire (défaut) : 409 IMPORT_INVENTAIRE_INDISPONIBLE ; autre valeur : 400 VALIDATION sur mode. Date de péremption obligatoire sauf « sans péremption », jamais passée ; colonnes facultatives Lot et Coût d'achat (par boîte). Chaque ligne acceptée porte quantiteAvant, quantiteApres et unitesRecues (unités, stock calculé). Coûts retirés sans marge:read.",
+      'Analyse le classeur (champ multipart `fichier`, .xlsx, 2 Mo et 1000 lignes max) sans rien écrire. Champ multipart `mode` : inventaire (défaut, inventaire:write) ou livraison (reception:write) ; autre valeur : 400 VALIDATION. Livraison : date obligatoire sauf « sans péremption », jamais passée, quantiteAvant, quantiteApres et unitesRecues en unités, coûts retirés sans marge:read. Inventaire : une ligne par lot (numéro ou date de péremption), quantiteComptee, quantiteTheorique, ecart, sousTolerance, nouveauLot ; plusieurs lots sans précision : ligne rejetée avec la liste des lots.',
   })
   apercuImportStock(
     @Param('structureId') structureId: string,
@@ -399,7 +407,7 @@ export class PharmacieController {
   @ApiOperation({
     summary: 'Importer le stock depuis un fichier Excel',
     description:
-      "Refait l'analyse de l'aperçu puis, dans une transaction, enregistre une réception (un lot par ligne acceptée, coût par unité figé) et rattache les ventes faites sans stock. Un médicament absent du stock y est ajouté ; prix de la boîte et notes mis à jour si la case est remplie. Mode inventaire : 409 IMPORT_INVENTAIRE_INDISPONIBLE. Renvoie le rapport, mode, importees et receptionId.",
+      "Refait l'analyse puis écrit dans une transaction. Livraison : une réception (un lot par ligne acceptée), ventes faites sans stock rattachées, receptionId. Inventaire : un inventaire (commentaire « Import Excel »), un mouvement INVENTAIRE par lot compté, anomalie ECART_INVENTAIRE au-delà de la tolérance, ventes faites sans stock rattachées aux lots comptés, inventaireId. Les lignes refusées sont rejetées une par une, les autres écrites.",
   })
   importerStock(
     @Param('structureId') structureId: string,

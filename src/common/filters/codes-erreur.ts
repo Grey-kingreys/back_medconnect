@@ -106,7 +106,7 @@ export const CODES_ERREUR = [
   'FOURNISSEUR_EXISTANT',
   // Date de péremption déjà passée à la réception (400), lignes dans `details`.
   'DATE_PEREMPTION_PASSEE',
-  // Import Excel d'un inventaire indisponible tant que l'inventaire par lot n'existe pas (409).
+  // Import Excel d'un inventaire indisponible (409, PB14c) ; plus renvoyé depuis PB15c, gardé au catalogue (D542).
   'IMPORT_INVENTAIRE_INDISPONIBLE',
   // Anomalie déjà traitée : un traitement ne se fait qu'une fois (409).
   'ANOMALIE_DEJA_TRAITEE',

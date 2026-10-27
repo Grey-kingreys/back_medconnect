@@ -50,6 +50,12 @@ import {
 
 import { NotificationsService } from 'src/notifications/notifications.service';
 import { ReceptionsService } from './receptions/receptions.service';
+import {
+  InventairesService,
+  type LigneInventaireAEnregistrer,
+  type RefusLigneInventaire,
+} from './inventaires/inventaires.service';
+import { normaliserNumeroLot } from './domaine/inventaire';
 
 export { MIME_XLSX } from './import-excel';
 
@@ -98,8 +104,15 @@ export const MESSAGE_MEDICAMENT_UTILISE =
 export function messageStockLotNegatif(solde: number): string {
   return `Ce lot n'a que ${solde} unité(s) en stock : la correction ne peut pas le rendre négatif.`;
 }
-export const MESSAGE_IMPORT_INVENTAIRE_INDISPONIBLE =
-  "L'import d'un inventaire depuis un fichier Excel n'est pas encore disponible avec le suivi des lots. Pour enregistrer des médicaments reçus, choisissez « Livraison » ; pour corriger une quantité, ouvrez la fiche du médicament.";
+export const MESSAGE_IMPORT_INVENTAIRE_INTERDIT =
+  "Vous n'avez pas le droit d'enregistrer un inventaire dans cette pharmacie. Demandez au titulaire de vous donner ce droit.";
+export function messageAnomaliesImportInventaire(nombre: number): string {
+  return nombre === 1
+    ? '1 écart dépasse la tolérance : il est signalé dans les anomalies.'
+    : `${nombre} écarts dépassent la tolérance : ils sont signalés dans les anomalies.`;
+}
+const MESSAGE_IMPORT_INVENTAIRE_DATE_REQUISE =
+  'Ces boîtes ne correspondent à aucun lot en stock : indiquez leur date de péremption (AAAA-MM-JJ) ou « sans péremption ».';
 export const MESSAGE_IMPORT_LIVRAISON_INTERDIT =
   "Vous n'avez pas le droit d'enregistrer une livraison dans cette pharmacie. Demandez au titulaire de vous donner ce droit.";
 export function messageAlerteImportLivraison(nombre: number): string {
@@ -114,6 +127,7 @@ const OPTIONS_TRANSACTION_IMPORT = { maxWait: 10_000, timeout: 60_000 };
 type ColonneImport =
   | 'nom'
   | 'quantite'
+  | 'unites'
   | 'prix'
   | 'date'
   | 'lot'
@@ -122,7 +136,7 @@ type ColonneImport =
 
 /** Colonnes de la feuille « Stock ». */
 const COLONNES_IMPORT_STOCK: ColonnesImport<ColonneImport> = {
-  toutes: ['nom', 'quantite', 'prix', 'date', 'lot', 'cout', 'notes'],
+  toutes: ['nom', 'quantite', 'unites', 'prix', 'date', 'lot', 'cout', 'notes'],
   // Titres des modèles et des logiciels de pharmacie courants (minuscules, sans accents ni espaces)
   reconnaitre: (titre) => {
     if (
@@ -149,6 +163,9 @@ const COLONNES_IMPORT_STOCK: ColonnesImport<ColonneImport> = {
         ['qty', 'qt', 'stock', 'stockactuel', 'enstock'].includes(titre))
     ) {
       return 'quantite';
+    }
+    if (titre.startsWith('unite') || ['vrac', 'detail'].includes(titre)) {
+      return 'unites';
     }
     if (
       titre.startsWith('cout') ||
@@ -207,6 +224,7 @@ const COLONNES_IMPORT_STOCK: ColonnesImport<ColonneImport> = {
   libelles: {
     nom: 'Médicament',
     quantite: 'Quantité',
+    unites: 'Unités en plus',
     prix: 'Prix',
     date: "Date d'expiration",
     lot: 'Lot',
@@ -224,6 +242,7 @@ export class PharmacieService {
     private readonly mouvementsStock: MouvementsStockService,
     private readonly permissions: PermissionsService,
     private readonly receptions: ReceptionsService,
+    private readonly inventaires: InventairesService,
   ) {}
 
   // ─── Catalogue Global (ADMIN/SUPER_ADMIN) ─────────────────────
@@ -915,6 +934,7 @@ export class PharmacieService {
   async getModeleImportStock(
     structureId: string,
     adminUserId: string,
+    mode: ModeImportStock = 'livraison',
   ): Promise<Buffer> {
     await this.accesPharmacie.verifier(structureId, adminUserId);
 
@@ -925,6 +945,43 @@ export class PharmacieService {
 
     const workbook = new Workbook();
     const feuille = workbook.addWorksheet('Stock');
+    if (mode === 'inventaire') {
+      feuille.columns = [
+        { header: 'Médicament', key: 'nom', width: 40 },
+        { header: 'Quantité comptée (boîtes)', key: 'quantite', width: 26 },
+        {
+          header: 'Unités en plus (boîte entamée)',
+          key: 'unites',
+          width: 30,
+        },
+        { header: 'Lot', key: 'lot', width: 16 },
+        { header: "Date d'expiration (AAAA-MM-JJ)", key: 'date', width: 32 },
+      ];
+      feuille.getRow(1).font = { bold: true };
+      const ligneInventaire = feuille.addRow({
+        nom: exemple?.nom ?? 'Paracétamol 500 mg',
+        quantite: 12,
+        unites: 7,
+        lot: 'A2417',
+        date: new Date(Date.UTC(2027, 11, 31)),
+      });
+      ligneInventaire.getCell('date').numFmt = 'yyyy-mm-dd';
+
+      const aideInventaire = workbook.addWorksheet("Mode d'emploi");
+      aideInventaire.getColumn(1).width = 110;
+      [
+        'Remplissez la feuille « Stock » : une ligne par lot compté, à partir de la ligne 2. Ne modifiez pas les titres de la ligne 1.',
+        "Écrivez le nom du médicament tel qu'il apparaît dans le catalogue MedConnecte (les majuscules et les accents ne comptent pas).",
+        "Quantité comptée : le nombre de boîtes entières trouvées en rayon (0 si aucune). Unités en plus : les comprimés, sachets ou ampoules d'une boîte entamée (case vide : 0).",
+        "Au moment d'envoyer le fichier, choisissez « Inventaire » : la quantité comptée remplace le stock enregistré du lot. L'écart est enregistré ; au-delà de la tolérance du médicament, il est signalé au titulaire.",
+        'Si un médicament a plusieurs lots en stock, faites une ligne par lot et indiquez le numéro de lot ou la date de péremption inscrite sur la boîte.',
+        "Des boîtes d'un lot qui n'est pas encore enregistré sont ajoutées au stock : indiquez alors leur date de péremption (AAAA-MM-JJ), ou « sans péremption ».",
+        'Saisissez le comptage sans vendre entre-temps les médicaments comptés : une vente faite après le comptage apparaîtrait comme un écart.',
+        "Un même fichier peut contenir jusqu'à 1000 lignes. Remplacez la ligne d'exemple par vos propres comptages.",
+      ].forEach((texte) => aideInventaire.addRow([texte]));
+
+      return Buffer.from(await workbook.xlsx.writeBuffer());
+    }
     feuille.columns = [
       { header: 'Médicament', key: 'nom', width: 40 },
       { header: 'Quantité (boîtes)', key: 'quantite', width: 16 },
@@ -972,7 +1029,40 @@ export class PharmacieService {
     await this.accesPharmacie.verifier(structureId, adminUserId);
     await this.verifierModeImport(adminUserId, mode);
     const jour = jourConakry(new Date());
-    const analyse = await this.analyserImportStock(fichier, jour);
+    const analyse = await this.analyserImportStock(fichier, jour, mode);
+
+    if (mode === 'inventaire') {
+      const acceptees = analyse.lignes.filter((l) => l.statut === 'acceptee');
+      const ficheDe = await this.lireFichesImport(
+        this.prisma,
+        structureId,
+        acceptees,
+      );
+      const avecFiche = acceptees.filter((l) =>
+        ficheDe.has(l.medicamentId as string),
+      );
+      const simule =
+        avecFiche.length === 0
+          ? { lignes: [], refusees: [] }
+          : await this.inventaires.simuler(
+              this.prisma,
+              structureId,
+              this.lignesInventaire(avecFiche, ficheDe),
+              jour,
+            );
+      const rapport = this.rapportInventaire(
+        analyse,
+        avecFiche,
+        simule.lignes,
+        simule.refusees,
+      );
+      return {
+        data: { ...rapport, mode },
+        message: this.messageImportStock(rapport, false),
+        success: true,
+      };
+    }
+
     const enStock = await this.lireQuantitesEnStock(
       this.prisma,
       structureId,
@@ -988,21 +1078,183 @@ export class PharmacieService {
     };
   }
 
-  /** Inventaire refusé jusqu'à PB15 ; livraison réservée à reception:write. */
+  /** Inventaire réservé à inventaire:write, livraison à reception:write. */
   private async verifierModeImport(
     userId: string,
     mode: ModeImportStock,
   ): Promise<void> {
-    if (mode === 'inventaire') {
-      throw new ConflictException({
-        message: MESSAGE_IMPORT_INVENTAIRE_INDISPONIBLE,
-        code: 'IMPORT_INVENTAIRE_INDISPONIBLE',
-      });
-    }
     const permissions = await this.permissions.getUserPermissions(userId);
+    if (mode === 'inventaire') {
+      if (!permissions.includes(PERMISSIONS.INVENTAIRE_WRITE)) {
+        throw new ForbiddenException(MESSAGE_IMPORT_INVENTAIRE_INTERDIT);
+      }
+      return;
+    }
     if (!permissions.includes(PERMISSIONS.RECEPTION_WRITE)) {
       throw new ForbiddenException(MESSAGE_IMPORT_LIVRAISON_INTERDIT);
     }
+  }
+
+  /** Fiche de stock (identifiant) de chaque médicament des lignes. */
+  private async lireFichesImport(
+    client: Pick<Prisma.TransactionClient, 'stockMedicament'>,
+    structureId: string,
+    lignes: LigneImportStock[],
+  ): Promise<Map<string, string>> {
+    const fiches = await client.stockMedicament.findMany({
+      where: {
+        structureId,
+        medicamentId: { in: lignes.map((l) => l.medicamentId as string) },
+      },
+      select: { id: true, medicamentId: true },
+    });
+    return new Map(fiches.map((f) => [f.medicamentId, f.id]));
+  }
+
+  /** Lignes du cœur de l'inventaire, dans l'ordre des lignes reçues. */
+  private lignesInventaire(
+    acceptees: LigneImportStock[],
+    ficheDe: Map<string, string>,
+  ): LigneInventaireAEnregistrer[] {
+    return acceptees.map((l) => ({
+      stockId: ficheDe.get(l.medicamentId as string) as string,
+      lotId: null,
+      numeroLot: l.numeroLot ?? null,
+      dateExpiration: l.dateExpiration
+        ? dateVersJour(new Date(l.dateExpiration))
+        : null,
+      sansPeremption: l.sansPeremption === true,
+      quantiteComptee: null,
+      nombreBoites: l.quantite as number,
+      unitesEnPlus: l.unitesEnPlus ?? 0,
+    }));
+  }
+
+  private raisonRefusInventaire(r: RefusLigneInventaire): string {
+    switch (r.code) {
+      case 'LOT_REQUIS': {
+        const lots = r.lots ?? [];
+        const liste =
+          lots
+            .slice(0, 5)
+            .map(
+              (lot) =>
+                `${lot.numeroLot ?? 'sans numéro'} (${
+                  lot.dateExpiration
+                    ? `péremption ${lot.dateExpiration}`
+                    : 'sans péremption'
+                })`,
+            )
+            .join(', ') + (lots.length > 5 ? ', ...' : '');
+        return `Ce médicament a plusieurs lots en stock (${liste}) : indiquez le lot ou la date de péremption, une ligne par lot.`;
+      }
+      case 'DATE_PEREMPTION_REQUISE':
+        return MESSAGE_IMPORT_INVENTAIRE_DATE_REQUISE;
+      case 'LOT_INCONNU_VIDE':
+        return "Ce lot n'est pas dans votre stock et la quantité comptée est 0 : rien à enregistrer. Retirez la ligne ou vérifiez le numéro de lot.";
+      case 'LOT_EN_DOUBLE':
+        return 'Ce lot est déjà compté sur une autre ligne du fichier.';
+      case 'QUANTITE_TROP_GRANDE':
+        return 'La quantité comptée est trop grande. Vérifiez la quantité.';
+      default:
+        return 'Ce médicament est introuvable dans votre stock.';
+    }
+  }
+
+  /** Médicament absent du stock : fiche créée à l'import si la quantité comptée est positive. */
+  private evaluerAbsent(l: LigneImportStock): LigneImportStock {
+    const comptee = (l.quantite ?? 0) + (l.unitesEnPlus ?? 0);
+    if (comptee === 0) {
+      return {
+        ligne: l.ligne,
+        nom: l.nom,
+        statut: 'rejetee',
+        raison:
+          "Ce médicament n'est pas dans votre stock et la quantité comptée est 0 : rien à enregistrer. Retirez la ligne.",
+      };
+    }
+    if (!l.dateExpiration && l.sansPeremption !== true) {
+      return {
+        ligne: l.ligne,
+        nom: l.nom,
+        statut: 'rejetee',
+        raison: MESSAGE_IMPORT_INVENTAIRE_DATE_REQUISE,
+      };
+    }
+    return {
+      ...l,
+      nouveauLot: true,
+      quantiteAvant: 0,
+      quantiteApres: comptee,
+      quantiteComptee: comptee,
+      quantiteTheorique: 0,
+      ecart: comptee,
+      sousTolerance: false,
+    };
+  }
+
+  /**
+   * Rapport d'un import d'inventaire : la k-ième ligne retenue correspond à
+   * l'index k du cœur. Les médicaments absents du stock et non retenus sont
+   * évalués par `evaluerAbsent`.
+   */
+  private rapportInventaire(
+    analyse: RapportImportStock,
+    retenues: LigneImportStock[],
+    evaluees: {
+      index: number;
+      lotId: string | null;
+      nouveauLot: boolean;
+      soldeAvant: number;
+      quantiteTheorique: number;
+      quantiteComptee: number;
+      ecart: number;
+      sousTolerance: boolean;
+    }[],
+    refusees: RefusLigneInventaire[],
+  ): RapportImportStock {
+    const indexDe = new Map(retenues.map((l, i) => [l.ligne, i]));
+    const evalueeDe = new Map(evaluees.map((e) => [e.index, e]));
+    const refusDe = new Map(refusees.map((r) => [r.index, r]));
+    const lignes = analyse.lignes.map((l): LigneImportStock => {
+      if (l.statut !== 'acceptee') return l;
+      const index = indexDe.get(l.ligne);
+      if (index === undefined) {
+        // Médicament absent du stock et non retenu (règle pure, identique à l'import)
+        return this.evaluerAbsent(l);
+      }
+      const refus = refusDe.get(index);
+      const e = evalueeDe.get(index);
+      if (refus || !e) {
+        return {
+          ligne: l.ligne,
+          nom: l.nom,
+          statut: 'rejetee',
+          raison: refus
+            ? this.raisonRefusInventaire(refus)
+            : 'Ce médicament est introuvable dans votre stock.',
+        };
+      }
+      return {
+        ...l,
+        lotId: e.lotId ?? undefined,
+        nouveauLot: e.nouveauLot,
+        quantiteAvant: e.soldeAvant,
+        quantiteApres: e.quantiteComptee,
+        quantiteComptee: e.quantiteComptee,
+        quantiteTheorique: e.quantiteTheorique,
+        ecart: e.ecart,
+        sousTolerance: e.sousTolerance,
+      };
+    });
+    const acceptees = lignes.filter((l) => l.statut === 'acceptee').length;
+    return {
+      totalLignes: lignes.length,
+      acceptees,
+      rejetees: lignes.length - acceptees,
+      lignes,
+      colonnes: analyse.colonnes,
+    };
   }
 
   /**
@@ -1018,7 +1270,90 @@ export class PharmacieService {
     const acces = await this.accesPharmacie.verifier(structureId, adminUserId);
     await this.verifierModeImport(adminUserId, mode);
     const jour = jourConakry(new Date());
-    const analyse = await this.analyserImportStock(fichier, jour);
+    const analyse = await this.analyserImportStock(fichier, jour, mode);
+
+    if (mode === 'inventaire') {
+      const { rapport, inventaireId, nombreAnomalies } =
+        await this.prisma.$transaction(async (tx) => {
+          const acceptees = analyse.lignes.filter(
+            (l) => l.statut === 'acceptee',
+          );
+          let ficheDe = await this.lireFichesImport(tx, structureId, acceptees);
+
+          // Médicaments absents du stock : fiche créée à quantité nulle (D493), si le comptage est positif
+          const absents = acceptees.filter(
+            (l) => !ficheDe.has(l.medicamentId as string),
+          );
+          const aCreer = absents.filter(
+            (l) => this.evaluerAbsent(l).statut === 'acceptee',
+          );
+          if (aCreer.length > 0) {
+            await tx.stockMedicament.createMany({
+              data: aCreer.map((l) => ({
+                medicamentId: l.medicamentId as string,
+                structureId,
+              })),
+              skipDuplicates: true,
+            });
+            ficheDe = await this.lireFichesImport(tx, structureId, acceptees);
+          }
+          const rejetesAbsents = new Set(
+            absents
+              .filter((l) => this.evaluerAbsent(l).statut === 'rejetee')
+              .map((l) => l.ligne),
+          );
+          const retenues = acceptees.filter(
+            (l) =>
+              !rejetesAbsents.has(l.ligne) &&
+              ficheDe.has(l.medicamentId as string),
+          );
+          if (retenues.length === 0) {
+            return {
+              rapport: this.rapportInventaire(analyse, [], [], []),
+              inventaireId: null,
+              nombreAnomalies: 0,
+            };
+          }
+
+          const ecrit = await this.inventaires.enregistrerDansTransaction(
+            tx,
+            acces,
+            {
+              commentaire: 'Import Excel',
+              lignes: this.lignesInventaire(retenues, ficheDe),
+            },
+            null,
+            { rejeterLignes: true },
+          );
+          // Les valeurs du cœur, sous verrou, font foi
+          return {
+            rapport: this.rapportInventaire(
+              analyse,
+              retenues,
+              ecrit.lignes,
+              ecrit.refusees,
+            ),
+            inventaireId: ecrit.inventaireId,
+            nombreAnomalies: ecrit.anomalies.length,
+          };
+        }, OPTIONS_TRANSACTION_IMPORT);
+
+      return {
+        data: {
+          ...rapport,
+          mode,
+          importees: rapport.acceptees,
+          receptionId: null,
+          inventaireId,
+        },
+        message:
+          this.messageImportStock(rapport, true) +
+          (nombreAnomalies > 0
+            ? ` ${messageAnomaliesImportInventaire(nombreAnomalies)}`
+            : ''),
+        success: true,
+      };
+    }
 
     // Lecture du stock, calcul et réception dans la même transaction
     const { rapport, receptionId, enStock } = await this.prisma.$transaction(
@@ -1132,7 +1467,13 @@ export class PharmacieService {
     const peutVoirMarge = await this.peutVoirMarge(adminUserId);
     return {
       data: masquerCouts(
-        { ...rapport, mode, importees: aEcrire.length, receptionId },
+        {
+          ...rapport,
+          mode,
+          importees: aEcrire.length,
+          receptionId,
+          inventaireId: null,
+        },
         peutVoirMarge,
       ),
       message: this.messageImportStock(rapport, true),
@@ -1144,7 +1485,9 @@ export class PharmacieService {
   private async analyserImportStock(
     fichier: FichierImport | undefined,
     jour: string,
+    mode: ModeImportStock,
   ): Promise<RapportImportStock> {
+    const inventaire = mode === 'inventaire';
     const feuille = await ouvrirFeuilleImport(fichier, 'Stock');
     const { brutes, colonnes } = lireLignesImport(
       feuille,
@@ -1189,17 +1532,35 @@ export class PharmacieService {
           );
         } else {
           med = candidats[0];
-          const premiere = dejaVus.get(med.id);
-          if (premiere !== undefined) {
-            raisons.push(`Médicament déjà présent à la ligne ${premiere}.`);
-          } else {
-            dejaVus.set(med.id, numero);
+          if (!inventaire) {
+            const premiere = dejaVus.get(med.id);
+            if (premiere !== undefined) {
+              raisons.push(`Médicament déjà présent à la ligne ${premiere}.`);
+            } else {
+              dejaVus.set(med.id, numero);
+            }
           }
         }
       }
+      // Inventaire : le doublon se juge après la lecture du lot et de la date
+      const nombreRaisonsNom = raisons.length;
 
       const quantite = this.lireNombre(valeurs.quantite);
-      if (quantite === undefined) {
+      if (inventaire) {
+        if (quantite === undefined) {
+          raisons.push(
+            'Indiquez le nombre de boîtes comptées (un nombre entier, 0 ou plus).',
+          );
+        } else if (
+          !Number.isInteger(quantite) ||
+          quantite < 0 ||
+          quantite > 1_000_000
+        ) {
+          raisons.push(
+            'Le nombre de boîtes comptées doit être un nombre entier, 0 ou plus (exemple : 12).',
+          );
+        }
+      } else if (quantite === undefined) {
         raisons.push(
           'Indiquez la quantité reçue (un nombre entier de boîtes, 1 ou plus).',
         );
@@ -1213,7 +1574,25 @@ export class PharmacieService {
         );
       }
 
-      let prixUnitaire = this.lireNombre(valeurs.prix);
+      let unitesEnPlus = 0;
+      if (inventaire) {
+        const unites = this.lireNombre(valeurs.unites);
+        if (unites !== undefined) {
+          if (
+            !Number.isInteger(unites) ||
+            unites < 0 ||
+            unites > 1_000_000_000
+          ) {
+            raisons.push(
+              "Les unités en plus doivent être un nombre entier, 0 ou plus (exemple : 7 comprimés d'une boîte entamée).",
+            );
+          } else {
+            unitesEnPlus = unites;
+          }
+        }
+      }
+
+      let prixUnitaire = inventaire ? undefined : this.lireNombre(valeurs.prix);
       if (
         prixUnitaire !== undefined &&
         (!Number.isFinite(prixUnitaire) || prixUnitaire < 0)
@@ -1237,7 +1616,14 @@ export class PharmacieService {
       const dateExpiration = sansPeremption
         ? undefined
         : this.lireDate(valeurs.date);
-      if (!sansPeremption) {
+      if (inventaire) {
+        // Date facultative, une date passée est acceptée (le stock existe déjà)
+        if (dateExpiration === false) {
+          raisons.push(
+            "La date d'expiration doit être une date valide au format AAAA-MM-JJ (exemple : 2027-12-31).",
+          );
+        }
+      } else if (!sansPeremption) {
         if (dateExpiration === undefined) {
           raisons.push(
             "Indiquez la date de péremption (AAAA-MM-JJ), ou écrivez « sans péremption » si ce médicament n'en a pas.",
@@ -1264,7 +1650,32 @@ export class PharmacieService {
         raisons.push('Le numéro de lot est trop long (64 caractères au plus).');
       }
 
-      let coutAchatBoite = this.lireNombre(valeurs.cout);
+      if (inventaire && med) {
+        const cle = numeroLot
+          ? normaliserNumeroLot(numeroLot)
+          : typeof dateExpiration === 'string'
+            ? dateVersJour(new Date(dateExpiration))
+            : sansPeremption
+              ? 'sansperemption'
+              : '';
+        const cleLigne = `${med.id}|${cle}`;
+        const premiere = dejaVus.get(cleLigne);
+        if (premiere !== undefined) {
+          raisons.splice(
+            nombreRaisonsNom,
+            0,
+            cle === ''
+              ? `Médicament déjà présent à la ligne ${premiere}.`
+              : `Ce lot de ce médicament est déjà compté à la ligne ${premiere}.`,
+          );
+        } else {
+          dejaVus.set(cleLigne, numero);
+        }
+      }
+
+      let coutAchatBoite = inventaire
+        ? undefined
+        : this.lireNombre(valeurs.cout);
       if (
         coutAchatBoite !== undefined &&
         (!Number.isFinite(coutAchatBoite) || coutAchatBoite < 0)
@@ -1291,7 +1702,7 @@ export class PharmacieService {
       }
 
       const notes =
-        valeurs.notes === null
+        inventaire || valeurs.notes === null
           ? ''
           : (valeurs.notes instanceof Date
               ? valeurs.notes.toISOString().slice(0, 10)
@@ -1311,6 +1722,7 @@ export class PharmacieService {
         dateExpiration: dateExpiration || undefined,
         notes: notes || undefined,
         sansPeremption,
+        ...(inventaire ? { unitesEnPlus } : {}),
         ...(numeroLot ? { numeroLot } : {}),
         ...(coutAchatBoite !== undefined ? { coutAchatBoite } : {}),
       };

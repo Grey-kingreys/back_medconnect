@@ -8,6 +8,7 @@ import {
 } from 'src/pharmacie/fiche-produit.service';
 import { cheminsCout } from 'src/pharmacie/masquer-couts';
 import { PharmacieService } from 'src/pharmacie/pharmacie.service';
+import { InventairesService } from 'src/pharmacie/inventaires/inventaires.service';
 import { ReceptionsService } from 'src/pharmacie/receptions/receptions.service';
 import { MouvementsStockService } from 'src/pharmacie/stock/mouvements-stock.service';
 import type { PermissionsService } from 'src/common/rbac/permissions.service';
@@ -75,6 +76,7 @@ describe('Fiche produit étendue sur base de test (PB06)', () => {
         new MouvementsStockService(),
         permissionsFactices,
       ),
+      new InventairesService(prisma, acces, new MouvementsStockService()),
     );
   });
 

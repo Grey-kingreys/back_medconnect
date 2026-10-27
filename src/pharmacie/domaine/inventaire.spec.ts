@@ -1,5 +1,6 @@
 import {
   ciblerLot,
+  lotsEnStockFefo,
   planifierInventaireFiche,
   type LigneCiblee,
   type SaisieCible,
@@ -138,10 +139,10 @@ describe("Règles de l'inventaire par lot", () => {
       type: 'LOT',
       lotId: 'l3',
     });
+    // D600 : la date désigne aussi un lot épuisé
     expect(ciblerLot(saisie({ dateExpiration: '2027-03-31' }), lots)).toEqual({
-      type: 'NOUVEAU',
-      numeroLot: null,
-      dateExpiration: '2027-03-31',
+      type: 'LOT',
+      lotId: 'l4',
     });
     expect(ciblerLot(saisie({ dateExpiration: '2020-01-31' }), lots)).toEqual({
       type: 'NOUVEAU',
@@ -157,15 +158,74 @@ describe("Règles de l'inventaire par lot", () => {
     expect(
       ciblerLot(saisie(), [lot('l1', 5, '2027-01-31'), lot('l2', 2, null)]),
     ).toEqual({ type: 'REFUS', code: 'LOT_REQUIS' });
+    const epuises = [lot('l1', 0, null), lot('l2', -2, '2027-01-31')];
+    for (const lots of [[], epuises]) {
+      expect(ciblerLot(saisie({ quantiteNulle: true }), lots)).toEqual({
+        type: 'SANS_LOT',
+      });
+      expect(ciblerLot(saisie(), lots)).toEqual({
+        type: 'REFUS',
+        code: 'DATE_PEREMPTION_REQUISE',
+      });
+    }
+  });
+
+  it('D600 : lot unique de la fiche ciblé même épuisé ou négatif', () => {
+    for (const solde of [0, -3]) {
+      const lots = [lot('l1', solde, '2027-01-31')];
+      expect(ciblerLot(saisie(), lots)).toEqual({ type: 'LOT', lotId: 'l1' });
+      expect(ciblerLot(saisie({ quantiteNulle: true }), lots)).toEqual({
+        type: 'LOT',
+        lotId: 'l1',
+      });
+    }
+    // Un numéro inconnu reste un nouveau lot
     expect(
-      ciblerLot(saisie({ quantiteNulle: true }), [lot('l1', 0, null)]),
+      ciblerLot(saisie({ numeroLot: 'Z99', dateExpiration: '2027-05-31' }), [
+        lot('l1', -3, '2027-01-31', 'A1'),
+      ]),
     ).toEqual({
-      type: 'SANS_LOT',
+      type: 'NOUVEAU',
+      numeroLot: 'Z99',
+      dateExpiration: '2027-05-31',
     });
-    expect(ciblerLot(saisie(), [lot('l1', 0, null)])).toEqual({
-      type: 'REFUS',
-      code: 'DATE_PEREMPTION_REQUISE',
+  });
+
+  it('D600 : la date désigne un lot épuisé parmi plusieurs', () => {
+    const lots = [
+      lot('l1', 5, '2027-01-31'),
+      lot('l2', 0, '2027-02-28'),
+      lot('l3', -1, '2027-03-31'),
+    ];
+    expect(ciblerLot(saisie({ dateExpiration: '2027-02-28' }), lots)).toEqual({
+      type: 'LOT',
+      lotId: 'l2',
     });
+    expect(ciblerLot(saisie({ dateExpiration: '2027-03-31' }), lots)).toEqual({
+      type: 'LOT',
+      lotId: 'l3',
+    });
+    // Sans date, plusieurs lots dont un seul en stock : celui en stock
+    expect(ciblerLot(saisie(), lots)).toEqual({ type: 'LOT', lotId: 'l1' });
+
+    // À date égale, le seul lot en stock l'emporte ; sinon LOT_REQUIS
+    const memeDate = [lot('l1', 5, '2027-01-31'), lot('l2', 0, '2027-01-31')];
+    expect(
+      ciblerLot(saisie({ dateExpiration: '2027-01-31' }), memeDate),
+    ).toEqual({ type: 'LOT', lotId: 'l1' });
+    const epuisesMemeDate = [
+      lot('l1', 0, '2027-01-31'),
+      lot('l2', -1, '2027-01-31'),
+    ];
+    expect(
+      ciblerLot(saisie({ dateExpiration: '2027-01-31' }), epuisesMemeDate),
+    ).toEqual({ type: 'REFUS', code: 'LOT_REQUIS' });
+    // La liste d'un LOT_REQUIS n'est jamais vide
+    expect(lotsEnStockFefo(epuisesMemeDate).map((l) => l.id)).toEqual([
+      'l1',
+      'l2',
+    ]);
+    expect(lotsEnStockFefo(memeDate).map((l) => l.id)).toEqual(['l1']);
   });
 
   it('écart et tolérance sous et au-dessus (CA8)', () => {

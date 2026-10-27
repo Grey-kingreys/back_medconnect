@@ -34,14 +34,19 @@ export type CibleLot =
   | { type: 'SANS_LOT' }
   | { type: 'REFUS'; code: CodeRefusCible };
 
-/** Lots à solde positif, en ordre FEFO (détails d'un LOT_REQUIS). */
+/**
+ * Lots à solde positif, en ordre FEFO (détails d'un LOT_REQUIS) ; tous les lots si
+ * aucun n'est en stock (lots épuisés de même date, D600), pour que la liste ne soit
+ * jamais vide.
+ */
 export function lotsEnStockFefo(lots: readonly LotCandidat[]): LotCandidat[] {
-  return lots.filter((l) => l.solde > 0).sort(comparerFefo);
+  const enStock = lots.filter((l) => l.solde > 0);
+  return (enStock.length > 0 ? enStock : [...lots]).sort(comparerFefo);
 }
 
 /**
- * Lot visé par une ligne d'inventaire (D589). `lots` = tous les lots de la fiche
- * au point de vente, solde nul compris.
+ * Lot visé par une ligne d'inventaire (D589, D600). `lots` = tous les lots de la
+ * fiche au point de vente, solde nul ou négatif compris.
  */
 export function ciblerLot(
   s: SaisieCible,
@@ -73,15 +78,20 @@ export function ciblerLot(
       return unique(memes.filter((l) => l.dateExpiration === dv)) ?? requis;
     }
   } else if (dateViseeConnue) {
-    // 3. Date de péremption
-    const enStock = lots.filter((l) => l.solde > 0 && l.dateExpiration === dv);
-    if (enStock.length === 1) return { type: 'LOT', lotId: enStock[0].id };
-    if (enStock.length > 1) return requis;
+    // 3. Date de péremption, lot épuisé compris (D600) ; à date égale, le seul
+    // lot à solde positif l'emporte
+    const memeDate = lots.filter((l) => l.dateExpiration === dv);
+    if (memeDate.length === 1) return { type: 'LOT', lotId: memeDate[0].id };
+    if (memeDate.length > 1) {
+      return unique(memeDate.filter((l) => l.solde > 0)) ?? requis;
+    }
   } else {
     // 4. Ni lot, ni numéro, ni date
     const enStock = lots.filter((l) => l.solde > 0);
     if (enStock.length === 1) return { type: 'LOT', lotId: enStock[0].id };
     if (enStock.length > 1) return requis;
+    // Lot unique de la fiche, même épuisé ou négatif (D600)
+    if (lots.length === 1) return { type: 'LOT', lotId: lots[0].id };
     return s.quantiteNulle
       ? { type: 'SANS_LOT' }
       : { type: 'REFUS', code: 'DATE_PEREMPTION_REQUISE' };

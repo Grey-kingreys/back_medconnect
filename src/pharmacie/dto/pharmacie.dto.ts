@@ -187,7 +187,19 @@ export class OptionsImportStockDto {
     enum: MODES_IMPORT_STOCK,
     default: 'inventaire',
     description:
-      "livraison : la quantité du fichier (en boîtes) s'ajoute au stock par une réception, un lot par ligne. inventaire : refusé pour l'instant (409 IMPORT_INVENTAIRE_INDISPONIBLE).",
+      "inventaire (défaut, inventaire:write) : la quantité comptée remplace le stock du lot, écart enregistré, anomalie au-delà de la tolérance. livraison (reception:write) : la quantité du fichier (en boîtes) s'ajoute au stock par une réception, un lot par ligne.",
+  })
+  @IsOptional()
+  @IsIn(MODES_IMPORT_STOCK)
+  mode?: ModeImportStock;
+}
+
+/** Paramètre de la route du modèle Excel. */
+export class ModeleImportStockDto {
+  @ApiPropertyOptional({
+    enum: MODES_IMPORT_STOCK,
+    default: 'livraison',
+    description: "Modèle de livraison (défaut) ou d'inventaire",
   })
   @IsOptional()
   @IsIn(MODES_IMPORT_STOCK)
@@ -221,10 +233,22 @@ export interface LigneImportStock {
   unitesRecues?: number;
   /** Lot créé par l'import, lignes acceptées seulement. */
   lotId?: string;
-  /** Stock calculé en unités avant l'import (0 si le médicament n'y est pas), lignes acceptées seulement. */
+  /** Livraison : stock calculé en unités avant l'import ; inventaire : stock du lot avant le comptage (0 pour un nouveau lot). Lignes acceptées seulement. */
   quantiteAvant?: number;
-  /** Stock calculé en unités après l'import, lignes acceptées seulement. */
+  /** Livraison : stock calculé après l'import ; inventaire : quantité comptée. Lignes acceptées seulement. */
   quantiteApres?: number;
+  /** Inventaire : unités d'une boîte entamée (colonne « Unités en plus »). */
+  unitesEnPlus?: number;
+  /** Inventaire : unités comptées (boîtes x unités par boîte du lot + unités en plus). */
+  quantiteComptee?: number;
+  /** Inventaire : stock attendu du lot (stock moins les ventes faites sans stock rattachées). */
+  quantiteTheorique?: number;
+  /** Inventaire : quantité comptée moins quantité théorique. */
+  ecart?: number;
+  /** Inventaire : écart de la fiche dans la tolérance du médicament. */
+  sousTolerance?: boolean;
+  /** Inventaire : boîtes d'un lot qui n'était pas enregistré (lot créé). */
+  nouveauLot?: boolean;
 }
 
 /** Colonnes du fichier telles que l'import les a comprises, montrées dans l'aperçu. */
@@ -254,6 +278,7 @@ export type RapportImportStock = RapportImport<LigneImportStock>;
 export interface ResultatImportStock extends RapportImportStock {
   importees: number;
   receptionId: string | null;
+  inventaireId: string | null;
 }
 
 // Import Excel du catalogue des médicaments

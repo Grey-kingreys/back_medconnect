@@ -4,6 +4,7 @@
 // services ne modifient que le bloc « construction des services » (D462).
 import { NotificationsService } from 'src/notifications/notifications.service';
 import { PharmacieService } from 'src/pharmacie/pharmacie.service';
+import { InventairesService } from 'src/pharmacie/inventaires/inventaires.service';
 import { ReceptionsService } from 'src/pharmacie/receptions/receptions.service';
 import { AccesPharmacieService } from 'src/pharmacie/acces-pharmacie.service';
 import { SessionsCaisseService } from 'src/pharmacie/caisse/sessions-caisse.service';
@@ -197,6 +198,7 @@ describe('Non-régression des lectures pharmacie (PB02)', () => {
         new MouvementsStockService(),
         permissionsFactices,
       ),
+      new InventairesService(prisma, acces, new MouvementsStockService()),
     );
     ventes = new VenteService(
       prisma,
