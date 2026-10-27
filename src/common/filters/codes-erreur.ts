@@ -106,6 +106,8 @@ export const CODES_ERREUR = [
   'FOURNISSEUR_EXISTANT',
   // Date de péremption déjà passée à la réception (400), lignes dans `details`.
   'DATE_PEREMPTION_PASSEE',
+  // Import Excel d'un inventaire indisponible tant que l'inventaire par lot n'existe pas (409).
+  'IMPORT_INVENTAIRE_INDISPONIBLE',
 ] as const;
 
 export type CodeErreur = (typeof CODES_ERREUR)[number];

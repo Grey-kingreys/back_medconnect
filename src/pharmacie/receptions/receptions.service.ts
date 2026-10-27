@@ -95,6 +95,8 @@ export interface LigneReceptionAEnregistrer {
   nombreBoites: number | null;
   quantiteUnites: number | null;
   coutAchatBoite: number | null;
+  /** Mise à jour de la fiche demandée par l'import (prix de la boîte, notes) ; jamais par la route. */
+  majFiche?: { prixUnitaire?: number; notes?: string };
 }
 export interface ReceptionAEnregistrer {
   id?: string;
@@ -391,6 +393,22 @@ export class ReceptionsService {
             avant: { archiveLe: fiche.archiveLe.toISOString() },
             apres: { archiveLe: null },
           },
+        },
+      });
+    }
+
+    // 7b. Prix de la boîte et notes demandés par l'import (fiche verrouillée à l'étape 5)
+    for (const ligne of entree.lignes) {
+      const maj = ligne.majFiche;
+      if (!maj) continue;
+      const prixUnitaire = maj.prixUnitaire;
+      const notes = maj.notes;
+      if (prixUnitaire === undefined && !notes) continue;
+      await tx.stockMedicament.update({
+        where: { id: ligne.stockId },
+        data: {
+          ...(prixUnitaire !== undefined ? { prixUnitaire } : {}),
+          ...(notes ? { notes } : {}),
         },
       });
     }

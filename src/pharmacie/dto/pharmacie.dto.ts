@@ -187,7 +187,7 @@ export class OptionsImportStockDto {
     enum: MODES_IMPORT_STOCK,
     default: 'inventaire',
     description:
-      "inventaire : la quantité du fichier remplace la quantité en stock. livraison : elle s'y ajoute.",
+      "livraison : la quantité du fichier (en boîtes) s'ajoute au stock par une réception, un lot par ligne. inventaire : refusé pour l'instant (409 IMPORT_INVENTAIRE_INDISPONIBLE).",
   })
   @IsOptional()
   @IsIn(MODES_IMPORT_STOCK)
@@ -211,9 +211,19 @@ export interface LigneImportStock {
   /** Date ISO 8601. */
   dateExpiration?: string;
   notes?: string;
-  /** Quantité en stock avant l'import (0 si le médicament n'y est pas), lignes acceptées seulement. */
+  /** Numéro de lot inscrit sur la boîte (colonne « Lot »). */
+  numeroLot?: string;
+  /** Coût d'achat d'une boîte en GNF (colonne « Coût d'achat »), retiré sans marge:read. */
+  coutAchatBoite?: number;
+  /** Vrai si la date de péremption est « sans péremption ». */
+  sansPeremption?: boolean;
+  /** Unités minimales reçues (boîtes x unités par boîte de la fiche), lignes acceptées seulement. */
+  unitesRecues?: number;
+  /** Lot créé par l'import, lignes acceptées seulement. */
+  lotId?: string;
+  /** Stock calculé en unités avant l'import (0 si le médicament n'y est pas), lignes acceptées seulement. */
   quantiteAvant?: number;
-  /** Quantité en stock après l'import, selon le mode choisi, lignes acceptées seulement. */
+  /** Stock calculé en unités après l'import, lignes acceptées seulement. */
   quantiteApres?: number;
 }
 
@@ -243,6 +253,7 @@ export type RapportImportStock = RapportImport<LigneImportStock>;
 /** Rapport de l'import, avec le nombre de lignes réellement écrites. */
 export interface ResultatImportStock extends RapportImportStock {
   importees: number;
+  receptionId: string | null;
 }
 
 // Import Excel du catalogue des médicaments

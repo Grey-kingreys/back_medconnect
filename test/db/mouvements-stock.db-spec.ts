@@ -1,5 +1,6 @@
 import { ConflictException, HttpException } from '@nestjs/common';
 import { AccesPharmacieService } from 'src/pharmacie/acces-pharmacie.service';
+import { ReceptionsService } from 'src/pharmacie/receptions/receptions.service';
 import {
   FicheProduitService,
   MESSAGE_FICHE_INTROUVABLE,
@@ -135,6 +136,7 @@ describe('Mouvements de stock et lectures recâblées sur base de test (PB08)', 
       acces,
       mouvements,
       permissions,
+      new ReceptionsService(prisma, acces, mouvements, permissions),
     );
     fiches = new FicheProduitService(prisma, acces, mouvements);
     J = resume.aujourdhui;

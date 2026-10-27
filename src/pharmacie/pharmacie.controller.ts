@@ -343,7 +343,7 @@ export class PharmacieController {
   @ApiOperation({
     summary: "Télécharger le modèle Excel d'import du stock",
     description:
-      "Classeur .xlsx : feuille « Stock » (Médicament, Quantité, Prix unitaire (GNF), Date d'expiration (AAAA-MM-JJ), Notes) avec une ligne d'exemple, et feuille « Mode d'emploi ».",
+      "Classeur .xlsx : feuille « Stock » (Médicament, Quantité (boîtes), Prix de la boîte (GNF), Date d'expiration (AAAA-MM-JJ), Lot, Coût d'achat de la boîte (GNF), Notes) avec une ligne d'exemple, et feuille « Mode d'emploi ».",
   })
   async getModeleImportStock(
     @Param('structureId') structureId: string,
@@ -371,7 +371,7 @@ export class PharmacieController {
   @ApiOperation({
     summary: "Aperçu de l'import Excel du stock",
     description:
-      "Analyse le classeur (champ multipart `fichier`, .xlsx, 2 Mo et 1000 lignes max) sans rien écrire. Champ multipart facultatif `mode` : `inventaire` (défaut, la quantité du fichier remplace le stock) ou `livraison` (elle s'y ajoute) ; toute autre valeur : 400 VALIDATION sur le champ `mode`. Renvoie { totalLignes, acceptees, rejetees, mode, lignes[] }, chaque ligne acceptée portant quantiteAvant et quantiteApres.",
+      "Analyse le classeur (champ multipart `fichier`, .xlsx, 2 Mo et 1000 lignes max) sans rien écrire. Champ multipart `mode` : livraison seulement (reception:write) ; inventaire (défaut) : 409 IMPORT_INVENTAIRE_INDISPONIBLE ; autre valeur : 400 VALIDATION sur mode. Date de péremption obligatoire sauf « sans péremption », jamais passée ; colonnes facultatives Lot et Coût d'achat (par boîte). Chaque ligne acceptée porte quantiteAvant, quantiteApres et unitesRecues (unités, stock calculé). Coûts retirés sans marge:read.",
   })
   apercuImportStock(
     @Param('structureId') structureId: string,
@@ -399,7 +399,7 @@ export class PharmacieController {
   @ApiOperation({
     summary: 'Importer le stock depuis un fichier Excel',
     description:
-      "Refait l'analyse de l'aperçu puis, dans une transaction, relit le stock et écrit les lignes acceptées : en mode inventaire la quantité remplace celle en stock, en mode livraison elle s'y ajoute (incrément atomique). Une case vide (prix, date d'expiration, notes) conserve la valeur enregistrée. Renvoie le rapport + mode + importees.",
+      "Refait l'analyse de l'aperçu puis, dans une transaction, enregistre une réception (un lot par ligne acceptée, coût par unité figé) et rattache les ventes faites sans stock. Un médicament absent du stock y est ajouté ; prix de la boîte et notes mis à jour si la case est remplie. Mode inventaire : 409 IMPORT_INVENTAIRE_INDISPONIBLE. Renvoie le rapport, mode, importees et receptionId.",
   })
   importerStock(
     @Param('structureId') structureId: string,

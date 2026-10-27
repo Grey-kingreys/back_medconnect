@@ -265,7 +265,9 @@ Chemin de l'artefact + preuve (commande lancée, résultat en une ligne). Ou un 
 ## Historique
 
 <!-- une ligne par tentative : AAAA-MM-JJ | tier | résultat | raison si échec -->
+2026-10-27 | spécifié (Sonnet) | PASS | vérificateur Sonnet PASS avec deux lacunes de couverture, comblées par deux tests DB ajoutés (import mixte, cases vides)
 
 ## Validation
 
 <!-- commande relancée par l'orchestrateur | résultat en une ligne | hash du commit -->
+tsc, eslint, npm test, npm run test:db (docker compose exec -T backend) | 0 erreur ; 946 unitaires et 238 test:db verts | voir rapports/PB14c-chef.md et le commit PB14c

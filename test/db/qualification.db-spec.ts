@@ -18,6 +18,7 @@ import {
 } from 'src/pharmacie/fiche-produit.service';
 import { cheminsCout } from 'src/pharmacie/masquer-couts';
 import { PharmacieService } from 'src/pharmacie/pharmacie.service';
+import { ReceptionsService } from 'src/pharmacie/receptions/receptions.service';
 import { verifierStock } from 'src/pharmacie/stock/commandes-stock';
 import { jourVersDate } from 'src/pharmacie/stock/lecture-stock';
 import { MouvementsStockService } from 'src/pharmacie/stock/mouvements-stock.service';
@@ -144,6 +145,7 @@ describe('Qualification d une fiche, sur base de test (PB13)', () => {
       acces,
       mouvements,
       permissions,
+      new ReceptionsService(prisma, acces, mouvements, permissions),
     );
     const pvs = await sql(
       'SELECT "id" FROM "PointDeVente" WHERE "structureId" = $1 AND "ordre" = 1',

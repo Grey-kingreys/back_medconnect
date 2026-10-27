@@ -8,6 +8,7 @@ import {
 } from 'src/pharmacie/fiche-produit.service';
 import { cheminsCout } from 'src/pharmacie/masquer-couts';
 import { PharmacieService } from 'src/pharmacie/pharmacie.service';
+import { ReceptionsService } from 'src/pharmacie/receptions/receptions.service';
 import { MouvementsStockService } from 'src/pharmacie/stock/mouvements-stock.service';
 import type { PermissionsService } from 'src/common/rbac/permissions.service';
 import { NotificationsService } from 'src/notifications/notifications.service';
@@ -68,6 +69,12 @@ describe('Fiche produit étendue sur base de test (PB06)', () => {
       acces,
       new MouvementsStockService(),
       permissionsFactices,
+      new ReceptionsService(
+        prisma,
+        acces,
+        new MouvementsStockService(),
+        permissionsFactices,
+      ),
     );
   });
 
