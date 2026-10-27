@@ -64,7 +64,7 @@ export const CODES_ERREUR = [
   'CONDITIONNEMENT_DEJA_OUVERT',
   // Motif obligatoire absent ou trop court (400).
   'MOTIF_REQUIS',
-  // Date de péremption obligatoire pour créer un lot, sauf « sans péremption » (400).
+  // Date de péremption obligatoire pour créer un lot, sauf « sans péremption » (400) ; à la réception, lignes dans `details`.
   'DATE_PEREMPTION_REQUISE',
   // Médicament du catalogue déjà utilisé par un lot, un mouvement ou une vente (409).
   'MEDICAMENT_UTILISE',
@@ -102,6 +102,10 @@ export const CODES_ERREUR = [
   'CONVERSION_IMPOSSIBLE',
   // Fiche d'un médicament du panier modifiée pendant la vente (409), lignes dans `details`.
   'FICHE_MODIFIEE',
+  // Fournisseur du même nom déjà enregistré dans la pharmacie (409).
+  'FOURNISSEUR_EXISTANT',
+  // Date de péremption déjà passée à la réception (400), lignes dans `details`.
+  'DATE_PEREMPTION_PASSEE',
 ] as const;
 
 export type CodeErreur = (typeof CODES_ERREUR)[number];

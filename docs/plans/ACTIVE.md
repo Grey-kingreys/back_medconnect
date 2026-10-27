@@ -24,7 +24,7 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | PB11 | Vente recâblée sur lots, prix et caisse (tasks/PB11-vente-recablee.md, D534 à D543) | dur | validé (D534 à D543, rapports/PB11-chef.md) | 1 |
 | PB12 | Annulation par écriture inverse et jour métier (tasks/PB12-annulation-ecriture-inverse.md, D544 à D554) | spécifié | validé (D544 à D554, rapports/PB12-chef.md) | 1 |
 | PB13 | Qualification d'une fiche (tasks/PB13-qualification-fiche.md, D555 à D565) | spécifié | validé (D555 à D565, rapports/PB13-chef.md) | 1 |
-| PB14 | Réceptions, fournisseurs, lots et import livraison | spécifié | à faire | 0 |
+| PB14 | Réceptions, fournisseurs, lots et import livraison, trois sous-fiches commitées dans l'ordre : tasks/PB14a-receptions-fournisseurs-lots.md, tasks/PB14b-resolution-provisoires.md, tasks/PB14c-import-livraison-reception.md (D566 à D581) | spécifié | en cours (PB14a validé, rapports/PB14a-chef.md ; PB14b et PB14c à faire) | 1 |
 | PB15 | Inventaire, sorties manuelles, anomalies et import inventaire | spécifié | à faire | 0 |
 | PB16 | Alertes de péremption, marge et étanchéité des coûts | spécifié | à faire | 0 |
 | PB17 | Clôture journalière | dur | à faire | 0 |
@@ -43,8 +43,8 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 
 ## Dernières décisions (5 max, historique complet dans decisions.md)
 
-- D545 Annulation : verrous poste, session, vente d'origine (`FOR UPDATE`), fiches ; P2002 sur `Vente` traduit en 409 `VENTE_DEJA_ANNULEE` (révisable)
-- D547 Pièce ANNULATION : `A-<numero>`, session et jour métier de l'auteur, lignes, allocations, paiements opposés, mouvements `CORRECTION` sur les lots d'origine (révisable)
-- D550 Statut et champs d'annulation dérivés de la pièce liée, colonnes gelées jamais écrites ; `venteOrigine` et `motif` sur toute pièce (révisable)
-- D551 Liste des ventes par `jourMetier`, annulations comprises, `totalJour` signé (révisable)
-- D554 `assurerPoste` verrouille le point de vente en `FOR NO KEY UPDATE` : plus d'attente des insertions à clé étrangère, interblocage écarté (révisable)
+- D566 PB14 découpé en PB14a (réceptions, fournisseurs, lots), PB14b (résolution des provisoires), PB14c (import livraison), sans migration
+- D570 Réception : lignes des fiches en `FOR NO KEY UPDATE` triées, puis verrous consultatifs ; ni poste ni caisse (révisable)
+- D576 Résolution : ventes les plus anciennes d'abord, lots non périmés en FEFO, partielle permise, jamais une vente annulée (révisable)
+- D578 L'annulation relit les allocations sous les verrous des fiches (concurrence avec la résolution) (révisable)
+- D579 Import : livraison vers réception en PB14c, inventaire refusé 409 `IMPORT_INVENTAIRE_INDISPONIBLE` jusqu'à PB15 ; plus aucune écriture du compteur gelé (révisable)

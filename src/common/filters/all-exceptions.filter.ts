@@ -59,6 +59,8 @@ const CODES_AVEC_DETAILS: ReadonlySet<CodeErreur> = new Set<CodeErreur>([
   'PRIX_UNITE_MANQUANT',
   'SORTIE_MANUELLE_REQUISE',
   'FICHE_MODIFIEE',
+  'DATE_PEREMPTION_REQUISE',
+  'DATE_PEREMPTION_PASSEE',
 ]);
 
 interface LotDetail {
