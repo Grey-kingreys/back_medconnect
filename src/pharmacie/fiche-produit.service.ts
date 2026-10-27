@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -9,7 +10,17 @@ import { AccesPharmacieService } from './acces-pharmacie.service';
 import { assurerPointDeVente } from './point-de-vente';
 import type { Reponse } from './points-de-vente.service';
 import { avertissementEcartPrix, type AvertissementPrix } from './domaine/prix';
-import { ModifierFicheDto } from './dto/fiche-produit.dto';
+import {
+  ModifierFicheDto,
+  type ConversionStock,
+} from './dto/fiche-produit.dto';
+import {
+  aDuStock,
+  planifierMultiplication,
+  type LotAConvertir,
+  type PlanMultiplication,
+} from './domaine/qualification';
+import { MouvementsStockService } from './stock/mouvements-stock.service';
 
 export const MESSAGE_FICHE_INTROUVABLE =
   'Ce médicament est introuvable dans le stock de cette pharmacie.';
@@ -17,6 +28,20 @@ export const MESSAGE_PRIX_UNITE_SANS_DECONDITIONNEMENT =
   "Un prix à l'unité n'est possible que si ce médicament se vend aussi à l'unité. Activez la vente à l'unité ou retirez le prix à l'unité.";
 export const MESSAGE_CONVERSION_REQUISE =
   "Ce médicament a du stock : précisez comment convertir le stock existant avant de changer le nombre d'unités par boîte.";
+export const MESSAGE_FICHE_DEJA_QUALIFIEE =
+  "Ce médicament est déjà qualifié : son stock n'est plus converti. Enregistrez le nouveau nombre d'unités par boîte sans conversion : il vaudra pour les prochaines réceptions.";
+export const MESSAGE_CONVERSION_IMPOSSIBLE =
+  'Le stock de ce médicament ne vient pas seulement de la reprise initiale : il ne peut pas être multiplié automatiquement. Choisissez « Conserver », puis corrigez la quantité en unités par un inventaire.';
+export const MESSAGE_CONVERSION_TROP_GRANDE =
+  "La conversion donnerait une quantité trop grande pour être enregistrée. Vérifiez le nombre d'unités par boîte.";
+export const MESSAGE_FICHE_ENREGISTREE = 'Fiche produit enregistrée.';
+export const MESSAGE_AUCUNE_MODIFICATION =
+  'Aucune modification de la fiche produit.';
+export const MESSAGE_STOCK_CONSERVE =
+  'Fiche produit enregistrée. Le stock existant est gardé tel quel, compté en unités.';
+export function messageStockMultiplie(quantite: number): string {
+  return `Fiche produit enregistrée. Le stock existant a été converti : ${quantite} unités.`;
+}
 
 const INCLUDE_FICHE = {
   medicament: { select: { id: true, nom: true, categorie: true } },
@@ -25,8 +50,17 @@ const INCLUDE_FICHE = {
 export type FicheAvecMedicament = Prisma.StockMedicamentGetPayload<{
   include: typeof INCLUDE_FICHE;
 }>;
+export interface ConversionAppliquee {
+  mode: ConversionStock;
+  coefficientAvant: number;
+  coefficientApres: number;
+  quantiteAvant: number;
+  quantiteApres: number;
+  lots: { lotId: string; quantiteAvant: number; quantiteApres: number }[];
+}
 export type FicheReponse = FicheAvecMedicament & {
   avertissements: AvertissementPrix[];
+  conversion: ConversionAppliquee | null;
 };
 
 type ChampFiche =
@@ -56,6 +90,7 @@ export class FicheProduitService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly accesPharmacie: AccesPharmacieService,
+    private readonly mouvementsStock: MouvementsStockService,
   ) {}
 
   async modifierFiche(
@@ -70,11 +105,11 @@ export class FicheProduitService {
       userId,
     );
 
-    const { fiche, seuil, modifiee } = await this.prisma.$transaction(
-      async (tx) => {
+    const { fiche, seuil, modifiee, conversion } =
+      await this.prisma.$transaction(async (tx) => {
         const verrou = await tx.$queryRaw<
           { id: string }[]
-        >`SELECT "id" FROM "StockMedicament" WHERE "id" = ${stockId} AND "structureId" = ${structure.id} AND "archiveLe" IS NULL FOR UPDATE`;
+        >`SELECT "id" FROM "StockMedicament" WHERE "id" = ${stockId} AND "structureId" = ${structure.id} AND "archiveLe" IS NULL FOR NO KEY UPDATE`;
         if (verrou.length === 0) {
           throw new NotFoundException(MESSAGE_FICHE_INTROUVABLE);
         }
@@ -108,15 +143,115 @@ export class FicheProduitService {
           });
         }
 
+        const coefficientChange =
+          voulus.coefficientBoite !== existante.coefficientBoite;
         if (
-          voulus.coefficientBoite !== existante.coefficientBoite &&
-          !existante.qualifie &&
-          existante.quantite !== 0
+          coefficientChange &&
+          existante.qualifie &&
+          dto.conversionStock !== undefined
         ) {
-          throw new BadRequestException({
-            message: MESSAGE_CONVERSION_REQUISE,
-            code: 'CONVERSION_REQUISE',
+          throw new ConflictException({
+            message: MESSAGE_FICHE_DEJA_QUALIFIEE,
+            code: 'FICHE_DEJA_QUALIFIEE',
           });
+        }
+
+        let conversion: ConversionAppliquee | null = null;
+        let plan: Extract<PlanMultiplication, { ok: true }> | null = null;
+        let maintenant = new Date();
+        if (coefficientChange && !existante.qualifie) {
+          await this.mouvementsStock.verrouillerFiches(tx, [stockId]);
+          const [{ maintenant: horloge }] = await tx.$queryRaw<
+            { maintenant: Date }[]
+          >`SELECT clock_timestamp() AS "maintenant"`;
+          maintenant = horloge;
+          const lotsLus = await tx.lotStock.findMany({
+            where: {
+              stockMedicamentId: stockId,
+              agregat: { is: { quantite: { gt: 0 } } },
+            },
+            select: {
+              id: true,
+              pointDeVenteId: true,
+              lotTechnique: true,
+              coefficientReception: true,
+              coutUnitaire: true,
+              agregat: { select: { quantite: true } },
+            },
+          });
+          const lots: LotAConvertir[] = lotsLus.map((l) => ({
+            lotId: l.id,
+            pointDeVenteId: l.pointDeVenteId,
+            lotTechnique: l.lotTechnique,
+            coefficientReception: l.coefficientReception,
+            coutUnitaire: l.coutUnitaire,
+            solde: l.agregat?.quantite ?? 0,
+          }));
+          const produits = await tx.agregatStockProduit.findMany({
+            where: { stockMedicamentId: stockId },
+            select: { pointDeVenteId: true, quantite: true },
+          });
+          const stock = aDuStock(produits, lots);
+          if (stock && dto.conversionStock === undefined) {
+            throw new BadRequestException({
+              message: MESSAGE_CONVERSION_REQUISE,
+              code: 'CONVERSION_REQUISE',
+            });
+          }
+          if (dto.conversionStock !== undefined) {
+            voulus.qualifie = true;
+            const quantiteAvant = produits.reduce(
+              (somme, p) => somme + p.quantite,
+              0,
+            );
+            if (dto.conversionStock === 'CONSERVER' || !stock) {
+              conversion = {
+                mode: dto.conversionStock,
+                coefficientAvant: existante.coefficientBoite,
+                coefficientApres: voulus.coefficientBoite,
+                quantiteAvant,
+                quantiteApres: quantiteAvant,
+                lots: [],
+              };
+            } else {
+              // Le stock repris compte des boîtes seulement si la fiche comptait 1 unité par boîte (D565)
+              if (existante.coefficientBoite !== 1) {
+                throw new ConflictException({
+                  message: MESSAGE_CONVERSION_IMPOSSIBLE,
+                  code: 'CONVERSION_IMPOSSIBLE',
+                });
+              }
+              const calcul = planifierMultiplication(
+                voulus.coefficientBoite,
+                produits,
+                lots,
+              );
+              if (!calcul.ok) {
+                throw new ConflictException({
+                  message:
+                    calcul.code === 'STOCK_NON_CONVERTIBLE'
+                      ? MESSAGE_CONVERSION_IMPOSSIBLE
+                      : MESSAGE_CONVERSION_TROP_GRANDE,
+                  code: 'CONVERSION_IMPOSSIBLE',
+                });
+              }
+              plan = calcul;
+              conversion = {
+                mode: 'MULTIPLIER',
+                coefficientAvant: existante.coefficientBoite,
+                coefficientApres: voulus.coefficientBoite,
+                quantiteAvant: calcul.quantiteAvant,
+                quantiteApres: calcul.quantiteApres,
+                lots: calcul.lots.map(
+                  ({ lotId, quantiteAvant: avant, quantiteApres: apres }) => ({
+                    lotId,
+                    quantiteAvant: avant,
+                    quantiteApres: apres,
+                  }),
+                ),
+              };
+            }
+          }
         }
 
         const parametres =
@@ -130,6 +265,7 @@ export class FicheProduitService {
             fiche: existante,
             seuil: parametres.seuilAvertissementPrixPct,
             modifiee: false,
+            conversion: null,
           };
         }
 
@@ -140,6 +276,22 @@ export class FicheProduitService {
           apres[c] = voulus[c];
         }
 
+        if (plan) {
+          for (const l of plan.lots) {
+            if (l.correction > 0) {
+              await this.mouvementsStock.qualifierLotTechnique(tx, {
+                lotId: l.lotId,
+                stockMedicamentId: stockId,
+                pointDeVenteId: l.pointDeVenteId,
+                coefficient: voulus.coefficientBoite,
+                coutUnitaire: l.coutUnitaireApres,
+                correction: l.correction,
+                auteurId: user.id,
+                horodatageServeur: maintenant,
+              });
+            }
+          }
+        }
         const misAJour = await tx.stockMedicament.update({
           where: { id: stockId },
           data: voulus,
@@ -152,16 +304,18 @@ export class FicheProduitService {
             entityType: 'StockMedicament',
             entityId: stockId,
             ip: ip ?? null,
-            metadata: { avant, apres },
+            metadata: conversion
+              ? { avant, apres, conversion: { ...conversion } }
+              : { avant, apres },
           },
         });
         return {
           fiche: misAJour,
           seuil: parametres.seuilAvertissementPrixPct,
           modifiee: true,
+          conversion,
         };
-      },
-    );
+      });
 
     const avertissement = avertissementEcartPrix(
       fiche.prixUnitaire,
@@ -170,10 +324,18 @@ export class FicheProduitService {
       seuil,
     );
     return {
-      data: { ...fiche, avertissements: avertissement ? [avertissement] : [] },
-      message: modifiee
-        ? 'Fiche produit enregistrée.'
-        : 'Aucune modification de la fiche produit.',
+      data: {
+        ...fiche,
+        avertissements: avertissement ? [avertissement] : [],
+        conversion,
+      },
+      message: !modifiee
+        ? MESSAGE_AUCUNE_MODIFICATION
+        : conversion && conversion.quantiteAvant !== 0
+          ? conversion.mode === 'MULTIPLIER'
+            ? messageStockMultiplie(conversion.quantiteApres)
+            : MESSAGE_STOCK_CONSERVE
+          : MESSAGE_FICHE_ENREGISTREE,
       success: true,
     };
   }

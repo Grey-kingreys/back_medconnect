@@ -4,8 +4,10 @@ import {
   MouvementsStockService,
   validerMouvement,
   validerNouveauLot,
+  validerQualificationLot,
   type MouvementAEcrire,
   type NouveauLot,
+  type QualificationLot,
 } from './mouvements-stock.service';
 
 function mouvement(surcharge: Partial<MouvementAEcrire> = {}) {
@@ -127,6 +129,36 @@ describe('validerNouveauLot', () => {
 
   it('accepte un lot valide', () => {
     expect(() => validerNouveauLot(lot())).not.toThrow();
+  });
+});
+
+describe('validerQualificationLot', () => {
+  const qualification = (surcharge: Partial<QualificationLot> = {}) => ({
+    lotId: 'lot',
+    stockMedicamentId: 'stk',
+    pointDeVenteId: 'pv',
+    coefficient: 20,
+    coutUnitaire: 0,
+    correction: 228,
+    auteurId: null,
+    horodatageServeur: new Date(),
+    ...surcharge,
+  });
+
+  it('refuse un coefficient inférieur à 2, une correction nulle ou un coût négatif', () => {
+    expect(() =>
+      validerQualificationLot(qualification({ coefficient: 1 })),
+    ).toThrow(RangeError);
+    expect(() =>
+      validerQualificationLot(qualification({ correction: 0 })),
+    ).toThrow(RangeError);
+    expect(() =>
+      validerQualificationLot(qualification({ coutUnitaire: -1 })),
+    ).toThrow(RangeError);
+  });
+
+  it('accepte une qualification valide', () => {
+    expect(() => validerQualificationLot(qualification())).not.toThrow();
   });
 });
 

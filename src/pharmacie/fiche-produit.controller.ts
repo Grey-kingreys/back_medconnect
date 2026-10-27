@@ -33,7 +33,7 @@ export class FicheProduitController {
   @ApiOperation({
     summary: 'Modifier la fiche produit (prix, unité, coefficient)',
     description:
-      "Prix de la boîte et prix à l'unité indépendants, jamais recalculés l'un depuis l'autre ; avertissement ECART_PRIX non bloquant au-delà du seuil de la pharmacie. 400 PRIX_UNITE_SANS_DECONDITIONNEMENT si un prix à l'unité reste sur une fiche non déconditionnable ; 400 CONVERSION_REQUISE si le coefficient change sur une fiche non qualifiée qui a du stock. Aucune conversion de stock.",
+      "Prix de la boîte et prix à l'unité indépendants, jamais recalculés l'un depuis l'autre ; avertissement ECART_PRIX non bloquant au-delà du seuil de la pharmacie. Changer le nombre d'unités par boîte d'une fiche non qualifiée qui a du stock exige conversionStock : MULTIPLIER (le stock repris compté en boîtes est converti en unités par un mouvement CORRECTION, pièce QUALIFICATION) ou CONSERVER (quantités gardées) ; la fiche est alors qualifiée. 400 PRIX_UNITE_SANS_DECONDITIONNEMENT, 400 CONVERSION_REQUISE, 409 FICHE_DEJA_QUALIFIEE, 409 CONVERSION_IMPOSSIBLE. Réponse : fiche, avertissements, conversion.",
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiParam({

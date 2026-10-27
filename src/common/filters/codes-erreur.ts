@@ -54,7 +54,7 @@ export const CODES_ERREUR = [
   'POSTE_TYPE_DIFFERENT',
   // Prix à l'unité sur une fiche produit qui ne se vend pas à l'unité (400).
   'PRIX_UNITE_SANS_DECONDITIONNEMENT',
-  // Coefficient d'une fiche non qualifiée qui a du stock changé sans conversion (400).
+  // Coefficient d'une fiche non qualifiée qui a du stock changé sans conversionStock (400).
   'CONVERSION_REQUISE',
   // Plusieurs lots (ou aucun) : préciser le lot ou faire un inventaire (409).
   'LOT_REQUIS',
@@ -96,6 +96,12 @@ export const CODES_ERREUR = [
   'PAIEMENTS_INCOHERENTS',
   // Pièce qui ne peut pas être annulée : annulation, régularisation, vente déjà régularisée ou vente d'avant la caisse (409).
   'PIECE_NON_ANNULABLE',
+  // Fiche déjà qualifiée : le stock existant ne se convertit plus (409).
+  'FICHE_DEJA_QUALIFIEE',
+  // Stock qui ne peut pas être multiplié automatiquement : hors reprise, provisoire ou trop grand (409).
+  'CONVERSION_IMPOSSIBLE',
+  // Fiche d'un médicament du panier modifiée pendant la vente (409), lignes dans `details`.
+  'FICHE_MODIFIEE',
 ] as const;
 
 export type CodeErreur = (typeof CODES_ERREUR)[number];

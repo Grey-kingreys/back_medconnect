@@ -43,6 +43,8 @@ export interface MouvementAEcrire {
   horodatageLocal?: Date | null;
   posteId?: string | null;
   sequencePoste?: number | null;
+  /** Horodatage serveur explicite (qualification, D561) ; défaut de la base sinon. */
+  horodatageServeur?: Date | null;
 }
 
 export interface MouvementEcrit {
@@ -81,6 +83,19 @@ export interface OuvertureConditionnement {
   unitesParConditionnement: number;
   ouvertParId: string | null;
   ouvertParPieceId: string | null;
+}
+
+export interface QualificationLot {
+  lotId: string;
+  stockMedicamentId: string;
+  pointDeVenteId: string;
+  /** Nouveau coefficient de la fiche, au moins 2. */
+  coefficient: number;
+  coutUnitaire: number;
+  /** solde x (coefficient - 1), au moins 1. */
+  correction: number;
+  auteurId: string | null;
+  horodatageServeur: Date;
 }
 
 /** Clé du verrou consultatif d'une fiche (D433, D507). */
@@ -122,6 +137,21 @@ export function validerNouveauLot(l: NouveauLot): void {
   for (const [champ, valeur, minimum] of entiers) {
     if (!Number.isInteger(valeur) || valeur < minimum) {
       throw new RangeError(`Lot invalide : ${champ} (reçu : ${valeur}).`);
+    }
+  }
+}
+
+export function validerQualificationLot(q: QualificationLot): void {
+  const entiers: Array<[string, number, number]> = [
+    ['coefficient', q.coefficient, 2],
+    ['correction', q.correction, 1],
+    ['coutUnitaire', q.coutUnitaire, 0],
+  ];
+  for (const [champ, valeur, minimum] of entiers) {
+    if (!Number.isInteger(valeur) || valeur < minimum) {
+      throw new RangeError(
+        `Qualification invalide : ${champ} (reçu : ${valeur}).`,
+      );
     }
   }
 }
@@ -171,6 +201,9 @@ export class MouvementsStockService {
           horodatageLocal: m.horodatageLocal ?? null,
           posteId: m.posteId ?? null,
           sequencePoste: m.sequencePoste ?? null,
+          ...(m.horodatageServeur
+            ? { horodatageServeur: m.horodatageServeur }
+            : {}),
         },
       });
     } catch (erreur) {
@@ -254,6 +287,35 @@ export class MouvementsStockService {
       auteurId: l.auteurId,
     });
     return { lot, reception };
+  }
+
+  /** Multiplie un lot technique à la qualification de sa fiche (D557) : lot mis à jour puis mouvement CORRECTION. */
+  async qualifierLotTechnique(
+    tx: Prisma.TransactionClient,
+    q: QualificationLot,
+  ): Promise<MouvementEcrit> {
+    validerQualificationLot(q);
+    await this.verrouillerFiches(tx, [q.stockMedicamentId]);
+    await tx.lotStock.update({
+      where: { id: q.lotId },
+      data: {
+        coefficientReception: q.coefficient,
+        coutUnitaire: q.coutUnitaire,
+      },
+    });
+    return this.ecrire(tx, {
+      evenementId: `qualification:${q.lotId}`,
+      pointDeVenteId: q.pointDeVenteId,
+      stockMedicamentId: q.stockMedicamentId,
+      lotId: q.lotId,
+      type: 'CORRECTION',
+      quantite: q.correction,
+      pieceOrigineType: 'QUALIFICATION',
+      pieceOrigineId: q.stockMedicamentId,
+      motif: `Qualification de la fiche : ${q.coefficient} unités par boîte`,
+      auteurId: q.auteurId,
+      horodatageServeur: q.horodatageServeur,
+    });
   }
 
   /** Ouvre un conditionnement ; une seconde ouverture du même lot est refusée par l'index partiel (CA6). */

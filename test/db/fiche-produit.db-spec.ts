@@ -54,7 +54,11 @@ describe('Fiche produit étendue sur base de test (PB06)', () => {
     });
     prisma = creerPrismaDeTest(base);
     const acces = new AccesPharmacieService(prisma);
-    service = new FicheProduitService(prisma, acces);
+    service = new FicheProduitService(
+      prisma,
+      acces,
+      new MouvementsStockService(),
+    );
     const permissionsFactices = {
       getUserPermissions: () => Promise.resolve([] as string[]),
     } as unknown as PermissionsService;

@@ -21,6 +21,10 @@ export const UNITES_MINIMALES = [
   'UNITE',
 ] as const satisfies readonly UniteMinimale[];
 
+/** Conversion du stock existant à la qualification (PB13, D556). */
+export const CONVERSIONS_STOCK = ['MULTIPLIER', 'CONSERVER'] as const;
+export type ConversionStock = (typeof CONVERSIONS_STOCK)[number];
+
 /** Plus grand entier enregistrable (colonne Int de PostgreSQL). */
 const ENTIER_MAX = 2147483647;
 
@@ -30,8 +34,8 @@ const siPresent = (_objet: object, valeur: unknown): boolean =>
 
 /**
  * Modification de la fiche produit (PB06, D485 à D490). Aucun champ obligatoire ;
- * null efface prixUnitaire, prixUnite ou toleranceInventaire. La conversion du
- * stock (conversionStock) arrive en PB13.
+ * null efface prixUnitaire, prixUnite ou toleranceInventaire. conversionStock
+ * convertit le stock à la qualification (PB13, D556).
  */
 export class ModifierFicheDto {
   @ApiPropertyOptional({
@@ -106,4 +110,14 @@ export class ModifierFicheDto {
   @ValidateIf(siPresent)
   @IsIn([true])
   qualifie?: true;
+
+  @ApiPropertyOptional({
+    enum: CONVERSIONS_STOCK,
+    example: 'MULTIPLIER',
+    description:
+      "Lu seulement si le nombre d'unités par boîte change sur une fiche non qualifiée : MULTIPLIER convertit le stock repris (boîtes) en unités, CONSERVER garde les quantités telles quelles. Obligatoire si la fiche a du stock ; qualifie la fiche.",
+  })
+  @ValidateIf(siPresent)
+  @IsIn(CONVERSIONS_STOCK)
+  conversionStock?: ConversionStock;
 }

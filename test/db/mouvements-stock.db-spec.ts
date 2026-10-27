@@ -136,7 +136,7 @@ describe('Mouvements de stock et lectures recâblées sur base de test (PB08)', 
       mouvements,
       permissions,
     );
-    fiches = new FicheProduitService(prisma, acces);
+    fiches = new FicheProduitService(prisma, acces, mouvements);
     J = resume.aujourdhui;
     const pvs = await sql(
       'SELECT "id", "structureId" FROM "PointDeVente" WHERE "ordre" = 1',

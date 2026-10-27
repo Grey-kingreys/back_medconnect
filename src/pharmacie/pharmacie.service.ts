@@ -683,7 +683,7 @@ export class PharmacieService {
         // Verrou de ligne de la fiche, puis verrou consultatif (D507)
         const lignes = await tx.$queryRaw<
           { id: string; coefficientBoite: number }[]
-        >`SELECT "id", "coefficientBoite" FROM "StockMedicament" WHERE "id" = ${stockId} AND "structureId" = ${structureId} AND "archiveLe" IS NULL FOR UPDATE`;
+        >`SELECT "id", "coefficientBoite" FROM "StockMedicament" WHERE "id" = ${stockId} AND "structureId" = ${structureId} AND "archiveLe" IS NULL FOR NO KEY UPDATE`;
         if (lignes.length === 0)
           throw new NotFoundException('Stock non trouvé');
 

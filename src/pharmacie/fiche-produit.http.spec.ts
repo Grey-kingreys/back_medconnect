@@ -200,11 +200,8 @@ describe('Fiche produit (HTTP)', () => {
       [{ deconditionnable: 'oui' }, 'deconditionnable', 'isBoolean'],
       [{ toleranceInventaire: -1 }, 'toleranceInventaire', 'min'],
       [{ qualifie: false }, 'qualifie', 'isIn'],
-      [
-        { conversionStock: 'MULTIPLIER' },
-        'conversionStock',
-        'whitelistValidation',
-      ],
+      [{ conversionStock: 'DOUBLER' }, 'conversionStock', 'isIn'],
+      [{ conversionStock: null }, 'conversionStock', 'isIn'],
       [{ quantite: 5 }, 'quantite', 'whitelistValidation'],
     ];
     for (const [corps, champ, contrainte] of cas) {
@@ -222,5 +219,23 @@ describe('Fiche produit (HTTP)', () => {
       ).toBe(true);
     }
     expect(modifierFiche).not.toHaveBeenCalled();
+  });
+
+  it('6. conversionStock transmis au service', async () => {
+    for (const conversionStock of ['MULTIPLIER', 'CONSERVER']) {
+      modifierFiche.mockClear();
+      const res = await request(serveur())
+        .patch(route)
+        .set('x-essai-user', 'pharmacien')
+        .send({ coefficientBoite: 20, conversionStock });
+      expect(res.status).toBe(200);
+      expect(modifierFiche).toHaveBeenCalledWith(
+        's1',
+        'pharmacien',
+        'k1',
+        expect.objectContaining({ coefficientBoite: 20, conversionStock }),
+        expect.any(String),
+      );
+    }
   });
 });

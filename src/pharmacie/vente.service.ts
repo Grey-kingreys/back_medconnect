@@ -76,6 +76,10 @@ export const MESSAGE_VENTE_HISTORIQUE_NON_ANNULABLE =
   "Cette vente date d'avant la mise en place de la caisse : elle ne peut pas être annulée. Corrigez le stock du médicament si besoin.";
 export const MESSAGE_POSTE_AUTRE_POINT_DE_VENTE =
   "Ce poste de caisse n'appartient pas au point de vente de cette vente.";
+export const MESSAGE_FICHE_MODIFIEE =
+  "La fiche d'un médicament du panier vient d'être modifiée (nombre d'unités par boîte). Vérifiez le panier puis validez de nouveau.";
+export const MESSAGE_VENTE_AVANT_QUALIFICATION =
+  "Cette vente date d'avant la conversion du stock de ce médicament en unités : elle ne peut pas être annulée. Corrigez le stock du médicament si besoin.";
 
 export function messageVenteAnnulee(
   numero: string,
@@ -627,6 +631,25 @@ export class VenteService {
 
     // 10. Verrous et lots
     await this.mouvementsStock.verrouillerFiches(tx, ids);
+    const coefficients = await tx.stockMedicament.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, coefficientBoite: true },
+    });
+    const modifiees = fiches.filter(
+      (f) =>
+        coefficients.find((c) => c.id === f.id)?.coefficientBoite !==
+        f.coefficientBoite,
+    );
+    if (modifiees.length > 0) {
+      throw new ConflictException({
+        message: MESSAGE_FICHE_MODIFIEE,
+        code: 'FICHE_MODIFIEE',
+        details: modifiees.map((f) => ({
+          stockId: f.id,
+          nom: f.medicament.nom,
+        })),
+      });
+    }
     const agregatsAvant = await tx.agregatStockProduit.findMany({
       where: { pointDeVenteId, stockMedicamentId: { in: ids } },
     });
@@ -1160,6 +1183,29 @@ export class VenteService {
           tx,
           origine.lignes.map((l) => l.stockMedicamentId),
         );
+
+        // 4b. Vente antérieure à une multiplication du stock (D561)
+        const lotsAlloues = [
+          ...new Set(
+            origine.lignes
+              .flatMap((l) => l.allocations)
+              .map((a) => a.lotId)
+              .filter((id): id is string => id !== null),
+          ),
+        ];
+        if (lotsAlloues.length > 0) {
+          const qualification = await tx.mouvementStock.findFirst({
+            where: {
+              pieceOrigineType: 'QUALIFICATION',
+              lotId: { in: lotsAlloues },
+              horodatageServeur: { gte: origine.createdAt },
+            },
+            select: { id: true },
+          });
+          if (qualification) {
+            throw nonAnnulable(MESSAGE_VENTE_AVANT_QUALIFICATION);
+          }
+        }
 
         // 5. Calcul des opposés
         const lignes = lignesInverses(origine.lignes);
