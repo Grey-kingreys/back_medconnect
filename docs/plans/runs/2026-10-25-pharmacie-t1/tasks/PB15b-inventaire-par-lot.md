@@ -432,7 +432,9 @@ Chemin de l'artefact + preuve (commande lancée, résultat en une ligne). Ou un 
 ## Historique
 
 <!-- une ligne par tentative : AAAA-MM-JJ | tier | résultat | raison si échec -->
+2026-10-27 | spécifié (codeur Sonnet) | PASS (vérificateur Sonnet, rapports/PB15b-verification.md) | remarque : désarchivage en mode rejeterLignes, corrigé par le chef (D599)
 
 ## Validation
 
 <!-- commande relancée par l'orchestrateur | résultat en une ligne | hash du commit -->
+docker compose exec -T backend npx tsc --noEmit, npx eslint (14 fichiers), npm test, npm run test:db | 0 erreur ; 88 suites 976 réussis 3 ignorés ; 23 suites 279 réussis | commit « feat(pharmacie): inventaire par lot avec tolérance et anomalies (PB15b) » (rapports/PB15b-chef.md)

@@ -14,6 +14,7 @@ import { REDIS_CLIENT } from 'src/common/redis/redis.module';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { InventairesController } from './inventaires.controller';
 import { SortiesStockService } from './sorties.service';
+import { InventairesService } from './inventaires.service';
 
 /**
  * Routes de sortie de stock : vrai PermissionsGuard et vrai PermissionsService
@@ -23,6 +24,11 @@ describe('Sorties de stock (HTTP)', () => {
   let app: INestApplication;
   const service = {
     enregistrer: jest.fn(),
+  };
+  const inventaires = {
+    enregistrer: jest.fn(),
+    lister: jest.fn(),
+    detail: jest.fn(),
   };
 
   const profils: Record<string, { type: string; codes: string[] }> = {
@@ -36,6 +42,7 @@ describe('Sorties de stock (HTTP)', () => {
       ],
     },
     lecteur: { type: 'PHARMACIE', codes: ['stock:read'] },
+    vendeur: { type: 'PHARMACIE', codes: ['stock:read', 'stock:write'] },
   };
   const prisma = {
     user: {
@@ -66,6 +73,7 @@ describe('Sorties de stock (HTTP)', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: REDIS_CLIENT, useValue: redis },
         { provide: SortiesStockService, useValue: service },
+        { provide: InventairesService, useValue: inventaires },
       ],
     })
       .overrideGuard(AuthGuard)
@@ -100,7 +108,10 @@ describe('Sorties de stock (HTTP)', () => {
   afterAll(() => app.close());
 
   beforeEach(() => {
-    for (const methode of Object.values(service)) {
+    for (const methode of [
+      ...Object.values(service),
+      ...Object.values(inventaires),
+    ]) {
       methode.mockReset().mockResolvedValue({
         data: {},
         message: 'ok',
@@ -172,5 +183,74 @@ describe('Sorties de stock (HTTP)', () => {
       .set('x-essai-user', 'titulaire')
       .send({ ...corpsValide, raison: undefined });
     expect(res.status).toBe(200);
+  });
+
+  it('permissions : inventaire:write exigé', async () => {
+    const corps = { lignes: [{ stockId: 's', quantiteComptee: 3 }] };
+    const reponses = [
+      await request(serveur())
+        .post('/pharmacie/s1/inventaires')
+        .set('x-essai-user', 'vendeur')
+        .send(corps),
+      await request(serveur())
+        .get('/pharmacie/s1/inventaires')
+        .set('x-essai-user', 'vendeur'),
+      await request(serveur())
+        .get('/pharmacie/s1/inventaires/i1')
+        .set('x-essai-user', 'vendeur'),
+    ];
+    for (const res of reponses) {
+      expect(res.status).toBe(403);
+      expect((res.body as CorpsErreur).code).toBe('PERMISSION_REFUSEE');
+    }
+    expect(inventaires.enregistrer).not.toHaveBeenCalled();
+    expect(inventaires.lister).not.toHaveBeenCalled();
+    expect(inventaires.detail).not.toHaveBeenCalled();
+  });
+
+  it('inventaire valide transmis au service', async () => {
+    const corps = {
+      commentaire: 'Comptage du soir',
+      lignes: [{ stockId: 's', nombreBoites: 2, unitesEnPlus: 3 }],
+    };
+    const res = await request(serveur())
+      .post('/pharmacie/s1/inventaires')
+      .set('x-essai-user', 'titulaire')
+      .send(corps);
+    expect(res.status).toBe(200);
+    expect(inventaires.enregistrer).toHaveBeenCalledWith(
+      's1',
+      'titulaire',
+      expect.objectContaining(corps),
+      expect.anything(),
+    );
+  });
+
+  it("validation du corps d'inventaire", async () => {
+    const ligne = { stockId: 's', quantiteComptee: 3 };
+    const cas: [Record<string, unknown>, string][] = [
+      [{ lignes: [] }, 'lignes'],
+      [
+        { lignes: [{ ...ligne, quantiteComptee: -1 }] },
+        'lignes.0.quantiteComptee',
+      ],
+      [{ lignes: [{ ...ligne, nombreBoites: 1.5 }] }, 'lignes.0.nombreBoites'],
+      [
+        { lignes: [{ ...ligne, dateExpiration: '31/12/2027' }] },
+        'lignes.0.dateExpiration',
+      ],
+      [{ id: 'x', lignes: [ligne] }, 'id'],
+    ];
+    for (const [corps, champ] of cas) {
+      const res = await request(serveur())
+        .post('/pharmacie/s1/inventaires')
+        .set('x-essai-user', 'titulaire')
+        .send(corps);
+      const body = res.body as CorpsErreur;
+      expect(res.status).toBe(400);
+      expect(body.code).toBe('VALIDATION');
+      expect((body.champs ?? []).some((c) => c.champ === champ)).toBe(true);
+    }
+    expect(inventaires.enregistrer).not.toHaveBeenCalled();
   });
 });

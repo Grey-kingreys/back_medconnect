@@ -61,12 +61,13 @@ const CODES_AVEC_DETAILS: ReadonlySet<CodeErreur> = new Set<CodeErreur>([
   'FICHE_MODIFIEE',
   'DATE_PEREMPTION_REQUISE',
   'DATE_PEREMPTION_PASSEE',
+  'LOT_REQUIS',
 ]);
 
 interface LotDetail {
   lotId: string;
   numeroLot: string | null;
-  dateExpiration: string;
+  dateExpiration: string | null;
   quantite: number;
 }
 
@@ -299,7 +300,7 @@ function assainirDetails(
         const l = lot as Record<string, unknown>;
         if (
           typeof l.lotId !== 'string' ||
-          typeof l.dateExpiration !== 'string' ||
+          (typeof l.dateExpiration !== 'string' && l.dateExpiration !== null) ||
           typeof l.quantite !== 'number'
         )
           continue;

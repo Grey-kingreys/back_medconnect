@@ -74,6 +74,8 @@ export interface NouveauLot {
   motif: string | null;
   evenementId?: string;
   dateReception?: Date;
+  /** Type du premier mouvement : RECEPTION par défaut, INVENTAIRE pour un lot trouvé à l'inventaire. */
+  typeMouvement?: 'RECEPTION' | 'INVENTAIRE';
 }
 
 export interface OuvertureConditionnement {
@@ -279,7 +281,7 @@ export class MouvementsStockService {
       pointDeVenteId: l.pointDeVenteId,
       stockMedicamentId: l.stockMedicamentId,
       lotId: lot.id,
-      type: 'RECEPTION',
+      type: l.typeMouvement ?? 'RECEPTION',
       quantite: l.quantite,
       pieceOrigineType: l.pieceOrigineType,
       pieceOrigineId: l.pieceOrigineId,

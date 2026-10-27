@@ -24,6 +24,8 @@ Décisions applicables : D466, D493, D509, D579 à D582, D589 à D595, et celles
 - `src/pharmacie/dto/pharmacie.dto.ts` : `OptionsImportStockDto`, `LigneImportStock`, `RapportImportStock`, `ResultatImportStock` (`importees`, `receptionId`).
 - `normaliserTitre` retire accents, majuscules et tout caractère non alphanumérique (`src/pharmacie/import-excel.ts`).
 - `normaliserNumeroLot` (`src/pharmacie/domaine/inventaire.ts`, PB15b).
+- Désarchivage (D599, corrigé par le chef PB15b) : `enregistrerDansTransaction` ne désarchive une fiche que si une ligne **retenue** de cette fiche compte une quantité non nulle ; en mode `rejeterLignes`, une ligne refusée ne désarchive rien (test db « mode rejeterLignes : une ligne refusée ne désarchive pas sa fiche »). Rien à faire en PB15c. Une fiche créée par l'import pour un médicament absent n'est pas archivée.
+- Rôle « Pharmacien » sans `inventaire:write` (D598) : l'import en mode `inventaire` lui renvoie 403 ; ne pas modifier `permissions.constants.ts`.
 - `src/pharmacie/pharmacie-import-mode.http.spec.ts` : vérifie seulement que le contrôleur transmet le mode (défaut `inventaire`) ; reste vrai tel quel.
 
 ### 1. `src/pharmacie/dto/pharmacie.dto.ts`

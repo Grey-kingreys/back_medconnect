@@ -183,6 +183,57 @@ describe('AllExceptionsFilter', () => {
     ]);
   });
 
+  it('LOT_REQUIS recopie les lots, date nulle comprise', () => {
+    filtre.catch(
+      new ConflictException({
+        message: 'm',
+        code: 'LOT_REQUIS',
+        details: [
+          {
+            stockId: 's',
+            nom: 'n',
+            lots: [
+              {
+                lotId: 'a',
+                numeroLot: null,
+                dateExpiration: null,
+                quantite: 3,
+              },
+              {
+                lotId: 'b',
+                numeroLot: 'B1',
+                dateExpiration: '2027-01-31',
+                quantite: 2,
+                coutUnitaire: 9,
+              },
+            ],
+          },
+        ],
+      }),
+      host,
+    );
+    expect(corpsRenvoye().details).toEqual([
+      {
+        stockId: 's',
+        nom: 'n',
+        lots: [
+          {
+            lotId: 'a',
+            numeroLot: null,
+            dateExpiration: null,
+            quantite: 3,
+          },
+          {
+            lotId: 'b',
+            numeroLot: 'B1',
+            dateExpiration: '2027-01-31',
+            quantite: 2,
+          },
+        ],
+      },
+    ]);
+  });
+
   it('garde details pour le 400 VENTE_UNITE_INTERDITE', () => {
     filtre.catch(
       new BadRequestException({

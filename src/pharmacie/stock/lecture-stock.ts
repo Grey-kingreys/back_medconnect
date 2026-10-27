@@ -243,6 +243,51 @@ export async function lireLotsCandidats(
   return resultat;
 }
 
+/**
+ * Tous les lots des fiches demandées au point de vente, solde nul compris (ciblage
+ * d'un inventaire, D589). À appeler sous les verrous des fiches.
+ */
+export async function lireTousLesLots(
+  client: Pick<Prisma.TransactionClient, 'lotStock'>,
+  pointDeVenteId: string,
+  stockMedicamentIds: readonly string[],
+): Promise<Map<string, LotCandidat[]>> {
+  const ids = [...new Set(stockMedicamentIds)];
+  const resultat = new Map<string, LotCandidat[]>();
+  if (ids.length === 0) return resultat;
+  for (const id of ids) resultat.set(id, []);
+
+  const lots = await client.lotStock.findMany({
+    where: { pointDeVenteId, stockMedicamentId: { in: ids } },
+    select: {
+      id: true,
+      stockMedicamentId: true,
+      numeroLot: true,
+      dateExpiration: true,
+      dateReception: true,
+      coefficientReception: true,
+      coutUnitaire: true,
+      lotTechnique: true,
+      agregat: { select: { quantite: true } },
+    },
+  });
+  for (const l of lots) {
+    resultat.get(l.stockMedicamentId)?.push(
+      versCandidat({
+        id: l.id,
+        numeroLot: l.numeroLot,
+        dateExpiration: l.dateExpiration,
+        dateReception: l.dateReception,
+        coefficientReception: l.coefficientReception,
+        coutUnitaire: l.coutUnitaire,
+        lotTechnique: l.lotTechnique,
+        solde: l.agregat?.quantite ?? 0,
+      }),
+    );
+  }
+  return resultat;
+}
+
 /** Filtre Prisma « au moins un lot vendable » : solde positif et non périmé (le jour même reste vendable). */
 export function filtreLotVendable(jour: string): Prisma.LotStockWhereInput {
   return {

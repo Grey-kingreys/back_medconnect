@@ -37,6 +37,7 @@ import {
 } from '../stock/lecture-stock';
 import { MouvementsStockService } from '../stock/mouvements-stock.service';
 import {
+  lireResolutionsDePiece,
   resoudreProvisoires,
   type ResolutionEcrite,
 } from '../stock/resolution-provisoires';
@@ -671,54 +672,7 @@ export class ReceptionsService {
       }
       return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
     });
-    const allocations = await client.allocationLot.findMany({
-      where: { remplaceeParPieceId: receptionId },
-      select: {
-        id: true,
-        quantite: true,
-        ligneVente: {
-          select: {
-            stockMedicamentId: true,
-            nomMedicament: true,
-            vente: { select: { id: true, numero: true } },
-          },
-        },
-      },
-    });
-    const resolutions: ResolutionEcrite[] = [];
-    for (const a of allocations) {
-      const somme = await client.mouvementStock.aggregate({
-        _sum: { quantite: true },
-        where: {
-          pieceOrigineType: 'RESOLUTION',
-          pieceOrigineId: receptionId,
-          lotId: { not: null },
-          evenementId: { startsWith: `resolution:${a.id}:` },
-        },
-      });
-      const quantiteResolue = -(somme._sum.quantite ?? 0);
-      resolutions.push({
-        allocationId: a.id,
-        venteId: a.ligneVente.vente.id,
-        numeroVente: a.ligneVente.vente.numero,
-        stockId: a.ligneVente.stockMedicamentId,
-        nom: a.ligneVente.nomMedicament,
-        quantiteProvisoire: a.quantite,
-        quantiteResolue,
-        resteProvisoire: a.quantite - quantiteResolue,
-      });
-    }
-    resolutions.sort((a, b) =>
-      a.numeroVente !== b.numeroVente
-        ? a.numeroVente < b.numeroVente
-          ? -1
-          : 1
-        : a.allocationId < b.allocationId
-          ? -1
-          : a.allocationId > b.allocationId
-            ? 1
-            : 0,
-    );
+    const resolutions = await lireResolutionsDePiece(client, receptionId);
     return {
       id: r.id,
       reference: r.reference,
