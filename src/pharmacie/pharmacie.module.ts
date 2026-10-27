@@ -14,6 +14,10 @@ import { SessionsCaisseController } from './caisse/sessions-caisse.controller';
 import { SessionsCaisseService } from './caisse/sessions-caisse.service';
 import { ReceptionsController } from './receptions/receptions.controller';
 import { ReceptionsService } from './receptions/receptions.service';
+import { InventairesController } from './inventaires/inventaires.controller';
+import { SortiesStockService } from './inventaires/sorties.service';
+import { AnomaliesController } from './anomalies/anomalies.controller';
+import { AnomaliesService } from './anomalies/anomalies.service';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { AuthModule } from 'src/auth/auth.module';
 
@@ -28,6 +32,8 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
     FicheProduitController,
     SessionsCaisseController,
     ReceptionsController,
+    InventairesController,
+    AnomaliesController,
   ],
   providers: [
     PharmacieService,
@@ -39,6 +45,8 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
     MouvementsStockService,
     SessionsCaisseService,
     ReceptionsService,
+    SortiesStockService,
+    AnomaliesService,
     PrismaService,
   ],
 })

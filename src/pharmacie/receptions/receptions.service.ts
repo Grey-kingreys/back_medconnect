@@ -942,12 +942,17 @@ export class ReceptionsService {
     const modifie = await this.prisma.$transaction(async (tx) => {
       const lot = await tx.lotStock.findFirst({
         where: { id: lotId, pointDeVente: { structureId } },
-        select: { id: true, stockMedicamentId: true, dateExpiration: true },
+        select: { id: true, stockMedicamentId: true },
       });
       if (!lot) throw new NotFoundException(MESSAGE_LOT_INTROUVABLE);
       await this.mouvementsStock.verrouillerFiches(tx, [lot.stockMedicamentId]);
-      const avant = lot.dateExpiration
-        ? dateVersJour(lot.dateExpiration)
+      // Relu sous le verrou : l'audit « avant » est juste même si une autre correction vient d'aboutir
+      const relu = await tx.lotStock.findUniqueOrThrow({
+        where: { id: lotId },
+        select: { dateExpiration: true },
+      });
+      const avant = relu.dateExpiration
+        ? dateVersJour(relu.dateExpiration)
         : null;
       const apres = dto.dateExpiration ?? null;
       if (avant === apres) return false;
