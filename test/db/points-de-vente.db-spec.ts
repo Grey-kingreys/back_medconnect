@@ -105,7 +105,6 @@ describe('Points de vente, postes et référentiels sur base de test (PB05)', ()
     }
     expect(Object.keys(data.parametres).sort()).toEqual([
       'debutCaisse',
-      'debutFiabiliteMarge',
       'horizonsPeremptionJours',
       'seuilAvertissementPrixPct',
       'seuilEcartCaisse',

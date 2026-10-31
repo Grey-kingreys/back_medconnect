@@ -33,7 +33,6 @@ export interface ParametresReponse {
   seuilStockBas: number;
   taillePlageTickets: number;
   seuilRechargementPlagePct: number;
-  debutFiabiliteMarge: Date;
   debutCaisse: Date;
 }
 
@@ -111,7 +110,6 @@ function versParametresReponse(p: ParametresPharmacie): ParametresReponse {
     seuilStockBas: p.seuilStockBas,
     taillePlageTickets: p.taillePlageTickets,
     seuilRechargementPlagePct: p.seuilRechargementPlagePct,
-    debutFiabiliteMarge: p.debutFiabiliteMarge,
     debutCaisse: p.debutCaisse,
   };
 }

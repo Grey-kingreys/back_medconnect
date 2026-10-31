@@ -311,7 +311,13 @@ Chemin de l'artefact + preuve (commande lancée, résultat en une ligne), dont l
 ## Historique
 
 <!-- une ligne par tentative : AAAA-MM-JJ | tier | résultat | raison si échec -->
+2026-10-31 | spécifié (codeur Sonnet, vérificateur Sonnet) | PASS, validé par le chef (rapports/PB16b-verification.md, rapports/PB16b-chef.md) | écart (a) `ignorerPromesses` remplacé par une découverte asynchrone (D611) ; puce PB05 de CLAUDE.md corrigée ; écarts (b), (c), (d) acceptés
 
 ## Validation
 
 <!-- commande relancée par l'orchestrateur | résultat en une ligne | hash du commit -->
+docker compose exec -T backend npx tsc --noEmit | 0 erreur | voir commit
+docker compose exec -T backend npx eslint (6 fichiers de la fiche) | 0 erreur, 0 avertissement | voir commit
+docker compose exec -T backend npm test | 91 suites, 1002 réussis, 3 ignorés, 0 échec | voir commit
+docker compose exec -T backend npm run test:db | 26 suites, 309 réussis, 0 échec | voir commit
+preuve du filet (point 5) | fuite remise : test db 4 échoue sur `GET /pharmacie/:structureId/referentiels` (`data.parametres.debutFiabiliteMarge`) ; route retirée : tsc TS2353 sur `APPELS` et test unitaire 1 la liste dans `manquantes` ; restauré, git diff sans trace | voir commit
