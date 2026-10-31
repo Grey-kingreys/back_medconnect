@@ -4,10 +4,10 @@
  * src/pharmacie/etancheite-couts.spec.ts échoue. Une route qui renvoie un coût
  * doit le masquer par masquerCouts (D466).
  */
-export type ClasseRoute = 'JSON' | 'FICHIER' | 'PUBLIQUE';
+export type ClasseRoute = 'JSON' | 'FICHIER' | 'PUBLIQUE' | 'TEXTE';
 
 export interface RouteInventoriee {
-  /** JSON : réponse lue ; FICHIER : classeur binaire, sans donnée de la pharmacie ; PUBLIQUE : sans authentification. */
+  /** JSON : réponse lue ; FICHIER : classeur binaire, sans donnée de la pharmacie ; PUBLIQUE : sans authentification ; TEXTE : fichier texte de la pharmacie (CSV), lu en entier : aucun en-tête ni aucune valeur ne doit correspondre au motif des coûts. */
   classe: ClasseRoute;
   /** Le titulaire reçoit au moins une clé de coût dans le scénario (contrôle positif). */
   porteCout: boolean;
@@ -18,6 +18,7 @@ export interface RouteInventoriee {
 const J: ClasseRoute = 'JSON';
 const F: ClasseRoute = 'FICHIER';
 const P: ClasseRoute = 'PUBLIQUE';
+const T: ClasseRoute = 'TEXTE';
 
 export const ROUTES_PHARMACIE = {
   'GET /pharmacie/:structureId/referentiels': {
@@ -227,6 +228,11 @@ export const ROUTES_PHARMACIE = {
   },
   'POST /pharmacie/:structureId/caisse/clotures': {
     classe: J,
+    porteCout: false,
+    exigeMarge: false,
+  },
+  'GET /pharmacie/:structureId/caisse/clotures/:jour/export': {
+    classe: T,
     porteCout: false,
     exigeMarge: false,
   },

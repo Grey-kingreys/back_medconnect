@@ -9,12 +9,14 @@ import {
   Post,
   Query,
   Req,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
   ApiParam,
+  ApiProduces,
   ApiTags,
 } from '@nestjs/swagger';
 import type { RequestWithUser } from 'src/auth/jwt.strategy';
@@ -50,6 +52,32 @@ export class ClotureController {
     @Param('jour') jour: string,
   ) {
     return this.clotures.preparer(structureId, req.user.userId, jour);
+  }
+
+  @Get(':structureId/caisse/clotures/:jour/export')
+  @RequirePermissions(PERMISSIONS.CLOTURE_GERER)
+  @ApiProduces('text/csv')
+  @ApiOperation({
+    summary: "Export CSV d'une journée clôturée",
+    description:
+      "Export CSV (séparateur point-virgule, UTF-8 avec BOM pour Excel) d'une journée clôturée : une ligne par pièce, par paiement et par mouvement de caisse (montant signé), sans coût, sans client, sans médicament. 409 JOURNEE_NON_CLOTUREE, 400 VALIDATION, 400 JOUR_AVANT_DEBUT_CAISSE.",
+  })
+  @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
+  @ApiParam({ name: 'jour', description: 'Jour métier, AAAA-MM-JJ' })
+  async exporter(
+    @Req() req: RequestWithUser,
+    @Param('structureId') structureId: string,
+    @Param('jour') jour: string,
+  ): Promise<StreamableFile> {
+    const { nomFichier, contenu } = await this.clotures.exporter(
+      structureId,
+      req.user.userId,
+      jour,
+    );
+    return new StreamableFile(contenu, {
+      type: 'text/csv; charset=utf-8',
+      disposition: `attachment; filename="${nomFichier}"`,
+    });
   }
 
   @Post(':structureId/caisse/clotures')

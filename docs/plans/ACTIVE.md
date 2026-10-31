@@ -27,7 +27,7 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | PB14 | Réceptions, fournisseurs, lots et import livraison, trois sous-fiches commitées dans l'ordre : tasks/PB14a-receptions-fournisseurs-lots.md, tasks/PB14b-resolution-provisoires.md, tasks/PB14c-import-livraison-reception.md (D566 à D582) | spécifié | validé (PB14a, PB14b, PB14c ; rapports/PB14a-chef.md, PB14b-chef.md, PB14c-chef.md) | 1 |
 | PB15 | Inventaire, sorties manuelles, anomalies et import inventaire, trois sous-fiches commitées dans l'ordre : tasks/PB15a-sorties-anomalies.md, tasks/PB15b-inventaire-par-lot.md, tasks/PB15c-import-inventaire.md (D583 à D600) | spécifié | validé (PB15a, PB15b, PB15c ; rapports/PB15a-chef.md, PB15b-chef.md, PB15c-chef.md) | 1 |
 | PB16 | Alertes de péremption, marge et étanchéité des coûts, deux sous-fiches commitées dans l'ordre : tasks/PB16a-alertes-peremption-marge.md, tasks/PB16b-etancheite-couts.md (D601 à D610) | spécifié | validé (PB16a, PB16b ; D601 à D611, rapports/PB16a-chef.md, PB16b-chef.md) | 1 |
-| PB17 | Clôture journalière, trois sous-fiches commitées dans l'ordre : tasks/PB17a-cloture-journaliere.md, tasks/PB17b-export-cloture.md, tasks/PB17c-verrou-journee-ecrivains.md (D612 à D627) | dur | en cours : PB17a validé (rapports/PB17a-chef.md) ; PB17b et PB17c à faire | 1 |
+| PB17 | Clôture journalière, trois sous-fiches commitées dans l'ordre : tasks/PB17a-cloture-journaliere.md, tasks/PB17b-export-cloture.md, tasks/PB17c-verrou-journee-ecrivains.md (D612 à D628) | dur | en cours : PB17a validé (rapports/PB17a-chef.md) ; PB17b validé (D628, rapports/PB17b-chef.md) ; PB17c à faire | 1 |
 | PB18 | Synchronisation desktop | dur | à faire | 0 |
 | PB19 | Seeds, démo et documentation | spécifié | à faire | 0 |
 
@@ -43,8 +43,8 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 
 ## Dernières décisions (5 max, historique complet dans decisions.md)
 
-- D613 Verrou consultatif de journée par pharmacie, partagé chez les écrivains de caisse et exclusif à la clôture, toujours en première instruction (révisable)
 - D616 Postes attendus : caisse ouverte sur le jour, desktop à file non vide, desktop qui a vendu sans synchro complète depuis le début du jour (révisable)
 - D617 Forcer exige un motif et n'est permis que si tous les postes attendus sont desktop ; une caisse web ouverte bloque (révisable)
 - D618 Clôture : caisses fermées incluses, caisse desktop ouverte laissée ouverte et consignée dans `postesManquants`, audit sans motif (révisable)
 - D627 Messages de clôture incomplète et forcée nommés par libellé du poste et vendeur, jamais par code seul (précise D621) (révisable)
+- D628 Export de clôture : référence de paiement faite uniquement de chiffres précédée d'une apostrophe, pour qu'Excel la garde telle quelle (précise D622) (révisable)

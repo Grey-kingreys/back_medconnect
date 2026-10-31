@@ -20,7 +20,7 @@ import { PermissionsService } from 'src/common/rbac/permissions.service';
 import { REDIS_CLIENT } from 'src/common/redis/redis.module';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { NotificationsService } from 'src/notifications/notifications.service';
-import { cheminsCout } from 'src/pharmacie/masquer-couts';
+import { cheminsCout, MOTIF_CLE_COUT } from 'src/pharmacie/masquer-couts';
 import { MIME_XLSX } from 'src/pharmacie/pharmacie.service';
 import { PharmacieModule } from 'src/pharmacie/pharmacie.module';
 import { ReceptionsService } from 'src/pharmacie/receptions/receptions.service';
@@ -573,6 +573,12 @@ describe('Étanchéité des coûts, sur base de test (PB16b, CA22)', () => {
         .en('post', `/pharmacie/${S}/caisse/clotures`)
         .send({ jour: JOUR_CLOTURE[c.profil]() }),
     ],
+    'GET /pharmacie/:structureId/caisse/clotures/:jour/export': async (c) => [
+      await c.en(
+        'get',
+        `/pharmacie/${S}/caisse/clotures/${JOUR_CLOTURE[c.profil]()}/export`,
+      ),
+    ],
     'GET /pharmacie/:structureId/caisse/clotures': async (c) => [
       await c.en(
         'get',
@@ -760,6 +766,14 @@ describe('Étanchéité des coûts, sur base de test (PB16b, CA22)', () => {
             succes: true,
             statut: r.status,
           });
+        }
+        if (route.classe === 'TEXTE') {
+          expect(String(r.headers['content-type'])).toContain('text/csv');
+          expect({
+            cle,
+            coutDansTexte: MOTIF_CLE_COUT.test(r.text),
+          }).toEqual({ cle, coutDansTexte: false });
+          continue;
         }
         if (route.classe === 'FICHIER') {
           expect(String(r.headers['content-type'])).toContain('spreadsheetml');

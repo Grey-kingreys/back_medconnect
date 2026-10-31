@@ -19,6 +19,11 @@ import type {
 } from '../dto/clotures.dto';
 import { estJourCloture, verrouillerJourneesExclusif } from './journee';
 import {
+  exporterCloture,
+  type MouvementExport,
+  type PieceExport,
+} from './export-cloture';
+import {
   forcageAutorise,
   postesAttendus,
   totauxCloture,
@@ -43,6 +48,10 @@ export const MESSAGE_MOTIF_FORCAGE_REQUIS =
 
 export function messageJourAvantDebutCaisse(debut: string): string {
   return `La caisse est utilisée depuis le ${jourLisible(debut)} : les journées précédentes ne se clôturent pas.`;
+}
+
+export function messageJourneeNonCloturee(jour: string): string {
+  return `La journée du ${jourLisible(jour)} n'est pas encore clôturée : clôturez-la avant de l'exporter.`;
 }
 
 export function messageJourneeDejaCloturee(jour: string): string {
@@ -606,6 +615,122 @@ export class ClotureService {
       },
       message: `${lues.length} clôture(s) en ${mois}.`,
       success: true,
+    };
+  }
+
+  /** Export CSV d'une journée clôturée : pièces, paiements et mouvements de caisse, sans coût, sans client (D622). */
+  async exporter(
+    structureId: string,
+    userId: string,
+    jour: string,
+  ): Promise<{ nomFichier: string; contenu: Buffer }> {
+    const { structure } = await this.accesPharmacie.verifier(
+      structureId,
+      userId,
+    );
+    const { pointDeVenteId, debutCaisse } = await this.contexte(structure);
+    this.validerJour(jour, debutCaisse);
+
+    const cloture = await this.prisma.clotureJournaliere.findUnique({
+      where: {
+        pointDeVenteId_jourMetier: {
+          pointDeVenteId,
+          jourMetier: jourVersDate(jour),
+        },
+      },
+    });
+    if (!cloture) {
+      throw new ConflictException({
+        message: messageJourneeNonCloturee(jour),
+        code: 'JOURNEE_NON_CLOTUREE',
+      });
+    }
+
+    const lues = await this.prisma.vente.findMany({
+      where: {
+        pointDeVenteId,
+        jourMetier: jourVersDate(jour),
+        sessionCaisse: { technique: false },
+      },
+      select: {
+        numero: true,
+        typePiece: true,
+        createdAt: true,
+        vendeurNom: true,
+        total: true,
+        motifAnnulation: true,
+        venteOrigine: { select: { numero: true } },
+        poste: { select: { code: true } },
+        sessionCaisse: { select: { clotureJournaliereId: true } },
+        paiements: {
+          select: {
+            montant: true,
+            referenceExterne: true,
+            createdAt: true,
+            modePaiement: {
+              select: { code: true, libelle: true, ordre: true },
+            },
+          },
+        },
+      },
+    });
+    const pieces: PieceExport[] = lues.map((v) => ({
+      numero: v.numero,
+      typePiece: v.typePiece,
+      numeroOrigine: v.venteOrigine?.numero ?? null,
+      createdAt: v.createdAt,
+      posteCode: v.poste.code,
+      vendeurNom: v.vendeurNom,
+      total: v.total,
+      motif: v.typePiece === 'ANNULATION' ? v.motifAnnulation : null,
+      caisseIncluse: v.sessionCaisse.clotureJournaliereId === cloture.id,
+      paiements: v.paiements.map((p) => ({
+        libelleMode: p.modePaiement.libelle,
+        ordreMode: p.modePaiement.ordre,
+        codeMode: p.modePaiement.code,
+        reference: p.referenceExterne,
+        montant: p.montant,
+        createdAt: p.createdAt,
+      })),
+    }));
+
+    const mouvementsLus = await this.prisma.mouvementCaisse.findMany({
+      where: {
+        sessionCaisse: {
+          pointDeVenteId,
+          jourMetier: jourVersDate(jour),
+          technique: false,
+        },
+      },
+      select: {
+        type: true,
+        montant: true,
+        motif: true,
+        horodatageServeur: true,
+        modePaiement: { select: { libelle: true } },
+        sessionCaisse: {
+          select: {
+            utilisateurNom: true,
+            clotureJournaliereId: true,
+            poste: { select: { code: true } },
+          },
+        },
+      },
+    });
+    const mouvements: MouvementExport[] = mouvementsLus.map((m) => ({
+      type: m.type,
+      horodatage: m.horodatageServeur,
+      posteCode: m.sessionCaisse.poste.code,
+      utilisateurNom: m.sessionCaisse.utilisateurNom,
+      libelleMode: m.modePaiement.libelle,
+      montant: m.montant,
+      motif: m.motif,
+      caisseIncluse: m.sessionCaisse.clotureJournaliereId === cloture.id,
+    }));
+
+    return {
+      nomFichier: `cloture-${jour}.csv`,
+      contenu: Buffer.from(exporterCloture(jour, pieces, mouvements), 'utf8'),
     };
   }
 }

@@ -15,7 +15,7 @@ PB17b livre `GET /pharmacie/:structureId/caisse/clotures/:jour/export` (`cloture
 
 **Aucune migration, aucun changement de `prisma/schema.prisma`.** Ne modifier ni `vente.service.ts`, ni `sessions-caisse.service.ts`, ni `receptions.service.ts`, ni les règles de PB17a (`cloture-regles.ts`, `journee.ts`), ni les tests de PB17a.
 
-Décisions applicables : D466, D517, D550, D551, D612, D618, D620, D622, D623.
+Décisions applicables : D466, D517, D550, D551, D612, D618, D620, D622, D623, D628 (ajoutée par le chef).
 
 ### Contexte vérifié (ne pas re-découvrir)
 
@@ -69,6 +69,9 @@ Règles exactes :
    - ligne paiement : `jour`, `Paiement`, `numero` de la pièce, type de la pièce, `numeroOrigine`, `instantLisible(paiement.createdAt)`, `posteCode`, `vendeurNom`, `libelleMode`, `reference`, `montant` (signé, tel qu'en base), vide, inclusion.
 6. Puis les mouvements triés par `horodatage` : `jour`, `Mouvement de caisse`, vide, libellé du type, vide, `instantLisible(horodatage)`, `posteCode`, `utilisateurNom`, `libelleMode`, vide, montant **signé** (`APPORT` positif, `PRELEVEMENT` et `REMBOURSEMENT` négatifs), `motif`, inclusion.
 7. Colonnes texte (passées avec `texte` vrai) : toutes sauf `Montant (GNF)`.
+8. Référence de paiement faite uniquement de chiffres (`^\d+$`) : écrite précédée d'une apostrophe (`'0012345678`) pour qu'Excel la garde comme texte ; toute autre référence telle quelle (D628, ajout du chef).
+
+BOM écrit dans le code sous la forme visible `'\u{FEFF}'` (même chaîne que `'﻿'`), jamais en caractère invisible littéral (correction du chef).
 
 ### 2. `src/pharmacie/caisse/clotures.service.ts` (ajout)
 
@@ -100,7 +103,7 @@ Placer cette route **avant** aucune autre route `:jour` qui la masquerait (les c
 
 ### 6. Tests unitaires
 
-`src/pharmacie/caisse/export-cloture.spec.ts` (nouveau, 7 tests ; jour `'2026-10-30'`) :
+`src/pharmacie/caisse/export-cloture.spec.ts` (nouveau, 8 tests ; jour `'2026-10-30'`) :
 1. « fichier vide » : `exporterCloture(jour, [], [])` commence par `'\uFEFF'`, vaut BOM + les 13 en-têtes joints par `;` + `'\r\n'`.
 2. « pièce et paiements » : vente `T1-0000012` à 14:05, total 25 000, paiements Orange Money (ordre 2, référence `OM-778`, 15 000) puis Espèces (ordre 1, 10 000) donnés dans le désordre : trois lignes, la pièce puis Espèces puis Orange Money ; ligne pièce exacte `2026-10-30;Pièce;T1-0000012;Vente;;30/10/2026 à 14:05;W1;Mamadou Diallo;;;25000;;Oui`.
 3. « annulation » : pièce `A-T1-0000012`, `numeroOrigine` `T1-0000012`, total -25 000, motif `Erreur de quantité`, paiement espèces -25 000 : colonnes `Annulation`, `T1-0000012`, `-25000`, motif présent, montant du paiement `-25000`.
@@ -108,6 +111,7 @@ Placer cette route **avant** aucune autre route `:jour` qui la masquerait (les c
 5. « échappement » : motif `Client "pressé"; rendu 500` donne `"Client ""pressé""; rendu 500"` ; motif multi-ligne entouré de guillemets.
 6. « formules neutralisées » : motif `=SOMME(A1)` donne `'=SOMME(A1)` ; vendeur `-Fanta` donne `'-Fanta` ; un montant négatif n'est jamais préfixé.
 7. « inclusion » : `caisseIncluse` faux donne `Non` sur la pièce et ses paiements.
+8. « référence numérique » (D628) : références `0012345678` et `123456789012` données `'0012345678` et `'123456789012`, `OM-0042` inchangée.
 
 `src/pharmacie/caisse/clotures.http.spec.ts` (2 tests ajoutés ; `exporter` ajouté au service simulé, renvoie `{ nomFichier: 'cloture-2026-10-30.csv', contenu: Buffer.from('\uFEFFJour;Ligne\r\n', 'utf8') }`) :
 1. vendeur (`caisse:utiliser`, `caisse:superviser`) `GET /pharmacie/s1/caisse/clotures/2026-10-30/export` : 403, service non appelé.
@@ -120,7 +124,7 @@ Préparation et aides calquées sur `test/db/clotures.db-spec.ts` (PB17a) : mêm
 1. « journée non clôturée » : `exporter(PHARMACIE, RESPONSABLE, jour(-3))` : 409 `JOURNEE_NON_CLOTUREE`, message `messageJourneeNonCloturee(jour(-3))` ; `jour(1)` : 400 `VALIDATION` `jourFutur`.
 2. « export d'une journée clôturée » : aujourd'hui, poste web, `ouvrirSession(poste, VENDEUR, { 20000: 5 })` (fond 100 000) ; `venteEncaissee(s, 200000)` (vente V1) ; vente V2 de 50 000 insérée par un `INSERT` direct (copie de `venteSql` avec en plus les colonnes `"clientNom"` = `'Aissatou Sow'` et `"clientTelephone"` = `'+224620000000'`) et deux paiements insérés directement : espèces 30 000, Orange Money 20 000 avec `"referenceExterne"` = `'OM-123'` ; `sessions.enregistrerMouvement(PHARMACIE, VENDEUR, s, { type: 'PRELEVEMENT', montant: 100000, motif: 'Dépôt au coffre' })` ; pièce d'annulation de V1 (`venteSql({ typePiece: 'ANNULATION', origine: V1, motif: 'Erreur de saisie', total: -200000 })`) et son paiement espèces -200 000 ; théorique espèces = 100 000 + 200 000 + 30 000 - 200 000 - 100 000 = 30 000 : fermeture `{ comptageFermeture: { coupures: coupures({ 20000: 1, 10000: 1 }), releves: [{ mode: 'ORANGE_MONEY', montant: 20000 }] } }`, puis `clotures.cloturer(PHARMACIE, RESPONSABLE, { jour: jour(0) }, '127.0.0.1')`. Export (texte gardé dans une variable du fichier pour le test 3) : `nomFichier` `cloture-<jour(0)>.csv` ; le contenu commence par le BOM ; première ligne = `ENTETES_EXPORT_CLOTURE` ; 3 lignes `Pièce`, 4 lignes `Paiement`, 1 ligne `Mouvement de caisse` (montant `-100000`, motif `Dépôt au coffre`) ; la ligne de l'annulation porte `Annulation`, le numéro de V1 et le motif ; la référence `OM-123` figure sur la ligne Orange Money ; toutes les lignes portent `Oui` ; somme des montants des lignes `Paiement` = somme des `total` des lignes `Pièce` (50 000).
 3. « rien de privé ni de coût » : sur le texte exporté au test 2 : ni `Aissatou`, ni `620000000`, et `MOTIF_CLE_COUT.test(texte)` est faux.
-4. « caisse desktop restée ouverte et session technique » : poste desktop D, `sessionSql({ posteId: D, jourMetier: jour(-5), statut: 'OUVERTE' })` avec une vente SQL (total 7 000, paiement espèces), poste web avec session FERMEE et `resultatSql` et une vente de 9 000 ; clôture forcée de `jour(-5)` (motif) ; export : la pièce desktop porte `Non`, la pièce web `Oui` ; une vente historique de la fixture (session technique) dont le `jourMetier` tombe sur un jour clôturable n'apparaît jamais (si aucune ne tombe dans la fenêtre de 30 jours, assertion sautée et commentée).
+4. « caisse desktop restée ouverte et session technique » : poste desktop D, `sessionSql({ posteId: D, jourMetier: jour(-5), statut: 'OUVERTE' })` avec une vente SQL (total 7 000, paiement espèces), poste web avec session FERMEE et `resultatSql` et une vente de 9 000 ; plus une session technique au `jour(-5)` insérée par SQL sur le poste `REPRISE` (FERMEE, `technique` vrai, sans utilisateur : le trigger `session_caisse_proteger` l'accepte, aucun contournement), avec une vente SQL de 3 333 payée en espèces et un mouvement de caisse `APPORT` de 4 444 (motif `Mouvement technique`), présence en base vérifiée ; clôture forcée de `jour(-5)` (motif) ; export : la pièce desktop porte `Non`, la pièce web `Oui` ; ni la pièce technique, ni un montant 3 333 ou 4 444, ni le motif `Mouvement technique`, ni aucune ligne `Mouvement de caisse` ; exactement 4 lignes (deux pièces, deux paiements). Assertion toujours exécutée, jamais conditionnelle (correction du chef) : supprimer le filtre `technique: false` des mouvements, ou des deux lectures, fait échouer ce test.
 
 ### 8. `CLAUDE.md` du dépôt back
 
@@ -138,7 +142,7 @@ Depuis `D:\souleymane\perso-archive-20260923\perso\medconnecte` :
 
 1. `docker compose exec -T backend npx tsc --noEmit` : aucune erreur.
 2. `docker compose exec -T backend npx eslint` sur les fichiers autorisés `.ts` : aucune erreur.
-3. `docker compose exec -T backend npm test` : tout vert, dont `export-cloture.spec.ts` (7), `clotures.http.spec.ts` (10), `etancheite-couts.spec.ts`.
+3. `docker compose exec -T backend npm test` : tout vert, dont `export-cloture.spec.ts` (8), `clotures.http.spec.ts` (10), `etancheite-couts.spec.ts`.
 4. `docker compose exec -T backend npm run test:db` : tout vert, dont `test/db/export-cloture.db-spec.ts` (4), `test/db/clotures.db-spec.ts` (13, inchangé) et `test/db/etancheite-couts.db-spec.ts` (avec la route TEXTE).
 5. `git status --porcelain` ne liste que les fichiers autorisés (plus `docker-entrypoint.sh`) ; `git diff --stat -- prisma test/db/instantanes test/db/clotures.db-spec.ts src/pharmacie/caisse/cloture-regles.ts src/pharmacie/caisse/journee.ts` vide.
 6. Données privées : `grep -n "clientNom\|clientTelephone\|lignes\|cout" src/pharmacie/caisse/export-cloture.ts` et la méthode `exporter` de `clotures.service.ts` : aucune lecture de ces champs (relecture du chef).
@@ -152,7 +156,13 @@ Chemin de l'artefact + preuve (commande lancée, résultat en une ligne). Ou un 
 ## Historique
 
 <!-- une ligne par tentative : AAAA-MM-JJ | tier | résultat | raison si échec -->
+2026-10-31 | dur (codeur Sonnet, vérificateur Sonnet) | PASS, validé par le chef (rapports/PB17b-verification.md, rapports/PB17b-chef.md) | BOM visible `'\u{FEFF}'` aux quatre endroits ; test db 4 rendu discriminant (session technique créée au jour exporté, avec pièce et mouvement) ; référence numérique neutralisée (D628, test unitaire 8)
 
 ## Validation
 
 <!-- commande relancée par l'orchestrateur | résultat en une ligne | hash du commit -->
+docker compose exec -T backend npx tsc --noEmit | 0 erreur | voir commit
+docker compose exec -T backend npx eslint (9 fichiers .ts de la fiche) | 0 erreur, 0 avertissement | voir commit
+docker compose exec -T backend npm test | 95 suites, 1034 réussis, 3 ignorés, 0 échec | voir commit
+docker compose exec -T backend npm run test:db | 28 suites, 326 réussis, 0 échec | voir commit
+mutation : filtre `technique: false` des mouvements retiré, `test/db/export-cloture.db-spec.ts` seul | test 4 en échec (restauré ensuite) | voir commit

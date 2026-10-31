@@ -120,6 +120,8 @@ export const CODES_ERREUR = [
   'CAISSES_A_FERMER',
   // Journée antérieure à la mise en place de la caisse, non clôturable (400).
   'JOUR_AVANT_DEBUT_CAISSE',
+  // Export d'une journée qui n'est pas encore clôturée (409).
+  'JOURNEE_NON_CLOTUREE',
 ] as const;
 
 export type CodeErreur = (typeof CODES_ERREUR)[number];

@@ -25,7 +25,8 @@ describe('Clôture journalière (HTTP)', () => {
   const preparer = jest.fn();
   const cloturer = jest.fn();
   const lister = jest.fn();
-  const services = [preparer, cloturer, lister];
+  const exporter = jest.fn();
+  const services = [preparer, cloturer, lister, exporter];
 
   const profils: Record<string, { type: string; codes: string[] }> = {
     titulaire: {
@@ -67,7 +68,7 @@ describe('Clôture journalière (HTTP)', () => {
         { provide: REDIS_CLIENT, useValue: redis },
         {
           provide: ClotureService,
-          useValue: { preparer, cloturer, lister },
+          useValue: { preparer, cloturer, lister, exporter },
         },
       ],
     })
@@ -110,6 +111,10 @@ describe('Clôture journalière (HTTP)', () => {
         success: true,
       });
     }
+    exporter.mockResolvedValue({
+      nomFichier: 'cloture-2026-10-30.csv',
+      contenu: Buffer.from('\u{FEFF}Jour;Ligne\r\n', 'utf8'),
+    });
   });
 
   const serveur = () => app.getHttpServer() as Parameters<typeof request>[0];
@@ -276,5 +281,26 @@ describe('Clôture journalière (HTTP)', () => {
       'La journée du 30/10/2026 est déjà clôturée.',
     );
     expect(corps(res).details).toBeUndefined();
+  });
+
+  it('9. l’export exige cloture:gerer : vendeur 403, service non appelé', async () => {
+    const res = await request(serveur())
+      .get(`${base}/2026-10-30/export`)
+      .set('x-essai-user', 'vendeur');
+    expect(res.status).toBe(403);
+    expect(exporter).not.toHaveBeenCalled();
+  });
+
+  it('10. le titulaire télécharge le fichier CSV', async () => {
+    const res = await request(serveur())
+      .get(`${base}/2026-10-30/export`)
+      .set('x-essai-user', 'titulaire');
+    expect(res.status).toBe(200);
+    expect(String(res.headers['content-type'])).toContain('text/csv');
+    expect(String(res.headers['content-disposition'])).toContain(
+      'cloture-2026-10-30.csv',
+    );
+    expect(exporter).toHaveBeenCalledWith('s1', 'titulaire', '2026-10-30');
+    expect(preparer).not.toHaveBeenCalled();
   });
 });
