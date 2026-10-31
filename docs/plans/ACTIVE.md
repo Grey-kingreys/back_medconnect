@@ -26,7 +26,7 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | PB13 | Qualification d'une fiche (tasks/PB13-qualification-fiche.md, D555 à D565) | spécifié | validé (D555 à D565, rapports/PB13-chef.md) | 1 |
 | PB14 | Réceptions, fournisseurs, lots et import livraison, trois sous-fiches commitées dans l'ordre : tasks/PB14a-receptions-fournisseurs-lots.md, tasks/PB14b-resolution-provisoires.md, tasks/PB14c-import-livraison-reception.md (D566 à D582) | spécifié | validé (PB14a, PB14b, PB14c ; rapports/PB14a-chef.md, PB14b-chef.md, PB14c-chef.md) | 1 |
 | PB15 | Inventaire, sorties manuelles, anomalies et import inventaire, trois sous-fiches commitées dans l'ordre : tasks/PB15a-sorties-anomalies.md, tasks/PB15b-inventaire-par-lot.md, tasks/PB15c-import-inventaire.md (D583 à D600) | spécifié | validé (PB15a, PB15b, PB15c ; rapports/PB15a-chef.md, PB15b-chef.md, PB15c-chef.md) | 1 |
-| PB16 | Alertes de péremption, marge et étanchéité des coûts | spécifié | à faire | 0 |
+| PB16 | Alertes de péremption, marge et étanchéité des coûts, deux sous-fiches commitées dans l'ordre : tasks/PB16a-alertes-peremption-marge.md, tasks/PB16b-etancheite-couts.md (D601 à D610) | spécifié | en cours (PB16a validé, rapports/PB16a-chef.md ; PB16b à faire) | 1 |
 | PB17 | Clôture journalière | dur | à faire | 0 |
 | PB18 | Synchronisation desktop | dur | à faire | 0 |
 | PB19 | Seeds, démo et documentation | spécifié | à faire | 0 |
@@ -43,8 +43,8 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 
 ## Dernières décisions (5 max, historique complet dans decisions.md)
 
-- D589 Ciblage du lot d'une ligne d'inventaire (identifiant, numéro, date, lot unique ; plusieurs possibles : `LOT_REQUIS`, jamais de répartition) (révisable)
-- D596 Import inventaire rétabli (mode par défaut, `inventaire:write`, 403 sinon), un `Inventaire` par import (révisable)
-- D598 Le rôle « Pharmacien » n'a pas `inventaire:write` (révisable)
-- D599 L'inventaire ne désarchive une fiche que si une ligne retenue compte une quantité non nulle (révisable)
-- D600 Lot unique de la fiche ciblé même épuisé ou négatif ; la date cible aussi un lot épuisé (révise D589) (révisable)
+- D602 Alertes de péremption par lot : groupe du plus petit horizon des paramètres (défaut 90, 30, 7), périmés à part, sans date comptés (révisable)
+- D603 Valeur au coût seulement si le coût est connu, jamais 0 pour un coût inconnu, masquée sans `marge:read` (révisable)
+- D604 Rapport de marge sur 92 jours au plus, `calculerMarge` inchangé : un lot à coût 0 rend la vente non valorisable (révisable)
+- D606 CA22 : découverte Nest des routes, inventaire des 50 routes `/pharmacie`, appel HTTP réel de chacune (révisable)
+- D610 `debutFiabiliteMarge` retiré des paramètres (seule fuite trouvée), exposé par le rapport de marge (révise D483) (révisable)

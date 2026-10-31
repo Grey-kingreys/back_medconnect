@@ -19,6 +19,8 @@ import { SortiesStockService } from './inventaires/sorties.service';
 import { InventairesService } from './inventaires/inventaires.service';
 import { AnomaliesController } from './anomalies/anomalies.controller';
 import { AnomaliesService } from './anomalies/anomalies.service';
+import { RapportsController } from './rapports/rapports.controller';
+import { RapportsService } from './rapports/rapports.service';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { AuthModule } from 'src/auth/auth.module';
 
@@ -35,6 +37,7 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
     ReceptionsController,
     InventairesController,
     AnomaliesController,
+    RapportsController,
   ],
   providers: [
     PharmacieService,
@@ -49,6 +52,7 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
     SortiesStockService,
     InventairesService,
     AnomaliesService,
+    RapportsService,
     PrismaService,
   ],
 })
