@@ -62,7 +62,22 @@ const CODES_AVEC_DETAILS: ReadonlySet<CodeErreur> = new Set<CodeErreur>([
   'DATE_PEREMPTION_REQUISE',
   'DATE_PEREMPTION_PASSEE',
   'LOT_REQUIS',
+  'CLOTURE_INCOMPLETE',
+  'CAISSES_A_FERMER',
 ]);
+
+// Clés chaînes recopiées pour les postes d'une clôture (CLOTURE_INCOMPLETE, CAISSES_A_FERMER).
+const CLES_POSTE_CLOTURE = [
+  'posteId',
+  'posteCode',
+  'libelle',
+  'type',
+  'raison',
+  'sessionId',
+  'utilisateurNom',
+  'dernierContactLe',
+  'message',
+] as const;
 
 interface LotDetail {
   lotId: string;
@@ -293,6 +308,10 @@ function assainirDetails(
     if (typeof source.disponible === 'number')
       ligne.disponible = source.disponible;
     if (typeof source.demande === 'number') ligne.demande = source.demande;
+    for (const cle of CLES_POSTE_CLOTURE) {
+      const valeur = source[cle];
+      if (typeof valeur === 'string') ligne[cle] = valeur;
+    }
     if (Array.isArray(source.lots)) {
       const lots: LotDetail[] = [];
       for (const lot of (source.lots as unknown[]).slice(0, 50)) {

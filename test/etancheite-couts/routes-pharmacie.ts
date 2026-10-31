@@ -220,6 +220,21 @@ export const ROUTES_PHARMACIE = {
     porteCout: true,
     exigeMarge: true,
   },
+  'GET /pharmacie/:structureId/caisse/clotures/:jour/preparation': {
+    classe: J,
+    porteCout: false,
+    exigeMarge: false,
+  },
+  'POST /pharmacie/:structureId/caisse/clotures': {
+    classe: J,
+    porteCout: false,
+    exigeMarge: false,
+  },
+  'GET /pharmacie/:structureId/caisse/clotures': {
+    classe: J,
+    porteCout: false,
+    exigeMarge: false,
+  },
   'GET /pharmacie/rechercher': {
     classe: P,
     porteCout: false,

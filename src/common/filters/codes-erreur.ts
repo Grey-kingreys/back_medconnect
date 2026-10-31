@@ -110,6 +110,16 @@ export const CODES_ERREUR = [
   'IMPORT_INVENTAIRE_INDISPONIBLE',
   // Anomalie déjà traitée : un traitement ne se fait qu'une fois (409).
   'ANOMALIE_DEJA_TRAITEE',
+  // Journée clôturée : plus aucune écriture n'y est possible, la correction se fait sur la journée en cours (409).
+  'JOURNEE_CLOTUREE',
+  // Journée déjà clôturée (409).
+  'JOURNEE_DEJA_CLOTUREE',
+  // Postes attendus avant la clôture (409), postes dans `details`.
+  'CLOTURE_INCOMPLETE',
+  // Caisses ouvertes sur un navigateur, à fermer même pour forcer la clôture (409), caisses dans `details`.
+  'CAISSES_A_FERMER',
+  // Journée antérieure à la mise en place de la caisse, non clôturable (400).
+  'JOUR_AVANT_DEBUT_CAISSE',
 ] as const;
 
 export type CodeErreur = (typeof CODES_ERREUR)[number];

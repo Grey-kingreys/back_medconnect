@@ -97,6 +97,12 @@ const ENTETES_CATALOGUE = [
 const jour = (n: number) =>
   new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
 
+// Chaque profil clôture un jour sans activité différent (une journée vide se clôture, D620).
+const JOUR_CLOTURE: Record<Profil, () => string> = {
+  titulaire: () => jour(-10),
+  vendeur: () => jour(-11),
+};
+
 async function classeur(
   feuille: string,
   entetes: string[],
@@ -255,6 +261,10 @@ describe('Étanchéité des coûts, sur base de test (PB16b, CA22)', () => {
   }
 
   async function preparerDonnees(): Promise<void> {
+    await sql(
+      'UPDATE "ParametresPharmacie" SET "debutCaisse" = now() - interval \'60 days\' WHERE "structureId" = $1',
+      [S],
+    );
     const f = await nouvelleFiche('F', 'Produit étanchéité', {
       coef: 10,
       prix: 8000,
@@ -548,6 +558,25 @@ describe('Étanchéité des coûts, sur base de test (PB16b, CA22)', () => {
       await c.en(
         'get',
         `/pharmacie/${S}/rapports/marge?du=${jour(0)}&au=${jour(0)}`,
+      ),
+    ],
+    'GET /pharmacie/:structureId/caisse/clotures/:jour/preparation': async (
+      c,
+    ) => [
+      await c.en(
+        'get',
+        `/pharmacie/${S}/caisse/clotures/${JOUR_CLOTURE[c.profil]()}/preparation`,
+      ),
+    ],
+    'POST /pharmacie/:structureId/caisse/clotures': async (c) => [
+      await c
+        .en('post', `/pharmacie/${S}/caisse/clotures`)
+        .send({ jour: JOUR_CLOTURE[c.profil]() }),
+    ],
+    'GET /pharmacie/:structureId/caisse/clotures': async (c) => [
+      await c.en(
+        'get',
+        `/pharmacie/${S}/caisse/clotures?mois=${JOUR_CLOTURE[c.profil]().slice(0, 7)}`,
       ),
     ],
     'GET /pharmacie/rechercher': async (c) => [

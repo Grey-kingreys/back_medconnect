@@ -248,6 +248,42 @@ describe('AllExceptionsFilter', () => {
     ]);
   });
 
+  it('CAISSES_A_FERMER recopie les clés chaînes des postes, sans les valeurs nulles ni les autres clés', () => {
+    filtre.catch(
+      new ConflictException({
+        message: 'm',
+        code: 'CAISSES_A_FERMER',
+        details: [
+          {
+            posteId: 'p1',
+            posteCode: 'W1',
+            libelle: 'Poste W1',
+            type: 'WEB',
+            raison: 'SESSION_OUVERTE',
+            sessionId: 's-1',
+            utilisateurNom: 'Mamadou Diallo',
+            dernierContactLe: null,
+            message: 'La caisse...',
+            secret: 'x',
+          },
+        ],
+      }),
+      host,
+    );
+    expect(corpsRenvoye().details).toEqual([
+      {
+        posteId: 'p1',
+        posteCode: 'W1',
+        libelle: 'Poste W1',
+        type: 'WEB',
+        raison: 'SESSION_OUVERTE',
+        sessionId: 's-1',
+        utilisateurNom: 'Mamadou Diallo',
+        message: 'La caisse...',
+      },
+    ]);
+  });
+
   it('ne recopie pas details sans code de vente', () => {
     filtre.catch(
       new BadRequestException({
