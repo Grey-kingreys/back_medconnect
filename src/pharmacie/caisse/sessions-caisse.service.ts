@@ -13,7 +13,13 @@ import { PrismaService } from 'src/common/services/prisma.service';
 import { AccesPharmacieService } from '../acces-pharmacie.service';
 import { assurerPointDeVente } from '../point-de-vente';
 import type { Reponse } from '../points-de-vente.service';
-import { jourConakry } from '../jour-metier';
+import { jourConakry, jourLisible } from '../jour-metier';
+import {
+  exigerJourOuvert,
+  jourDeRattachement,
+  messageCaisseJourneeCloturee,
+  verrouillerJourneesPartage,
+} from './journee';
 import { CODE_ESPECES, totalComptage } from '../domaine/caisse';
 import {
   commentaireEcartRequis,
@@ -43,6 +49,9 @@ export const MESSAGE_COMPTAGE_FERMETURE_REQUIS =
   'Comptez les billets du tiroir avant de fermer la caisse.';
 export const MESSAGE_MOTIF_MOUVEMENT_REQUIS =
   'Indiquez le motif de ce mouvement de caisse (3 caractères au moins).';
+export function messageOuvertureJourSuivant(jour: string): string {
+  return `Caisse ouverte. La journée d'aujourd'hui est déjà clôturée : cette caisse compte pour le ${jourLisible(jour)}.`;
+}
 export function messageSessionAutreUtilisateur(nom: string): string {
   return `La caisse de ce poste est ouverte par ${nom}. Elle doit être fermée avant que vous puissiez encaisser ici.`;
 }
@@ -222,8 +231,8 @@ export class SessionsCaisseService {
     dto: OuvrirSessionDto,
   ): Promise<Reponse<SessionReponse & { ouverteMaintenant: boolean }>> {
     const { user } = await this.accesPharmacie.verifier(structureId, userId);
-    const { session, ouverteMaintenant } = await this.prisma.$transaction(
-      (tx) =>
+    const { session, ouverteMaintenant, rattacheeAuJourSuivant } =
+      await this.prisma.$transaction((tx) =>
         this.ouvrirDansTransaction(tx, {
           structureId,
           userId,
@@ -232,12 +241,14 @@ export class SessionsCaisseService {
           sessionId: dto.id,
           comptage: dto.comptage,
         }),
-    );
+      );
     return {
       data: { ...session, ouverteMaintenant },
-      message: ouverteMaintenant
-        ? 'Caisse ouverte.'
-        : 'Votre caisse était déjà ouverte.',
+      message: rattacheeAuJourSuivant
+        ? messageOuvertureJourSuivant(session.jourMetier)
+        : ouverteMaintenant
+          ? 'Caisse ouverte.'
+          : 'Votre caisse était déjà ouverte.',
       success: true,
     };
   }
@@ -284,8 +295,16 @@ export class SessionsCaisseService {
     const session = await this.lireSessionPharmacie(structureId, sessionId);
     await this.exigerDroitSurSession(session, userId);
     const { comptage, cree } = await this.prisma.$transaction(async (tx) => {
+      await verrouillerJourneesPartage(tx, structureId);
       const s = await this.verrouillerSession(tx, sessionId);
       if (s.statut !== 'OUVERTE') this.leverSessionFermee();
+      const jourSession = jourConakry(s.jourMetier);
+      await exigerJourOuvert(
+        tx,
+        s.pointDeVenteId,
+        jourSession,
+        messageCaisseJourneeCloturee(jourSession),
+      );
       return this.enregistrerComptage(tx, s, dto.moment, dto, user.id);
     });
     return {
@@ -314,8 +333,16 @@ export class SessionsCaisseService {
     const session = await this.lireSessionPharmacie(structureId, sessionId);
     await this.exigerDroitSurSession(session, userId);
     const { mouvement, cree } = await this.prisma.$transaction(async (tx) => {
+      await verrouillerJourneesPartage(tx, structureId);
       const s = await this.verrouillerSession(tx, sessionId);
       if (s.statut !== 'OUVERTE') this.leverSessionFermee();
+      const jourSession = jourConakry(s.jourMetier);
+      await exigerJourOuvert(
+        tx,
+        s.pointDeVenteId,
+        jourSession,
+        messageCaisseJourneeCloturee(jourSession),
+      );
       if (dto.id) {
         const existant = await tx.mouvementCaisse.findUnique({
           where: { id: dto.id },
@@ -399,6 +426,7 @@ export class SessionsCaisseService {
     await this.exigerDroitSurSession(lue, userId);
 
     return this.prisma.$transaction(async (tx) => {
+      await verrouillerJourneesPartage(tx, structureId);
       let s = await this.verrouillerSession(tx, sessionId);
       if (s.statut !== 'OUVERTE') {
         return {
@@ -407,6 +435,13 @@ export class SessionsCaisseService {
           success: true as const,
         };
       }
+      const jourSession = jourConakry(s.jourMetier);
+      await exigerJourOuvert(
+        tx,
+        s.pointDeVenteId,
+        jourSession,
+        messageCaisseJourneeCloturee(jourSession),
+      );
       if (dto.comptageFermeture) {
         await this.enregistrerComptage(
           tx,
@@ -548,8 +583,13 @@ export class SessionsCaisseService {
       sessionId?: string;
       comptage?: { coupures: { valeurFaciale: number; nombre: number }[] };
     },
-  ): Promise<{ session: SessionReponse; ouverteMaintenant: boolean }> {
+  ): Promise<{
+    session: SessionReponse;
+    ouverteMaintenant: boolean;
+    rattacheeAuJourSuivant: boolean;
+  }> {
     const { structureId, userId, utilisateurNom, posteId, sessionId } = entree;
+    await verrouillerJourneesPartage(tx, structureId);
     const postes = await tx.$queryRaw<
       { id: string; pointDeVenteId: string; type: string; actif: boolean }[]
     >`SELECT p."id", p."pointDeVenteId", p."type"::text AS "type", p."actif" FROM "Poste" p JOIN "PointDeVente" pv ON pv."id" = p."pointDeVenteId" WHERE p."id" = ${posteId} AND pv."structureId" = ${structureId} FOR UPDATE OF p`;
@@ -596,6 +636,13 @@ export class SessionsCaisseService {
     }
 
     if (existante) {
+      const jourExistante = jourConakry(existante.jourMetier);
+      await exigerJourOuvert(
+        tx,
+        existante.pointDeVenteId,
+        jourExistante,
+        messageCaisseJourneeCloturee(jourExistante),
+      );
       let session = existante;
       if (
         entree.comptage &&
@@ -610,11 +657,20 @@ export class SessionsCaisseService {
         );
         session = await this.relire(tx, session.id);
       }
-      return { session: versSessionReponse(session), ouverteMaintenant: false };
+      return {
+        session: versSessionReponse(session),
+        ouverteMaintenant: false,
+        rattacheeAuJourSuivant: false,
+      };
     }
 
     const id = sessionId ?? randomUUID();
     const maintenant = new Date();
+    const { jour, jourReel } = await jourDeRattachement(
+      tx,
+      poste.pointDeVenteId,
+      maintenant,
+    );
     let creee = await tx.sessionCaisse.create({
       data: {
         id,
@@ -622,7 +678,9 @@ export class SessionsCaisseService {
         posteId,
         utilisateurId: userId,
         utilisateurNom,
-        jourMetier: new Date(`${jourConakry(maintenant)}T00:00:00.000Z`),
+        jourMetier: new Date(`${jour}T00:00:00.000Z`),
+        jourMetierOrigine:
+          jour !== jourReel ? new Date(`${jourReel}T00:00:00.000Z`) : null,
         ouverteLe: maintenant,
         evenementOuvertureId: id,
       },
@@ -638,7 +696,11 @@ export class SessionsCaisseService {
       );
       creee = await this.relire(tx, id);
     }
-    return { session: versSessionReponse(creee), ouverteMaintenant: true };
+    return {
+      session: versSessionReponse(creee),
+      ouverteMaintenant: true,
+      rattacheeAuJourSuivant: jour !== jourReel,
+    };
   }
 
   // -------------------------------------------------------------- internes

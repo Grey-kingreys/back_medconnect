@@ -82,7 +82,7 @@ if (jourRecu < jourConakry(new Date())) {
 
 Imports : `verrouillerJourneesPartage`, `exigerJourOuvert`, `messageReceptionJourneeCloturee` de `../caisse/journee`. Ce verrou n'est pas la première instruction (lecture du point de vente avant) : permis, aucune ligne de caisse ni de fiche n'est encore verrouillée (D613).
 
-### 4. `test/db/journee-cloturee.db-spec.ts` (nouveau, 10 tests)
+### 4. `test/db/journee-cloturee.db-spec.ts` (nouveau, 10 tests ; un 11e ajouté par le chef, D629)
 
 Préparation calquée sur `test/db/annulation.db-spec.ts` ; services à la main : `AccesPharmacieService`, `MouvementsStockService`, `SessionsCaisseService`, `VenteService`, `PointsDeVenteService`, `ReceptionsService(prisma, acces, mouvements, permissions)`, `ClotureService(prisma, acces)`. Permissions simulées : `RESPONSABLE` (`usr-admin-p1`, Fatoumata Camara) : `vente:write`, `vente:annuler`, `caisse:utiliser`, `caisse:superviser`, `cloture:gerer`, `reception:write`, `stock:read`, `stock:write`, `marge:read` ; `VENDEUR` (`usr-pharm-p1`) : `vente:write`, `caisse:utiliser`. Recopier `refus`, `sql`, `compter`, `nouvelleFiche`, `nouveauLot`, `soldeLot`, `prochainNumero` (d'`annulation.db-spec.ts`), `coupures`, `attendreAttentes`. `jour(n)` comme ailleurs ; `demain = lendemain(jour(0))` ; `ip = '127.0.0.1'`. L'aide `vendre` de ce fichier a la forme `vendre(utilisateur, stockId, quantite, posteId?)` = `service.creerVente(PHARMACIE, utilisateur, { lignes: [{ stockId, quantite }], ordonnanceVerifiee: true, ...(posteId ? { posteId } : {}) }, undefined, ip)` (quantité en boîtes, coefficient 1).
 
@@ -109,6 +109,7 @@ Fiche F : `F = (await nouvelleFiche()).stockId` (prix de la boîte 1 000, coeffi
 8. « course réelle sans interblocage » : pour `k` de 4 à 6 : `Promise.allSettled([clotures.cloturer(PHARMACIE, RESPONSABLE, { jour: jour(-k) }, ip), vendre(VENDEUR, F, 1)])` : les deux `fulfilled` ; la vente a `jourMetier` `demain`.
 9. « une annulation et une vente qui attendent une clôture en cours » : `h = tenirJournees('exclusif')` ; `await h.tenu` ; `v = vendre(VENDEUR, F, 1)` et `a = service.annulerVente(PHARMACIE, V3, RESPONSABLE, { motif: 'Erreur de prix' }, ip)` lancées ; `attendreAttentes(2)` ; `h.liberer()` ; `await h.fin` ; `v` et `a` réussissent (aucune clôture n'a été écrite par le test : elles se poursuivent normalement).
 10. « une vente qui attendait la clôture voit la journée clôturée » (dernier : la caisse du vendeur devient inutilisable) : `h = tenirJournees('exclusif', (tx) => tx.$executeRaw`INSERT INTO "ClotureJournaliere" ("id","pointDeVenteId","jourMetier","clotureParId") VALUES ('clo-essai-demain', ${pv1}, ${demain}::date, 'usr-admin-p1')`)` (simule la clôture du jour de `SV2` ; le service refuse un jour futur, d'où l'insertion directe, commentée) ; `await h.tenu` ; `compteurAvant = prochainNumero()` ; `v = vendre(VENDEUR, F, 1)` ; `attendreAttentes(1)` ; `h.liberer()` ; `await h.fin` ; `v` rejette 409 `JOURNEE_CLOTUREE` (`messageCaisseJourneeCloturee(demain)`) ; aucune `Vente` créée après la libération, `prochainNumero()` = `compteurAvant`.
+11. (ajouté par le chef, D629) « chaque écrivain de caisse attend la clôture avant toute lecture » : `h = tenirJournees('exclusif')` ; lancer ensemble une vente d'une fiche inexistante, l'annulation d'une vente inexistante, `sessions.ouvrir` sur un poste inexistant, puis `saisirComptage`, `enregistrerMouvement` et `fermer` sur `SV` (fermée) ; `attendreAttentes(6)` ; `h.liberer()` ; résultats habituels : 404 `STOCK_INTROUVABLE`, 404, 409 `POSTE_INCONNU`, 409 `SESSION_FERMEE` deux fois, bilan rejoué.
 
 ### 5. `CLAUDE.md` du dépôt back
 
@@ -127,7 +128,7 @@ Depuis `D:\souleymane\perso-archive-20260923\perso\medconnecte` :
 1. `docker compose exec -T backend npx tsc --noEmit` : aucune erreur.
 2. `docker compose exec -T backend npx eslint src/pharmacie/caisse/sessions-caisse.service.ts src/pharmacie/vente.service.ts src/pharmacie/receptions/receptions.service.ts test/db/journee-cloturee.db-spec.ts` : aucune erreur.
 3. `docker compose exec -T backend npm test` : tout vert, sans aucun test modifié.
-4. `docker compose exec -T backend npm run test:db` : tout vert, dont `test/db/journee-cloturee.db-spec.ts` (10) ; tous les autres db-specs (dont `sessions-caisse`, `vente`, `annulation`, `qualification`, `receptions`, `clotures`, `export-cloture`, `etancheite-couts`) verts et inchangés.
+4. `docker compose exec -T backend npm run test:db` : tout vert, dont `test/db/journee-cloturee.db-spec.ts` (10, puis 11 avec D629) ; tous les autres db-specs (dont `sessions-caisse`, `vente`, `annulation`, `qualification`, `receptions`, `clotures`, `export-cloture`, `etancheite-couts`) verts et inchangés.
 5. `git status --porcelain` ne liste que les fichiers autorisés (plus `docker-entrypoint.sh`) ; `git diff --stat -- prisma test/db/instantanes src/pharmacie/caisse/journee.ts src/pharmacie/caisse/clotures.service.ts` vide.
 6. Verrou en tête : dans chacune des transactions de `enregistrerVente`, `annulerVente`, `ouvrirDansTransaction`, `saisirComptage`, `enregistrerMouvement`, `fermer`, la première instruction est `verrouillerJourneesPartage` (relecture du chef, `grep -n "verrouillerJourneesPartage" src/pharmacie` : 7 appels, dont celui de la réception).
 7. Aucun caractère U+2014 ni U+2013 dans les lignes ajoutées ni dans les fichiers nouveaux.
@@ -139,7 +140,15 @@ Chemin de l'artefact + preuve (commande lancée, résultat en une ligne). Ou un 
 ## Historique
 
 <!-- une ligne par tentative : AAAA-MM-JJ | tier | résultat | raison si échec -->
+2026-10-31 | dur (codeur Sonnet, vérificateur Sonnet) | PASS, validé par le chef (rapports/PB17c-verification.md, rapports/PB17c-chef.md) | code conforme, aucune correction ; test db 11 ajouté par le chef (D629) : sans lui, retirer le verrou en tête de `enregistrerVente` laissait les dix tests verts
 
 ## Validation
 
 <!-- commande relancée par l'orchestrateur | résultat en une ligne | hash du commit -->
+docker compose exec -T backend npx tsc --noEmit | 0 erreur | voir commit
+docker compose exec -T backend npx eslint (4 fichiers .ts de la fiche) | 0 erreur, 0 avertissement | voir commit
+docker compose exec -T backend npm test | 95 suites, 1034 réussis, 3 ignorés, 0 échec | voir commit
+docker compose exec -T backend npm run test:db | 29 suites, 337 réussis (326 + 11), 0 échec | voir commit
+contre-épreuve : verrou partagé retiré de `enregistrerVente`, `journee-cloturee.db-spec.ts` seul | 10 tests de la fiche verts, test 11 en échec « Attente non observée. » (restauré) | voir commit
+contre-épreuve : verrou partagé retiré de `fermer` | test 11 en échec (restauré) | voir commit
+contre-épreuve : `exigerJourOuvert` retiré de `saisirComptage` | test 3 en échec (restauré) ; `git diff --stat src` identique avant et après | voir commit

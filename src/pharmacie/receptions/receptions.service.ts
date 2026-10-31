@@ -12,6 +12,11 @@ import {
   AccesPharmacieService,
   type AccesPharmacie,
 } from '../acces-pharmacie.service';
+import {
+  exigerJourOuvert,
+  messageReceptionJourneeCloturee,
+  verrouillerJourneesPartage,
+} from '../caisse/journee';
 import { assurerPointDeVente } from '../point-de-vente';
 import { jourConakry } from '../jour-metier';
 import { masquerCouts } from '../masquer-couts';
@@ -289,6 +294,18 @@ export class ReceptionsService {
         code: 'VALIDATION',
         champs: [{ champ: 'recueLe', contraintes: ['pasDansLeFutur'] }],
       });
+    }
+
+    // 4b. Réception datée d'un jour antérieur clôturé (D614) ; le jour même reste permis
+    const jourRecu = jourConakry(entree.recueLe);
+    if (jourRecu < jourConakry(new Date())) {
+      await verrouillerJourneesPartage(tx, structureId);
+      await exigerJourOuvert(
+        tx,
+        pointDeVenteId,
+        jourRecu,
+        messageReceptionJourneeCloturee(jourRecu),
+      );
     }
 
     // 5. Verrous de ligne des fiches, triés (D570)

@@ -12,6 +12,7 @@ import { PermissionsService } from 'src/common/rbac/permissions.service';
 import { NotificationsService } from 'src/notifications/notifications.service';
 import { StorageService } from 'src/storage/storage.service';
 import { AccesPharmacieService } from './acces-pharmacie.service';
+import { verrouillerJourneesPartage } from './caisse/journee';
 import {
   estConflitCleIdempotence,
   lireCleIdempotence,
@@ -418,6 +419,9 @@ export class VenteService {
     const { structure, user, dto, cle, ip } = entree;
     const structureId = structure.id;
     const utilisateurNom = `${user.prenom} ${user.nom}`.trim();
+
+    // 0. Verrou de journée partagé (D613) : aucune clôture ne s'intercale
+    await verrouillerJourneesPartage(tx, structureId);
 
     // 1. Fiches
     const ids = [...new Set(dto.lignes.map((l) => l.stockId))];
@@ -1120,6 +1124,9 @@ export class VenteService {
     };
     try {
       resultat = await this.prisma.$transaction(async (tx) => {
+        // 0. Verrou de journée partagé (D613) : aucune clôture ne s'intercale
+        await verrouillerJourneesPartage(tx, structureId);
+
         // 1. Origine
         const origine = await tx.vente.findFirst({
           where: { id: venteId, structureId },
