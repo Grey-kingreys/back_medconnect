@@ -92,7 +92,13 @@ Chemin de l'artefact + preuve (commande lancée, résultat en une ligne). Ou un 
 ## Historique
 
 <!-- une ligne par tentative : AAAA-MM-JJ | tier | résultat | raison si échec -->
+2026-11-01 | spécifié (Sonnet codeur, Sonnet vérificateur) | PASS avec réserve (rapports/PF07b-verification.md) | libellé des lots de la sortie calculé avec le coefficient de la fiche et non celui du lot
+2026-11-01 | chef (Opus) | validé | coefficient du lot appliqué (D709, `ChoixLot.tsx` touché en plus de la liste), test ajouté (rapports/PF07b-chef.md)
 
 ## Validation
 
 <!-- commande relancée par l'orchestrateur | résultat en une ligne | hash du commit -->
+docker compose exec -T frontend npx tsc --noEmit | exit 0 | 23a558c
+docker compose exec -T frontend npx eslint (10 fichiers touchés) | exit 0 | 23a558c
+docker compose exec -T frontend npx vitest run | 67 fichiers, 576 verts | 23a558c
+npm run build (local) | réussi ; hook pre-commit du front passé | 23a558c

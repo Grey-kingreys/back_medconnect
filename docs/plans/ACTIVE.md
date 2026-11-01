@@ -32,7 +32,7 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | PB19 | Seeds, démo et documentation, deux sous-fiches à commiter dans l'ordre : tasks/PB19a-jeu-demo-pharmacie.md, tasks/PB19b-documentation-swagger-variables.md (D668 à D682) | spécifié | validé (PB19a, PB19b ; D668 à D682, rapports/PB19a-chef.md, PB19b-chef.md) | 1 |
 | PF01 | Vente : socle (types, droits, erreurs, règles, source) puis écran (unité, reliquat, vente sans stock, paiements), dépôt front, branche orch/pharmacie-t1-front : tasks/PF01a-socle-front-caisse.md, tasks/PF01b-ecran-vente-unite-paiements.md (D683 à D705) | spécifié | PF01a validé (front 3bd8abe, D705, rapports/PF01a-chef.md) ; PF01b validé (front 646edfd, D706, rapports/PF01b-chef.md) | 1 |
 | PF02 | Fiche produit et page du stock : tasks/PF02a-page-stock-correction-apercu.md, tasks/PF02b-fiche-produit-deux-prix-qualification.md | spécifié | PF02a validé (front 63bb9ad, rapports/PF02a-chef.md) ; PF02b validé (front 9faa963, D707, rapports/PF02b-chef.md), avec correction du back sur cette branche : upsert du stock à quantité facultative, sans elle aucune écriture de stock | 2 |
-| PF07 | Réception, inventaire et sorties de stock (ajout D683, après PF02) : tasks/PF07a-reception-livraison-fournisseurs.md, tasks/PF07b-detail-reception-sorties-stock.md, tasks/PF07c-inventaire-par-lot.md, tasks/PF07d-import-excel-livraison-inventaire.md | spécifié | PF07a validé (front 1d2197f, D708, rapports/PF07a-chef.md) ; PF07b, PF07c, PF07d fiches prêtes | 1 |
+| PF07 | Réception, inventaire et sorties de stock (ajout D683, après PF02) : tasks/PF07a-reception-livraison-fournisseurs.md, tasks/PF07b-detail-reception-sorties-stock.md, tasks/PF07c-inventaire-par-lot.md, tasks/PF07d-import-excel-livraison-inventaire.md | spécifié | PF07a validé (front 1d2197f, D708, rapports/PF07a-chef.md) ; PF07b validé (front 23a558c, D709, rapports/PF07b-chef.md) ; PF07c, PF07d fiches prêtes | 1 |
 | PF03 | Ma caisse : tasks/PF03a-ma-caisse-ouverture-comptage.md, tasks/PF03b-ma-caisse-mouvements-fermeture.md | spécifié | spécifié par le chef, fiches prêtes | 0 |
 | PF04 | Annulation et ventes du jour : tasks/PF04-annulation-ventes-du-jour.md | spécifié | spécifié par le chef, fiches prêtes | 0 |
 | PF05 | Clôture journalière : tasks/PF05-cloture-journaliere.md | spécifié | spécifié par le chef, fiches prêtes | 0 |
@@ -55,8 +55,8 @@ Back de la tranche (PB01 à PB19) validé ; bilan, décisions à faire valider p
 
 ## Dernières décisions (5 max, historique complet dans decisions.md)
 
+- D709 Une quantité de lot se lit avec le coefficient du lot, repli sur la fiche s'il est absent (révisable)
 - D708 Garde de navigation étendue aux sous-pages d'une entrée (`couvreSousPages`, réceptions) (orchestrateur principal, révisable)
-- D684 Péremption saisie MM/AA ou MM/AAAA convertie au dernier jour du mois, date complète acceptée (révisable)
 - D688 Un identifiant client par saisie, rejoué après échec réseau, saisie verrouillée tant que l'issue est inconnue (révisable)
 - D689 Vente jamais bloquée par le stock côté front ; périmé seul : choix du lot et motif (révisable)
 - D704 Écrans du titulaire masqués au vendeur avec les rôles par défaut, aucun contournement côté front (révisable)
