@@ -28,7 +28,9 @@ describe('Points de vente, postes et référentiels (HTTP)', () => {
   const enregistrerPoste = jest.fn();
   const listerPostes = jest.fn();
   const modifierPoste = jest.fn();
+  const attribuerPlage = jest.fn();
   const services = [
+    attribuerPlage,
     referentiels,
     parametres,
     modifierParametres,
@@ -100,6 +102,7 @@ describe('Points de vente, postes et référentiels (HTTP)', () => {
             enregistrerPoste,
             listerPostes,
             modifierPoste,
+            attribuerPlage,
           },
         },
       ],
@@ -357,5 +360,17 @@ describe('Points de vente, postes et référentiels (HTTP)', () => {
       true,
     );
     expect(modifierPoste).not.toHaveBeenCalled();
+  });
+
+  it('8. plage de tickets : identifiant qui n est pas un UUID refusé (VALIDATION)', async () => {
+    const res = await request(serveur())
+      .post('/pharmacie/s1/postes/p1/plages')
+      .set('x-essai-user', 'pharmacien')
+      .send({ id: 'abc' });
+    expect(res.status).toBe(400);
+    const erreur = res.body as CorpsErreur;
+    expect(erreur.code).toBe('VALIDATION');
+    expect(aContrainte(erreur, 'id')).toBe(true);
+    expect(attribuerPlage).not.toHaveBeenCalled();
   });
 });

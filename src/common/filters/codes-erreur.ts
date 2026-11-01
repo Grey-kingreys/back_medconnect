@@ -122,6 +122,8 @@ export const CODES_ERREUR = [
   'JOUR_AVANT_DEBUT_CAISSE',
   // Export d'une journée qui n'est pas encore clôturée (409).
   'JOURNEE_NON_CLOTUREE',
+  // Deux séries de numéros de tickets déjà en réserve sur ce poste (409).
+  'PLAGES_SUFFISANTES',
 ] as const;
 
 export type CodeErreur = (typeof CODES_ERREUR)[number];

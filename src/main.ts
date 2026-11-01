@@ -9,6 +9,7 @@ import { Logger } from 'nestjs-pino';
 import { RedisIoAdapter } from './common/redis-io.adapter';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { fabriquerErreurValidation } from './common/filters/erreur-validation';
+import { originesCors } from './config/origines-cors';
 
 async function bootstrap() {
   // `bufferLogs` : conserve les logs émis avant que Pino ne soit prêt.
@@ -54,10 +55,12 @@ async function bootstrap() {
   // au format { statusCode, message, error } attendu par le front.
   app.useGlobalFilters(new AllExceptionsFilter());
 
-  // CORS
+  // CORS : origine du front web et origines du serveur local du desktop (D635).
   app.enableCors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: originesCors(process.env),
     credentials: true,
+    // Date : heure du serveur lisible par le desktop pour repérer une horloge déréglée (D662).
+    exposedHeaders: ['ETag', 'Date'],
   });
 
   // Swagger : jamais exposé en production par défaut. La documentation publique

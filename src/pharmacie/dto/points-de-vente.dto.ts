@@ -8,6 +8,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   Matches,
   Max,
@@ -113,4 +114,12 @@ export class ModifierParametresDto {
   @Min(5)
   @Max(50)
   seuilRechargementPlagePct?: number;
+}
+
+export class AttribuerPlageDto {
+  @ApiProperty({
+    description: 'UUID généré par le poste (rejeu sans doublon)',
+  })
+  @IsUUID('all')
+  id: string;
 }

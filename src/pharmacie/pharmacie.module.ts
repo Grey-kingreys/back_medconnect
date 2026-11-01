@@ -23,6 +23,8 @@ import { RapportsController } from './rapports/rapports.controller';
 import { RapportsService } from './rapports/rapports.service';
 import { ClotureController } from './caisse/clotures.controller';
 import { ClotureService } from './caisse/clotures.service';
+import { SynchroController } from './synchro/synchro.controller';
+import { CatalogueSynchroService } from './synchro/catalogue-synchro.service';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { AuthModule } from 'src/auth/auth.module';
 
@@ -41,6 +43,7 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
     AnomaliesController,
     RapportsController,
     ClotureController,
+    SynchroController,
   ],
   providers: [
     PharmacieService,
@@ -57,6 +60,7 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
     AnomaliesService,
     RapportsService,
     ClotureService,
+    CatalogueSynchroService,
     PrismaService,
   ],
 })

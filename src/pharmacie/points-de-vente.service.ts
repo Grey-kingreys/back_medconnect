@@ -16,13 +16,25 @@ import { AccesPharmacieService } from './acces-pharmacie.service';
 import { assurerPointDeVente } from './point-de-vente';
 import { jourConakry } from './jour-metier';
 import {
+  AttribuerPlageDto,
   EnregistrerPosteDto,
   ModifierParametresDto,
   ModifierPosteDto,
   TypePosteEnregistrable,
 } from './dto/points-de-vente.dto';
+import {
+  MESSAGE_IDENTIFIANT_DEJA_UTILISE,
+  MESSAGE_POSTE_INCONNU,
+} from './caisse/sessions-caisse.service';
+import { estDoublonSur } from './stock/erreurs-base';
+import { lirePlagesNonEpuisees, type PlageLue } from './synchro/plages';
 
 export const MESSAGE_POSTE_INTROUVABLE = 'Ce poste est introuvable.';
+export const MESSAGE_PLAGES_SUFFISANTES =
+  "Ce poste a déjà deux séries de numéros de tickets en réserve : utilisez-les avant d'en demander une autre.";
+export const MESSAGE_PLAGE_POSTE_WEB =
+  "Les numéros de tickets réservés servent seulement à l'application MedConnecte Caisse pour Windows.";
+export const TAILLE_PLAGE_DEFAUT = 1000;
 export const MESSAGE_POSTE_TYPE_DIFFERENT =
   'Cet appareil est déjà enregistré comme un autre type de poste.';
 
@@ -102,7 +114,9 @@ const CHAMPS_PARAMETRES: ChampParametre[] = [
   'seuilRechargementPlagePct',
 ];
 
-function versParametresReponse(p: ParametresPharmacie): ParametresReponse {
+export function versParametresReponse(
+  p: ParametresPharmacie,
+): ParametresReponse {
   return {
     horizonsPeremptionJours: p.horizonsPeremptionJours,
     seuilEcartCaisse: p.seuilEcartCaisse,
@@ -407,6 +421,144 @@ export class PointsDeVenteService implements OnApplicationBootstrap {
     return {
       data: { ...versPosteReponse(poste), cree },
       message: cree ? 'Poste enregistré.' : 'Ce poste était déjà enregistré.',
+      success: true,
+    };
+  }
+
+  /**
+   * Réserve une série de numéros de tickets pour un poste desktop (D632).
+   * Idempotent par `id` ; verrous : poste puis compteur, ni journée ni caisse.
+   */
+  async attribuerPlage(
+    structureId: string,
+    userId: string,
+    posteId: string,
+    dto: AttribuerPlageDto,
+    ip?: string,
+  ): Promise<
+    Reponse<{
+      id: string;
+      debut: number;
+      fin: number;
+      taille: number;
+      cree: boolean;
+      plages: PlageLue[];
+    }>
+  > {
+    const { user, structure } = await this.accesPharmacie.verifier(
+      structureId,
+      userId,
+    );
+    const refus = (message: string, code: string) =>
+      new ConflictException({ message, code });
+
+    let resultat: {
+      plage: { id: string; debut: number; fin: number };
+      cree: boolean;
+      plages: PlageLue[];
+    };
+    try {
+      resultat = await this.prisma.$transaction(
+        async (tx) => {
+          const [poste] = await tx.$queryRaw<
+            {
+              id: string;
+              pointDeVenteId: string;
+              code: string;
+              type: string;
+              actif: boolean;
+            }[]
+          >`SELECT p."id", p."pointDeVenteId", p."code", p."type"::text AS "type", p."actif" FROM "Poste" p JOIN "PointDeVente" pv ON pv."id" = p."pointDeVenteId" WHERE p."id" = ${posteId} AND pv."structureId" = ${structure.id} FOR UPDATE OF p`;
+          if (!poste || poste.type === 'TECHNIQUE' || !poste.actif) {
+            throw refus(MESSAGE_POSTE_INCONNU, 'POSTE_INCONNU');
+          }
+          if (poste.type === 'WEB') {
+            throw refus(MESSAGE_PLAGE_POSTE_WEB, 'POSTE_INCONNU');
+          }
+
+          const existante = await tx.plageTicket.findUnique({
+            where: { id: dto.id },
+          });
+          if (existante) {
+            if (existante.posteId !== poste.id) {
+              throw refus(
+                MESSAGE_IDENTIFIANT_DEJA_UTILISE,
+                'IDENTIFIANT_DEJA_UTILISE',
+              );
+            }
+            return {
+              plage: existante,
+              cree: false,
+              plages: await lirePlagesNonEpuisees(tx, poste.id),
+            };
+          }
+
+          if ((await lirePlagesNonEpuisees(tx, poste.id)).length >= 2) {
+            throw refus(MESSAGE_PLAGES_SUFFISANTES, 'PLAGES_SUFFISANTES');
+          }
+
+          const parametres = await tx.parametresPharmacie.findUnique({
+            where: { structureId: structure.id },
+          });
+          const taille = parametres?.taillePlageTickets ?? TAILLE_PLAGE_DEFAUT;
+
+          const [{ debut: debutBrut }] = await tx.$queryRaw<
+            { debut: number }[]
+          >`INSERT INTO "CompteurTicket" ("pointDeVenteId", "prochainNumero") VALUES (${poste.pointDeVenteId}, ${1 + taille}) ON CONFLICT ("pointDeVenteId") DO UPDATE SET "prochainNumero" = "CompteurTicket"."prochainNumero" + ${taille} RETURNING "prochainNumero" - ${taille} AS "debut"`;
+          const debut = Number(debutBrut);
+          const fin = debut + taille - 1;
+
+          const plage = await tx.plageTicket.create({
+            data: {
+              id: dto.id,
+              posteId: poste.id,
+              pointDeVenteId: poste.pointDeVenteId,
+              debut,
+              fin,
+              attribueeParId: user.id,
+            },
+          });
+          await tx.auditLog.create({
+            data: {
+              userId: user.id,
+              action: 'create',
+              entityType: 'PlageTicket',
+              entityId: dto.id,
+              ip: ip ?? null,
+              metadata: { posteCode: poste.code, debut, fin },
+            },
+          });
+          return {
+            plage,
+            cree: true,
+            plages: await lirePlagesNonEpuisees(tx, poste.id),
+          };
+        },
+        { maxWait: 5_000, timeout: 15_000 },
+      );
+    } catch (e) {
+      if (estDoublonSur(e, 'PlageTicket')) {
+        throw refus(
+          MESSAGE_IDENTIFIANT_DEJA_UTILISE,
+          'IDENTIFIANT_DEJA_UTILISE',
+        );
+      }
+      throw e;
+    }
+
+    const { debut, fin } = resultat.plage;
+    return {
+      data: {
+        id: resultat.plage.id,
+        debut,
+        fin,
+        taille: fin - debut + 1,
+        cree: resultat.cree,
+        plages: resultat.plages,
+      },
+      message: resultat.cree
+        ? `Numéros de tickets ${debut} à ${fin} réservés pour ce poste.`
+        : 'Ces numéros de tickets étaient déjà réservés pour ce poste.',
       success: true,
     };
   }

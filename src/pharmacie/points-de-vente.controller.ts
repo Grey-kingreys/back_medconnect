@@ -25,6 +25,7 @@ import { RequirePermissions } from 'src/common/rbac/require-permissions.decorato
 import { PERMISSIONS } from 'src/common/rbac/permissions.constants';
 import { PointsDeVenteService } from './points-de-vente.service';
 import {
+  AttribuerPlageDto,
   EnregistrerPosteDto,
   ModifierParametresDto,
   ModifierPosteDto,
@@ -103,6 +104,32 @@ export class PointsDeVenteController {
     return this.pointsDeVente.enregistrerPoste(
       structureId,
       req.user.userId,
+      dto,
+      ip,
+    );
+  }
+
+  @Post(':structureId/postes/:posteId/plages')
+  @RequirePermissions(PERMISSIONS.CAISSE_UTILISER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Réserver une série de numéros de tickets pour un poste desktop',
+    description:
+      'Idempotent par id (data.cree faux au rejeu). 409 : PLAGES_SUFFISANTES, POSTE_INCONNU, IDENTIFIANT_DEJA_UTILISE.',
+  })
+  @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
+  @ApiParam({ name: 'posteId', description: 'Identifiant du poste desktop' })
+  attribuerPlage(
+    @Req() req: RequestWithUser,
+    @Param('structureId') structureId: string,
+    @Param('posteId') posteId: string,
+    @Body() dto: AttribuerPlageDto,
+    @Ip() ip: string,
+  ) {
+    return this.pointsDeVente.attribuerPlage(
+      structureId,
+      req.user.userId,
+      posteId,
       dto,
       ip,
     );

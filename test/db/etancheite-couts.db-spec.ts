@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   ClassSerializerInterceptor,
   ExecutionContext,
@@ -328,6 +329,18 @@ describe('Étanchéité des coûts, sur base de test (PB16b, CA22)', () => {
 
   const id = (c: Contexte, nom: string) => c.etat[nom] ?? 'inexistant';
 
+  /** Enregistre (idempotent) le poste desktop du profil et le retient. */
+  async function enregistrerPosteDesktop(
+    c: Contexte,
+  ): Promise<request.Response> {
+    const r = await c.en('post', `/pharmacie/${S}/postes`).send({
+      type: 'DESKTOP',
+      appareilId: `etancheite-desktop-${c.profil}`,
+    });
+    retenir(c, 'posteDesktopId', r);
+    return r;
+  }
+
   const APPELS: Record<CleRoutePharmacie, Appel> = {
     'GET /pharmacie/:structureId/referentiels': async (c) => [
       await c.en('get', `/pharmacie/${S}/referentiels`),
@@ -355,6 +368,28 @@ describe('Étanchéité des coûts, sur base de test (PB16b, CA22)', () => {
         .en('patch', `/pharmacie/${S}/postes/${id(c, 'posteId')}`)
         .send({ libelle: `Comptoir ${c.profil}` }),
     ],
+    'POST /pharmacie/:structureId/postes/:posteId/plages': async (c) => {
+      const poste = await enregistrerPosteDesktop(c);
+      return [
+        poste,
+        await c
+          .en(
+            'post',
+            `/pharmacie/${S}/postes/${id(c, 'posteDesktopId')}/plages`,
+          )
+          .send({ id: randomUUID() }),
+      ];
+    },
+    'GET /pharmacie/:structureId/synchro/catalogue': async (c) => {
+      const poste = await enregistrerPosteDesktop(c);
+      return [
+        poste,
+        await c.en(
+          'get',
+          `/pharmacie/${S}/synchro/catalogue?posteId=${id(c, 'posteDesktopId')}`,
+        ),
+      ];
+    },
     'POST /pharmacie/:structureId/caisse/sessions': async (c) => {
       const r = await c
         .en('post', `/pharmacie/${S}/caisse/sessions`)
