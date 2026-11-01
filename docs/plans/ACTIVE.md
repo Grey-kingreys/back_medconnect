@@ -30,8 +30,15 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | PB17 | Clôture journalière, trois sous-fiches commitées dans l'ordre : tasks/PB17a-cloture-journaliere.md, tasks/PB17b-export-cloture.md, tasks/PB17c-verrou-journee-ecrivains.md (D612 à D628) | dur | validé (PB17a, PB17b, PB17c ; D612 à D629, rapports/PB17a-chef.md, PB17b-chef.md, PB17c-chef.md) | 1 |
 | PB18 | Synchronisation desktop, quatre sous-fiches commitées dans l'ordre : tasks/PB18a-plages-catalogue-cors.md, tasks/PB18b-moteur-rejeu-caisse.md, tasks/PB18c-rejeu-ventes.md, tasks/PB18d-remontee-apres-cloture.md (D630 à D661) | dur | validé (PB18a, PB18b, PB18c, PB18d ; D630 à D667, rapports/PB18a-chef.md, PB18b-chef.md, PB18c-chef.md, PB18d-chef.md) | 1 |
 | PB19 | Seeds, démo et documentation, deux sous-fiches à commiter dans l'ordre : tasks/PB19a-jeu-demo-pharmacie.md, tasks/PB19b-documentation-swagger-variables.md (D668 à D682) | spécifié | validé (PB19a, PB19b ; D668 à D682, rapports/PB19a-chef.md, PB19b-chef.md) | 1 |
+| PF01 | Vente : socle (types, droits, erreurs, règles, source) puis écran (unité, reliquat, vente sans stock, paiements), dépôt front, branche orch/pharmacie-t1-front : tasks/PF01a-socle-front-caisse.md, tasks/PF01b-ecran-vente-unite-paiements.md (D683 à D705) | spécifié | PF01a validé (front 3bd8abe, D705, rapports/PF01a-chef.md) ; PF01b à faire | 1 |
+| PF02 | Fiche produit et page du stock : tasks/PF02a-page-stock-correction-apercu.md, tasks/PF02b-fiche-produit-deux-prix-qualification.md | spécifié | spécifié par le chef, fiches prêtes | 0 |
+| PF07 | Réception, inventaire et sorties de stock (ajout D683, après PF02) : tasks/PF07a-reception-livraison-fournisseurs.md, tasks/PF07b-detail-reception-sorties-stock.md, tasks/PF07c-inventaire-par-lot.md, tasks/PF07d-import-excel-livraison-inventaire.md | spécifié | spécifié par le chef, fiches prêtes | 0 |
+| PF03 | Ma caisse : tasks/PF03a-ma-caisse-ouverture-comptage.md, tasks/PF03b-ma-caisse-mouvements-fermeture.md | spécifié | spécifié par le chef, fiches prêtes | 0 |
+| PF04 | Annulation et ventes du jour : tasks/PF04-annulation-ventes-du-jour.md | spécifié | spécifié par le chef, fiches prêtes | 0 |
+| PF05 | Clôture journalière : tasks/PF05-cloture-journaliere.md | spécifié | spécifié par le chef, fiches prêtes | 0 |
+| PF06 | Anomalies, alertes de péremption et marge : tasks/PF06a-file-anomalies.md, tasks/PF06b-alertes-peremption-marge.md | spécifié | spécifié par le chef, fiches prêtes | 0 |
 
-Back de la tranche (PB01 à PB19) validé ; bilan, décisions à faire valider par le porteur et consignes pour le front : rapports/PB19b-chef.md. Prochaine étape : front web PF01 à PF06 (PLAN.md, section « Front web »), dans le dépôt front_medconnect.
+Back de la tranche (PB01 à PB19) validé ; bilan, décisions à faire valider par le porteur et consignes pour le front : rapports/PB19b-chef.md. Front : 14 sous-fiches dans l'ordre PF01a, PF01b, PF02a, PF02b, PF07a, PF07b, PF07c, PF07d, PF03a, PF03b, PF04, PF05, PF06a, PF06b (D685), une à la fois sur l'arbre principal du dépôt front_medconnect, en attente de validation des fiches par l'orchestrateur principal.
 
 ## Faites (preuve = commit)
 
@@ -48,8 +55,8 @@ Back de la tranche (PB01 à PB19) validé ; bilan, décisions à faire valider p
 
 ## Dernières décisions (5 max, historique complet dans decisions.md)
 
-- D682 Rôles non rattachés après création du jeu démo : scénario pharmacie sauté et journalisé `demo.scenario_pharmacie_saute` (révisable)
-- D681 Recul de `debutCaisse` et `debutFiabiliteMarge` démo par `reculerDebutsCaisseDemo` dans `src/pharmacie/demo/` (étanchéité des coûts) (révisable)
-- D670 Jeu démo en deux phases : données en une transaction, puis scénario pharmacie joué par les services juste après une création ou une remise à zéro (révisable)
-- D667 Journée clôturée jamais modifiée (pièces, paiements, clôture, totaux, export) ; seule transition admise : caisse du poste manquant OUVERTE vers FERMEE, jamais incluse (D649) (révisable)
-- D659 Vente remontée après clôture ou fermeture : pièce `REGULARISATION` sur la caisse d'origine, jour de rattachement, anomalie `REMONTEE_APRES_CLOTURE` au vendeur de la caisse (révisable)
+- D683 PF07 « Réception, inventaire et sorties de stock » ajouté après PF02 (orchestrateur principal, révisable)
+- D684 Péremption saisie MM/AA ou MM/AAAA convertie au dernier jour du mois, date complète acceptée (révisable)
+- D688 Un identifiant client par saisie, rejoué après échec réseau, saisie verrouillée tant que l'issue est inconnue (révisable)
+- D689 Vente jamais bloquée par le stock côté front ; périmé seul : choix du lot et motif (révisable)
+- D704 Écrans du titulaire masqués au vendeur avec les rôles par défaut, aucun contournement côté front (révisable)
