@@ -817,11 +817,8 @@ describe('Synchro desktop : moteur de rejeu et événements de caisse, sur base 
     expect(statuts(ferme)).toEqual(['APPLIQUE']);
   });
 
-  it('14. vente sur une caisse fermée : renvoyée plus tard', async () => {
+  it('14. vente sur une caisse fermée : régularisée, jamais renvoyée', async () => {
     const n = (await derniere()) + 1;
-    const lignesAvant = await compter(
-      'SELECT count(*) AS n FROM "EvenementSynchro"',
-    );
     const r = await envoyer([
       ev(n, 'VENTE', {
         venteId: randomUUID(),
@@ -839,23 +836,26 @@ describe('Synchro desktop : moteur de rejeu et événements de caisse, sur base 
         total: 1000,
         ordonnanceVerifiee: true,
       }),
-      ev(n + 1, 'MOUVEMENT_CAISSE', { sessionId: S1 }),
+      ev(n + 1, 'MOUVEMENT_CAISSE', {
+        mouvementId: randomUUID(),
+        sessionId: S1,
+        type: 'APPORT',
+        montant: 1000,
+        motif: 'Monnaie',
+      }),
     ]);
-    expect(statuts(r)).toEqual(['A_RENVOYER', 'A_RENVOYER']);
+    expect(statuts(r)).toEqual(['REJETE', 'REJETE']);
     expect(r.data.resultats.map((x) => x.code)).toEqual([
-      'REGULARISATION_INDISPONIBLE',
-      'SERVICE_INDISPONIBLE',
+      'STOCK_INTROUVABLE',
+      'SESSION_FERMEE',
     ]);
-    expect(await compter('SELECT count(*) AS n FROM "EvenementSynchro"')).toBe(
-      lignesAvant,
-    );
-    expect(await derniere()).toBe(n - 1);
+    expect(await derniere()).toBe(n + 1);
     const etat = await sql(
       `SELECT "dernierEtat" FROM "Poste" WHERE "id" = $1`,
       [D],
     );
     expect((etat.rows[0].dernierEtat as Record<string, unknown>).fileVide).toBe(
-      false,
+      true,
     );
   });
 

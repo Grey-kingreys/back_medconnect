@@ -1106,7 +1106,7 @@ describe('Synchro desktop : rejeu des ventes, sur base de test (PB18c)', () => {
     ).toBe(0);
   });
 
-  it('14. vente sur une caisse fermée : renvoyée plus tard', async () => {
+  it('14. vente sur une caisse fermée : régularisation', async () => {
     const n = (await derniere(D1)) + 1;
     const fermeture: EvenementEnvoye = {
       evenementId: randomUUID(),
@@ -1118,21 +1118,24 @@ describe('Synchro desktop : rejeu des ventes, sur base de test (PB18c)', () => {
     };
     expect(statuts(await envoyer(D1, [fermeture]))).toEqual(['APPLIQUE']);
 
-    const lignesAvant = await compter(
-      'SELECT count(*) AS n FROM "EvenementSynchro"',
+    const vente = evVente(D1, n + 1, S1, [ligne(F, 1)]);
+    const resultat = unique(await envoyer(D1, [vente]));
+    expect(resultat.statut).toBe('APPLIQUE');
+    expect(resultat.piece?.type).toBe('REGULARISATION');
+    const piece = await pieceDe(vente.venteId);
+    expect(piece.typePiece).toBe('REGULARISATION');
+    expect(piece.jour).toBe(jour(0));
+    expect(piece.sessionCaisseId).toBe(S1);
+    const origine = await sql(
+      `SELECT to_char("jourMetierOrigine", 'YYYY-MM-DD') AS "jour", (SELECT to_char("jourMetier", 'YYYY-MM-DD') FROM "SessionCaisse" WHERE "id" = $2) AS "jourSession" FROM "Vente" WHERE "id" = $1`,
+      [vente.venteId, S1],
     );
-    const ventesAvant = await compter('SELECT count(*) AS n FROM "Vente"');
-    const r = await envoyer(D1, [evVente(D1, n + 1, S1, [ligne(F, 1)])]);
-    const resultat = unique(r);
-    expect(resultat.statut).toBe('A_RENVOYER');
-    expect(resultat.code).toBe('REGULARISATION_INDISPONIBLE');
-    expect(await compter('SELECT count(*) AS n FROM "EvenementSynchro"')).toBe(
-      lignesAvant,
-    );
-    expect(await compter('SELECT count(*) AS n FROM "Vente"')).toBe(
-      ventesAvant,
-    );
-    expect(await derniere(D1)).toBe(n);
+    expect(origine.rows[0].jour).toBe(origine.rows[0].jourSession);
+    const remontees = await anomalies('REMONTEE_APRES_CLOTURE', vente.venteId);
+    expect(remontees).toHaveLength(1);
+    expect(remontees[0].attribueeAId).toBe(VENDEUR);
+    expect(remontees[0].details.raison).toBe('CAISSE_FERMEE');
+    expect(await derniere(D1)).toBe(n + 1);
   });
 
   it('15. vente web pendant le rejeu, sans interblocage', async () => {

@@ -67,6 +67,7 @@ import {
   resumeEvenement,
   SEUIL_ECHECS_IMPREVUS,
   verifierCoherenceVente,
+  type CodeARenvoyer,
   type StatutResultat,
 } from './rejeu-regles';
 import { validerCorps } from './valider-corps';
@@ -330,10 +331,7 @@ export class SynchroService {
 
   // ------------------------------------------------------- un événement
 
-  private aRenvoyer(
-    e: EvenementBrut,
-    code: 'SERVICE_INDISPONIBLE' | 'REGULARISATION_INDISPONIBLE',
-  ): ResultatEvenement {
+  private aRenvoyer(e: EvenementBrut, code: CodeARenvoyer): ResultatEvenement {
     return {
       evenementId: e.evenementId,
       sequence: e.sequence,
@@ -704,12 +702,13 @@ export class SynchroService {
     pieceType: string,
     pieceId: string,
     details: Prisma.InputJsonObject,
+    attribueeAId: string | null = ctx.structure.adminId,
   ): Promise<{ type: string; id: string }> {
     const creee = await tx.anomalie.create({
       data: {
         pointDeVenteId: ctx.poste.pointDeVenteId,
         type,
-        attribueeAId: ctx.structure.adminId,
+        attribueeAId,
         pieceType,
         pieceId,
         details,
@@ -869,12 +868,21 @@ export class SynchroService {
     const structureId = ctx.structure.id;
     const pointDeVenteId = ctx.poste.pointDeVenteId;
     const s = await this.sessionDuPoste(tx, ctx, corps.sessionId);
-    // Caisse fermée ou d'un jour clôturé : régularisation, reprise en PB18d (D658).
-    if (
-      s.statut !== 'OUVERTE' ||
-      (await estJourCloture(tx, pointDeVenteId, dateVersJour(s.jourMetier)))
-    ) {
-      throw new ARenvoyerSynchro('REGULARISATION_INDISPONIBLE');
+    // Caisse fermée ou d'un jour clôturé : régularisation sur la journée en cours,
+    // la journée clôturée ne bouge pas (D659).
+    const jourCaisse = dateVersJour(s.jourMetier);
+    const clos = await estJourCloture(tx, pointDeVenteId, jourCaisse);
+    const regularisation = s.statut !== 'OUVERTE' || clos;
+    let jourMetier = s.jourMetier;
+    let jourMetierOrigine: Date | null = null;
+    let jourRattachement = jourCaisse;
+    if (regularisation) {
+      // Sous le verrou de journée partagé pris en tête de transaction (D613).
+      jourRattachement = (
+        await jourDeRattachement(tx, pointDeVenteId, new Date())
+      ).jour;
+      jourMetier = jourVersDate(jourRattachement);
+      jourMetierOrigine = s.jourMetier;
     }
     const existante = await tx.vente.findUnique({
       where: { id: corps.venteId },
@@ -1016,11 +1024,11 @@ export class SynchroService {
       posteId: ctx.poste.id,
       posteCode,
       sessionId: s.id,
-      typePiece: 'VENTE',
+      typePiece: regularisation ? 'REGULARISATION' : 'VENTE',
       numero,
       numeroTicket,
-      jourMetier: s.jourMetier,
-      jourMetierOrigine: null,
+      jourMetier,
+      jourMetierOrigine,
       vendeur: { id: utilisateur.id, nom: nomVendeur },
       clientNom: corps.clientNom || null,
       clientTelephone: corps.clientTelephone || null,
@@ -1052,7 +1060,7 @@ export class SynchroService {
 
     // Anomalies d'application, au titulaire : la vente est toujours appliquée (D653).
     const anomalies: { type: string; id: string }[] = [...ecrit.anomalies];
-    const jour = dateVersJour(s.jourMetier);
+    const jour = dateVersJour(jourMetier);
     const causes = anomaliesApplication(
       lignes.map((c) => ({
         fiche: {
@@ -1182,6 +1190,55 @@ export class SynchroService {
       );
     }
 
+    if (regularisation) {
+      const raison = clos ? 'JOURNEE_CLOTUREE' : 'CAISSE_FERMEE';
+      const cloture = clos
+        ? await tx.clotureJournaliere.findUnique({
+            where: {
+              pointDeVenteId_jourMetier: {
+                pointDeVenteId,
+                jourMetier: s.jourMetier,
+              },
+            },
+            select: { id: true, postesManquants: true },
+          })
+        : null;
+      const manquants = Array.isArray(cloture?.postesManquants)
+        ? (cloture.postesManquants as { sessionId?: string }[])
+        : [];
+      const posteManquantDeLaCloture = manquants.some(
+        (p) => p?.sessionId === s.id,
+      );
+      const message = clos
+        ? `La vente ${numero} du ${jourLisible(jourCaisse)} est arrivée après la clôture de cette journée : elle est enregistrée sur la journée du ${jourLisible(jourRattachement)} (régularisation). La journée clôturée n'a pas changé.`
+        : `La vente ${numero} est arrivée après la fermeture de sa caisse (caisse de ${s.utilisateurNom}) : elle est enregistrée sur la journée du ${jourLisible(jourRattachement)} (régularisation). Vérifiez l'argent de cette caisse.`;
+      anomalies.push(
+        await this.creerAnomalie(
+          tx,
+          ctx,
+          'REMONTEE_APRES_CLOTURE',
+          'VENTE',
+          corps.venteId,
+          {
+            raison,
+            clotureId: cloture?.id ?? null,
+            jourOrigine: jourCaisse,
+            jourRattachement,
+            posteManquantDeLaCloture,
+            numero,
+            total: corps.total,
+            posteCode,
+            sessionId: s.id,
+            utilisateurId: utilisateur.id,
+            utilisateurNom: nomVendeur,
+            horodatageLocal: local.toISOString(),
+            message,
+          },
+          s.utilisateurId ?? ctx.structure.adminId,
+        ),
+      );
+    }
+
     await tx.auditLog.create({
       data: {
         userId: utilisateur.id,
@@ -1191,6 +1248,7 @@ export class SynchroService {
         ip: ctx.ip ?? null,
         metadata: {
           numero,
+          typePiece: regularisation ? 'REGULARISATION' : 'VENTE',
           total: corps.total,
           nombreLignes: lignes.length,
           provisoire: allouees.some((a) => a.resteProvisoire > 0),
@@ -1201,7 +1259,11 @@ export class SynchroService {
       },
     });
     return {
-      piece: { type: 'VENTE', id: corps.venteId, numero },
+      piece: {
+        type: regularisation ? 'REGULARISATION' : 'VENTE',
+        id: corps.venteId,
+        numero,
+      },
       anomalies,
     };
   }
