@@ -781,6 +781,9 @@ describe('Vente recâblée sur lots, prix et caisse, sur base de test (PB11)', (
     expect(details.nom).toBe(nom);
     expect(details.quantiteProvisoire).toBe(2);
     expect(details.soldeProduit).toBe(-2);
+    expect(details.message).toBe(
+      `${nom} : 2 unité(s) vendue(s) sans stock disponible (vente ${data.numero}, poste ${details.posteCode as string}, ${details.utilisateurNom as string}). Le stock de ce médicament est à -2 unité(s) : enregistrez la réception ou l'inventaire qui rattachera ces unités à un lot.`,
+    );
     expect(details).not.toHaveProperty('clientNom');
     expect(details).not.toHaveProperty('clientTelephone');
 

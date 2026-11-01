@@ -111,7 +111,7 @@ describe('Étanchéité des coûts : inventaire des routes /pharmacie', () => {
       }
     };
     parcourir(path.join(racine, 'src'));
-    expect(fichiers.sort()).toEqual(['src/demo/demo.seeder.ts']);
+    expect(fichiers.sort()).toEqual([]);
   });
 
   it('découverte : chemins, tableaux, méthode racine et imports en promesse', async () => {

@@ -197,6 +197,12 @@ export async function ecrirePieceVente(
   for (const c of p.lignes) {
     const a = c.allocation;
     if (a.resteProvisoire <= 0 && !c.anomalieMemeSansProvisoire) continue;
+    const soldeProduit = apresParFiche.get(c.fiche.id) ?? 0;
+    const quantiteLocale = Number(c.detailsAnomalie?.quantiteProvisoireLocale);
+    const message =
+      a.resteProvisoire > 0
+        ? `${c.fiche.nom} : ${a.resteProvisoire} unité(s) vendue(s) sans stock disponible (vente ${p.numero}, poste ${p.posteCode}, ${p.vendeur.nom}). Le stock de ce médicament est à ${soldeProduit} unité(s) : enregistrez la réception ou l'inventaire qui rattachera ces unités à un lot.`
+        : `${c.fiche.nom} : le poste ${p.posteCode} a vendu ${Number.isFinite(quantiteLocale) ? quantiteLocale : 0} unité(s) sans stock (vente ${p.numero}, ${p.vendeur.nom}) ; le serveur a trouvé du stock pour cette vente. Vérifiez le stock de ce médicament sur le poste.`;
     const creee = await tx.anomalie.create({
       data: {
         pointDeVenteId: p.pointDeVenteId,
@@ -208,12 +214,13 @@ export async function ecrirePieceVente(
           stockId: c.fiche.id,
           nom: c.fiche.nom,
           quantiteProvisoire: a.resteProvisoire,
-          soldeProduit: apresParFiche.get(c.fiche.id) ?? 0,
+          soldeProduit,
           posteCode: p.posteCode,
           utilisateurId: p.vendeur.id,
           utilisateurNom: p.vendeur.nom,
           jourMetier: dateVersJour(p.jourMetier),
           ...c.detailsAnomalie,
+          message,
         },
       },
       select: { id: true },

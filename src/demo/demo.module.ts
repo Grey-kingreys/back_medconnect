@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from 'src/auth/auth.module';
+import { PharmacieModule } from 'src/pharmacie/pharmacie.module';
 import { DemoController } from './demo.controller';
 import { DemoService } from './demo.service';
 import { DemoSeeder } from './demo.seeder';
@@ -13,7 +14,7 @@ import { DemoSeeder } from './demo.seeder';
  * viennent des modules globaux (PrismaModule, SecurityModule, RbacModule).
  */
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, PharmacieModule],
   controllers: [DemoController],
   providers: [DemoService, DemoSeeder],
 })

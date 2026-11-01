@@ -29,7 +29,7 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | PB16 | Alertes de péremption, marge et étanchéité des coûts, deux sous-fiches commitées dans l'ordre : tasks/PB16a-alertes-peremption-marge.md, tasks/PB16b-etancheite-couts.md (D601 à D610) | spécifié | validé (PB16a, PB16b ; D601 à D611, rapports/PB16a-chef.md, PB16b-chef.md) | 1 |
 | PB17 | Clôture journalière, trois sous-fiches commitées dans l'ordre : tasks/PB17a-cloture-journaliere.md, tasks/PB17b-export-cloture.md, tasks/PB17c-verrou-journee-ecrivains.md (D612 à D628) | dur | validé (PB17a, PB17b, PB17c ; D612 à D629, rapports/PB17a-chef.md, PB17b-chef.md, PB17c-chef.md) | 1 |
 | PB18 | Synchronisation desktop, quatre sous-fiches commitées dans l'ordre : tasks/PB18a-plages-catalogue-cors.md, tasks/PB18b-moteur-rejeu-caisse.md, tasks/PB18c-rejeu-ventes.md, tasks/PB18d-remontee-apres-cloture.md (D630 à D661) | dur | validé (PB18a, PB18b, PB18c, PB18d ; D630 à D667, rapports/PB18a-chef.md, PB18b-chef.md, PB18c-chef.md, PB18d-chef.md) | 1 |
-| PB19 | Seeds, démo et documentation | spécifié | à faire | 0 |
+| PB19 | Seeds, démo et documentation, deux sous-fiches à commiter dans l'ordre : tasks/PB19a-jeu-demo-pharmacie.md, tasks/PB19b-documentation-swagger-variables.md (D668 à D682) | spécifié | PB19a validé (D668 à D676, D681, D682, rapports/PB19a-chef.md) ; PB19b à faire | 1 |
 
 ## Faites (preuve = commit)
 
@@ -39,12 +39,13 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 ## Questions parquées
 
 - Porteur : Q01, Q02, Q05 à Q14, Q16, Q17 de PLAN.md section 7, défauts du plan appliqués (A6), à remonter au rapport final.
+- Porteur, après PB19 (D679) : outil de rejeu d'un événement mis de côté, rapprochement de l'argent des régularisations hors clôture, paiement arrivé après la fermeture d'une caisse du jour non compté par le bilan figé.
 - Reprises du run parqué 2026-10-22-lot8 : voir son decisions.md et l'historique git de ce fichier (questions TB3, B2, B4, U1, B8, B10, B11, B12, B14 toujours ouvertes).
 
 ## Dernières décisions (5 max, historique complet dans decisions.md)
 
+- D682 Rôles non rattachés après création du jeu démo : scénario pharmacie sauté et journalisé `demo.scenario_pharmacie_saute` (révisable)
+- D681 Recul de `debutCaisse` et `debutFiabiliteMarge` démo par `reculerDebutsCaisseDemo` dans `src/pharmacie/demo/` (étanchéité des coûts) (révisable)
+- D670 Jeu démo en deux phases : données en une transaction, puis scénario pharmacie joué par les services juste après une création ou une remise à zéro (révisable)
 - D667 Journée clôturée jamais modifiée (pièces, paiements, clôture, totaux, export) ; seule transition admise : caisse du poste manquant OUVERTE vers FERMEE, jamais incluse (D649) (révisable)
 - D659 Vente remontée après clôture ou fermeture : pièce `REGULARISATION` sur la caisse d'origine, jour de rattachement, anomalie `REMONTEE_APRES_CLOTURE` au vendeur de la caisse (révisable)
-- D666 Vente à l'unité sur fiche non déconditionnable : seule `VENTE_UNITE_INTERDITE`, pas de `PRIX_DIVERGENT` en plus (révisable)
-- D664 Événement empoisonné : NUL rejeté `EVENEMENT_INVALIDE`, 3e échec imprévu (hors panne passagère) mis de côté `EVENEMENT_INAPPLICABLE`, compteur dans `dernierEtat` (révisable)
-- D662 Photographie du catalogue sans `jour` : rien qui dépende de l'heure dans l'ETag ; heure du serveur dans l'en-tête `Date`, exposé par le CORS (révisable)

@@ -742,6 +742,7 @@ export class InventairesService {
               utilisateurId: user.id,
               utilisateurNom,
               lignes: detailLots,
+              message: `Inventaire de ${fiche.nom} par ${utilisateurNom} : écart de ${plan.ecartFiche > 0 ? '+' : ''}${plan.ecartFiche} unité(s), au-delà de la tolérance de ${fiche.toleranceInventaire ?? 0} unité(s). Vérifiez le comptage avant de traiter cette anomalie.`,
             },
           },
           select: { id: true },

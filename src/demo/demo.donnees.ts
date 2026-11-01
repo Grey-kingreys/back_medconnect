@@ -628,13 +628,33 @@ export const MEDICAMENTS_DEMO: MedicamentDemo[] = [
   },
 ];
 
+export type UniteMinimaleDemo =
+  | 'COMPRIME'
+  | 'GELULE'
+  | 'ML'
+  | 'SACHET'
+  | 'GRAMME'
+  | 'AMPOULE'
+  | 'UNITE';
+
+/**
+ * Fiche produit d'une pharmacie démo. Ni quantité ni coût ni péremption : le stock
+ * naît des réceptions du scénario pharmacie (lots, péremptions, coûts).
+ */
 export interface StockDemo {
   pharmacie: CleStructure;
   medicament: string;
-  quantite: number;
+  uniteMinimale: UniteMinimaleDemo;
+  /** Unités minimales par boîte. */
+  coefficientBoite: number;
+  /** Prix de la boîte (GNF). */
   prixUnitaire: number;
-  /** Décalage en jours de la date d'expiration. */
-  expirationJours: number;
+  /** Prix d'une unité (GNF), nul si la fiche ne se vend pas à l'unité. */
+  prixUnite: number | null;
+  deconditionnable: boolean;
+  /** Tolérance d'inventaire en unités minimales, nulle si non réglée. */
+  toleranceInventaire: number | null;
+  qualifie: boolean;
   notes?: string;
 }
 
@@ -643,102 +663,181 @@ export const STOCKS_DEMO: StockDemo[] = [
   {
     pharmacie: 'pharmaKaloum',
     medicament: 'Doliprane 1000mg',
-    quantite: 240,
+    uniteMinimale: 'COMPRIME',
+    coefficientBoite: 8,
     prixUnitaire: 15000,
-    expirationJours: 540,
+    prixUnite: 2000,
+    deconditionnable: true,
+    toleranceInventaire: 2,
+    qualifie: true,
   },
   {
     pharmacie: 'pharmaKaloum',
     medicament: 'Augmentin 1g/125mg',
-    quantite: 35,
+    uniteMinimale: 'COMPRIME',
+    coefficientBoite: 8,
     prixUnitaire: 85000,
-    expirationJours: 300,
+    prixUnite: null,
+    deconditionnable: false,
+    toleranceInventaire: 0,
+    qualifie: true,
   },
   {
     pharmacie: 'pharmaKaloum',
     medicament: 'Coartem 20/120',
-    quantite: 60,
+    uniteMinimale: 'COMPRIME',
+    coefficientBoite: 24,
     prixUnitaire: 45000,
-    expirationJours: 420,
+    prixUnite: null,
+    deconditionnable: false,
+    toleranceInventaire: 0,
+    qualifie: true,
   },
   {
     pharmacie: 'pharmaKaloum',
     medicament: 'Ventoline 100 µg',
-    quantite: 0,
+    uniteMinimale: 'UNITE',
+    coefficientBoite: 1,
     prixUnitaire: 60000,
-    expirationJours: 365,
+    prixUnite: null,
+    deconditionnable: false,
+    toleranceInventaire: 0,
+    qualifie: true,
     notes: 'Livraison attendue la semaine prochaine',
   },
   {
     pharmacie: 'pharmaKaloum',
     medicament: 'Amlor 5mg',
-    quantite: 6,
+    uniteMinimale: 'GELULE',
+    coefficientBoite: 30,
     prixUnitaire: 35000,
-    expirationJours: 200,
+    prixUnite: 1300,
+    deconditionnable: true,
+    toleranceInventaire: 3,
+    qualifie: true,
   },
   {
     pharmacie: 'pharmaKaloum',
     medicament: 'Glucophage 850mg',
-    quantite: 120,
+    uniteMinimale: 'COMPRIME',
+    coefficientBoite: 30,
     prixUnitaire: 25000,
-    expirationJours: 480,
+    prixUnite: 1000,
+    deconditionnable: true,
+    toleranceInventaire: 3,
+    qualifie: true,
   },
   {
     pharmacie: 'pharmaKaloum',
     medicament: 'SRO',
-    quantite: 300,
+    uniteMinimale: 'SACHET',
+    coefficientBoite: 1,
     prixUnitaire: 3000,
-    expirationJours: 700,
+    prixUnite: null,
+    deconditionnable: false,
+    toleranceInventaire: 2,
+    qualifie: true,
   },
   {
     pharmacie: 'pharmaKaloum',
     medicament: 'Flagyl 500mg',
-    quantite: 80,
+    uniteMinimale: 'COMPRIME',
+    coefficientBoite: 20,
     prixUnitaire: 20000,
-    expirationJours: 260,
+    prixUnite: 1200,
+    deconditionnable: true,
+    toleranceInventaire: 2,
+    qualifie: true,
   },
-  // Pharmacie du Niger : une rupture (Gaviscon) et un stock faible (Coartem)
+  {
+    pharmacie: 'pharmaKaloum',
+    medicament: 'Amoxicilline 500mg',
+    uniteMinimale: 'GELULE',
+    coefficientBoite: 12,
+    prixUnitaire: 22000,
+    prixUnite: 2000,
+    deconditionnable: true,
+    toleranceInventaire: 2,
+    qualifie: true,
+  },
+  {
+    pharmacie: 'pharmaKaloum',
+    medicament: 'Ibuprofène 400mg',
+    uniteMinimale: 'COMPRIME',
+    coefficientBoite: 20,
+    prixUnitaire: 12000,
+    prixUnite: 700,
+    deconditionnable: true,
+    toleranceInventaire: 2,
+    qualifie: true,
+  },
+  // Pharmacie du Niger : une rupture (Gaviscon), un stock faible (Coartem) et une
+  // fiche reprise de l'ancien logiciel, à qualifier (Spasfon)
   {
     pharmacie: 'pharmaNiger',
     medicament: 'Doliprane 1000mg',
-    quantite: 140,
+    uniteMinimale: 'COMPRIME',
+    coefficientBoite: 8,
     prixUnitaire: 15000,
-    expirationJours: 500,
+    prixUnite: 2000,
+    deconditionnable: true,
+    toleranceInventaire: 2,
+    qualifie: true,
   },
   {
     pharmacie: 'pharmaNiger',
     medicament: 'Coartem 20/120',
-    quantite: 4,
+    uniteMinimale: 'COMPRIME',
+    coefficientBoite: 24,
     prixUnitaire: 47000,
-    expirationJours: 330,
+    prixUnite: null,
+    deconditionnable: false,
+    toleranceInventaire: 0,
+    qualifie: true,
   },
   {
     pharmacie: 'pharmaNiger',
     medicament: 'Spasfon',
-    quantite: 60,
+    uniteMinimale: 'COMPRIME',
+    coefficientBoite: 1,
     prixUnitaire: 18000,
-    expirationJours: 400,
+    prixUnite: null,
+    deconditionnable: false,
+    toleranceInventaire: null,
+    qualifie: false,
   },
   {
     pharmacie: 'pharmaNiger',
     medicament: 'Gaviscon Pro',
-    quantite: 0,
+    uniteMinimale: 'UNITE',
+    coefficientBoite: 1,
     prixUnitaire: 40000,
-    expirationJours: 365,
+    prixUnite: null,
+    deconditionnable: false,
+    toleranceInventaire: 0,
+    qualifie: true,
   },
   {
     pharmacie: 'pharmaNiger',
     medicament: 'Amoxicilline 500mg',
-    quantite: 90,
+    uniteMinimale: 'GELULE',
+    coefficientBoite: 12,
     prixUnitaire: 22000,
-    expirationJours: 310,
+    prixUnite: 2000,
+    deconditionnable: true,
+    toleranceInventaire: 2,
+    qualifie: true,
   },
   {
     pharmacie: 'pharmaNiger',
     medicament: 'Ibuprofène 400mg',
-    quantite: 75,
+    uniteMinimale: 'COMPRIME',
+    coefficientBoite: 20,
     prixUnitaire: 12000,
-    expirationJours: 450,
+    prixUnite: 700,
+    deconditionnable: true,
+    toleranceInventaire: 2,
+    qualifie: true,
   },
 ];
 

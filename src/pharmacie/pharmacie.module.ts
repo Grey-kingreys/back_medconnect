@@ -26,6 +26,7 @@ import { ClotureService } from './caisse/clotures.service';
 import { SynchroController } from './synchro/synchro.controller';
 import { CatalogueSynchroService } from './synchro/catalogue-synchro.service';
 import { SynchroService } from './synchro/synchro.service';
+import { ScenarioDemoPharmacieService } from './demo/scenario-demo-pharmacie.service';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { AuthModule } from 'src/auth/auth.module';
 
@@ -63,7 +64,9 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
     ClotureService,
     CatalogueSynchroService,
     SynchroService,
+    ScenarioDemoPharmacieService,
     PrismaService,
   ],
+  exports: [ScenarioDemoPharmacieService],
 })
 export class PharmacieModule {}

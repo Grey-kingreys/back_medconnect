@@ -445,6 +445,11 @@ describe('Inventaire par lot, sur base de test (PB15b)', () => {
       tolerance: 5,
       utilisateurNom: 'Mamadou Diallo',
     });
+    expect((anomalies[0].details as Record<string, unknown>).message).toBe(
+      'Inventaire de ' +
+        String((anomalies[0].details as Record<string, unknown>).nom) +
+        ' par Mamadou Diallo : écart de -10 unité(s), au-delà de la tolérance de 5 unité(s). Vérifiez le comptage avant de traiter cette anomalie.',
+    );
     expect(r.data.lignes[0].anomalieId).toBe(String(anomalies[0].id));
     expect(await soldeLot(lotId)).toBe(20);
     expect(r.message).toBe(messageInventaireEnregistre(1, 1));

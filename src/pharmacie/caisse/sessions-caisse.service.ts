@@ -559,7 +559,10 @@ export class SessionsCaisseService {
           attribueeAId: structure.adminId,
           pieceType: 'SessionCaisse',
           pieceId: sessionId,
-          details: identite,
+          details: {
+            ...identite,
+            message: `La caisse de ${identite.utilisateurNom} (poste ${identite.posteCode}, journée du ${jourLisible(identite.jourMetier)}) a été fermée sans comptage du fond d'ouverture : l'écart des espèces ne peut pas être vérifié.`,
+          },
         },
       });
       anomalies.push({ type: 'FOND_NON_COMPTE', id: creee.id });
@@ -568,6 +571,7 @@ export class SessionsCaisseService {
       const indexEspeces = bilan.theorique.findIndex(
         (t) => t.mode === CODE_ESPECES,
       );
+      const ecartEspeces = bilan.ecarts[indexEspeces].ecart as number;
       const creee = await tx.anomalie.create({
         data: {
           pointDeVenteId: s.pointDeVenteId,
@@ -581,6 +585,7 @@ export class SessionsCaisseService {
             compte: bilan.compte[indexEspeces].montant,
             ecart: bilan.ecarts[indexEspeces].ecart,
             seuilEcartCaisse: bilan.seuilEcartCaisse,
+            message: `La caisse de ${identite.utilisateurNom} (poste ${identite.posteCode}, journée du ${jourLisible(identite.jourMetier)}) a un écart de ${ecartEspeces > 0 ? '+' : ''}${formaterGnf(ecartEspeces)} GNF en espèces (théorique ${formaterGnf(bilan.theorique[indexEspeces].montant)} GNF, compté ${formaterGnf(bilan.compte[indexEspeces].montant as number)} GNF), au-delà du seuil de ${formaterGnf(bilan.seuilEcartCaisse)} GNF.`,
           },
         },
       });

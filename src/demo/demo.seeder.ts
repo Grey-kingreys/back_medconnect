@@ -28,10 +28,19 @@ import {
   URGENCES_DEMO,
   VACCINATIONS_DEMO,
 } from './demo.donnees';
+import { jourConakry, joursAvant } from 'src/pharmacie/jour-metier';
+import { jourVersDate } from 'src/pharmacie/stock/lecture-stock';
 import {
   assurerPointDeVente,
   supprimerConfigurationPharmacies,
 } from 'src/pharmacie/point-de-vente';
+import {
+  reculerDebutsCaisseDemo,
+  ScenarioDemoPharmacieService,
+  type BilanScenarioPharmacie,
+  type ContexteScenarioPharmacie,
+  type PharmacieDemo,
+} from 'src/pharmacie/demo/scenario-demo-pharmacie.service';
 import { purgerStockPharmacies } from 'src/pharmacie/stock/purge-stock';
 import { purgerPiecesPharmacies } from 'src/pharmacie/caisse/purge-pieces';
 
@@ -78,6 +87,7 @@ export class DemoSeeder implements OnApplicationBootstrap {
     private readonly encryption: EncryptionService,
     private readonly rolesService: RolesService,
     private readonly permissionsService: PermissionsService,
+    private readonly scenarioPharmacie: ScenarioDemoPharmacieService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -91,11 +101,12 @@ export class DemoSeeder implements OnApplicationBootstrap {
     }
 
     this.avertir();
+    let cree = false;
     try {
       if (estResetDemoDemande()) {
-        await this.reinitialiserJeuDeDonnees();
+        cree = (await this.reinitialiserJeuDeDonnees()) !== null;
       } else {
-        await this.creerJeuDeDonnees();
+        cree = await this.creerJeuDeDonnees();
       }
       await this.rattacherRoles();
     } catch (e) {
@@ -105,7 +116,76 @@ export class DemoSeeder implements OnApplicationBootstrap {
         message: 'Création des données de démonstration impossible',
         raison: e instanceof Error ? e.message : 'inconnue',
       });
+      if (cree) {
+        // Création réussie mais rôles non rattachés : la phase 2 est sautée.
+        this.logger.warn({
+          evenement: 'demo.scenario_pharmacie_saute',
+          message:
+            'Scénario pharmacie de démonstration non joué : les rôles des comptes démo n’ont pas pu être rattachés. Relancez avec DEMO_RESET=true.',
+        });
+      }
+      return;
     }
+    // Scénario de pharmacie : seulement juste après une création ou une remise à zéro.
+    if (!cree) return;
+    try {
+      const bilan = await this.jouerScenarioPharmacie();
+      this.logger.log(
+        `Scénario pharmacie de démonstration joué : ${bilan.receptions} réceptions, ${bilan.evenementsAppliques} opérations du poste, ${bilan.clotures} clôtures, ${bilan.ventesWeb} ventes web.`,
+      );
+    } catch (e) {
+      this.logger.error({
+        evenement: 'demo.scenario_pharmacie_echoue',
+        message:
+          'Scénario pharmacie de démonstration incomplet : relancez avec DEMO_RESET=true.',
+        raison: e instanceof Error ? e.message : 'inconnue',
+      });
+    }
+  }
+
+  /**
+   * Joue le scénario de pharmacie (phase 2, D670) sur les pharmacies démo déjà
+   * créées : titulaire = administrateur de la structure, vendeur = pharmacien du
+   * compte démo. Les erreurs des services sont relancées.
+   */
+  async jouerScenarioPharmacie(): Promise<BilanScenarioPharmacie> {
+    const pharmacie = async (
+      cleStructure: CleStructure,
+      cleVendeur: string,
+    ): Promise<PharmacieDemo> => {
+      const definition = STRUCTURES_DEMO.find((s) => s.cle === cleStructure);
+      const compteVendeur = COMPTES_DEMO.find((c) => c.cle === cleVendeur);
+      if (!definition || !compteVendeur) {
+        throw new Error(
+          `Jeu de démonstration incomplet : ${cleStructure} ou ${cleVendeur} inconnu.`,
+        );
+      }
+      const [structure, vendeur] = await Promise.all([
+        this.prisma.structure.findFirst({
+          where: { email: definition.email },
+          select: { id: true, adminId: true },
+        }),
+        this.prisma.user.findFirst({
+          where: { email: compteVendeur.email },
+          select: { id: true },
+        }),
+      ]);
+      if (!structure?.adminId || !vendeur) {
+        throw new Error(
+          `Pharmacie de démonstration introuvable : ${cleStructure}.`,
+        );
+      }
+      return {
+        structureId: structure.id,
+        titulaireId: structure.adminId,
+        vendeurId: vendeur.id,
+      };
+    };
+    const contexte: ContexteScenarioPharmacie = {
+      kaloum: await pharmacie('pharmaKaloum', 'pharmaKeita'),
+      niger: await pharmacie('pharmaNiger', 'pharmaKourouma'),
+    };
+    return this.scenarioPharmacie.jouer(contexte);
   }
 
   private avertir(): void {
@@ -187,7 +267,7 @@ export class DemoSeeder implements OnApplicationBootstrap {
    * messages, autorisations, fichiers, stocks et rôles propres aux structures.
    * Le catalogue de médicaments, partagé, n'est jamais touché.
    */
-  private async purger(tx: Prisma.TransactionClient): Promise<BilanPurgeDemo> {
+  async purger(tx: Prisma.TransactionClient): Promise<BilanPurgeDemo> {
     const filtre = { email: { endsWith: SUFFIXE_EMAIL_DEMO } };
     const comptes = await tx.user.findMany({
       where: filtre,
@@ -361,13 +441,14 @@ export class DemoSeeder implements OnApplicationBootstrap {
     });
 
     // 1 bis. Point de vente, poste de reprise, compteur et paramètres des pharmacies (D478)
-    const idsPointsDeVente = new Map<CleStructure, string>();
+    const debutDemo = jourVersDate(joursAvant(jourConakry(maintenant), 30));
     for (const s of STRUCTURES_DEMO.filter((x) => x.type === 'PHARMACIE')) {
-      const { pointDeVente } = await assurerPointDeVente(tx, {
+      await assurerPointDeVente(tx, {
         id: structureId(s.cle),
         nom: s.nom,
       });
-      idsPointsDeVente.set(s.cle, pointDeVente.id);
+      // Journées passées clôturables : début de la caisse et de la fiabilité de la marge reculés de 30 jours.
+      await reculerDebutsCaisseDemo(tx, structureId(s.cle), debutDemo);
     }
 
     // 2. Comptes : professionnels d'abord (cibles de `medecinTraitantId`), puis patients
@@ -453,43 +534,20 @@ export class DemoSeeder implements OnApplicationBootstrap {
       await tx.medicament.create({ data: { id, ...m } });
       idsMedicaments.set(m.nom, id);
     }
-    // Fiches à quantité nulle : le stock vient du journal (gel du compteur, D493).
-    const fiches = STOCKS_DEMO.map((s) => ({ s, id: randomUUID() }));
+    // Fiches à quantité nulle, sans date de péremption : le stock et les lots viennent
+    // du scénario pharmacie, joué par les services après la création (D670).
     await tx.stockMedicament.createMany({
-      data: fiches.map(({ s, id }) => ({
-        id,
+      data: STOCKS_DEMO.map((s) => ({
         medicamentId: trouver(idsMedicaments, s.medicament),
         structureId: structureId(s.pharmacie),
         prixUnitaire: s.prixUnitaire,
-        dateExpiration: jour(s.expirationJours, 0, 0),
+        prixUnite: s.prixUnite,
+        uniteMinimale: s.uniteMinimale,
+        coefficientBoite: s.coefficientBoite,
+        deconditionnable: s.deconditionnable,
+        toleranceInventaire: s.toleranceInventaire,
+        qualifie: s.qualifie,
         notes: s.notes ?? null,
-      })),
-    });
-    // Stock initial (D504) : un lot technique et un mouvement RECEPTION par fiche non vide.
-    const lots = fiches
-      .filter(({ s }) => s.quantite > 0)
-      .map(({ s, id }) => ({
-        id: randomUUID(),
-        stockMedicamentId: id,
-        pointDeVenteId: trouver(idsPointsDeVente, s.pharmacie),
-        dateExpiration: jour(s.expirationJours, 0, 0),
-        quantiteRecue: s.quantite,
-        coutUnitaire: 0,
-        coefficientReception: 1,
-        dateReception: maintenant,
-        lotTechnique: true,
-      }));
-    await tx.lotStock.createMany({ data: lots });
-    await tx.mouvementStock.createMany({
-      data: lots.map((l) => ({
-        evenementId: randomUUID(),
-        pointDeVenteId: l.pointDeVenteId,
-        stockMedicamentId: l.stockMedicamentId,
-        lotId: l.id,
-        type: 'RECEPTION' as const,
-        quantite: l.quantiteRecue,
-        pieceOrigineType: 'RECEPTION' as const,
-        motif: 'Stock initial du jeu de démonstration',
       })),
     });
 

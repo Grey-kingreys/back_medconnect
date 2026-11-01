@@ -4,6 +4,7 @@ import { PermissionsService } from 'src/common/rbac/permissions.service';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { AccesPharmacieService } from 'src/pharmacie/acces-pharmacie.service';
 import { SessionsCaisseService } from 'src/pharmacie/caisse/sessions-caisse.service';
+import { jourLisible } from 'src/pharmacie/jour-metier';
 import { cheminsCout } from 'src/pharmacie/masquer-couts';
 import { PointsDeVenteService } from 'src/pharmacie/points-de-vente.service';
 import { jourConakry } from 'src/pharmacie/vente.service';
@@ -606,6 +607,9 @@ describe('Sessions de caisse sur base de test (PB10)', () => {
     const details = anomalies.rows[0].details as Record<string, unknown>;
     expect(details.ecart).toBe(-10000);
     expect(Object.keys(details)).not.toContain('commentaire');
+    expect(details.message).toBe(
+      `La caisse de ${details.utilisateurNom as string} (poste ${details.posteCode as string}, journée du ${jourLisible(details.jourMetier as string)}) a un écart de -10 000 GNF en espèces (théorique 500 000 GNF, compté 490 000 GNF), au-delà du seuil de 5 000 GNF.`,
+    );
   });
 
   it('14. CA18 : fermeture sans comptage refusée, session restée ouverte', async () => {
@@ -638,9 +642,11 @@ describe('Sessions de caisse sur base de test (PB10)', () => {
       [session.id],
     );
     expect(anomalies.rows.map((a) => a.type)).toEqual(['FOND_NON_COMPTE']);
-    expect(
-      (anomalies.rows[0].details as Record<string, unknown>).posteCode,
-    ).toBe(session.poste.code);
+    const details = anomalies.rows[0].details as Record<string, unknown>;
+    expect(details.posteCode).toBe(session.poste.code);
+    expect(details.message).toBe(
+      `La caisse de ${details.utilisateurNom as string} (poste ${session.poste.code}, journée du ${jourLisible(details.jourMetier as string)}) a été fermée sans comptage du fond d'ouverture : l'écart des espèces ne peut pas être vérifié.`,
+    );
   });
 
   it('16. CA16 : moitié espèces moitié Orange Money, relevé mobile, MTN non rapproché', async () => {

@@ -730,6 +730,10 @@ describe('Synchro desktop : rejeu des ventes, sur base de test (PB18c)', () => {
       quantiteProvisoire: 0,
       quantiteProvisoireLocale: 2,
     });
+    expect(resultat.piece?.numero).toBeTruthy();
+    expect(anomalie.details.message).toBe(
+      `${String(anomalie.details.nom)} : le poste ${D1.code} a vendu 2 unité(s) sans stock (vente ${String(resultat.piece?.numero)}, ${String(anomalie.details.utilisateurNom)}) ; le serveur a trouvé du stock pour cette vente. Vérifiez le stock de ce médicament sur le poste.`,
+    );
     expect(await rattachementDe(anomalie.id)).toBe('RATTACHEE');
     expect(await soldeProduit(K)).toBe(3);
   });
