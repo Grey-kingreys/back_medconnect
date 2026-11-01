@@ -47,7 +47,7 @@ export class InventairesController {
     summary:
       "Sortie manuelle d'un lot (périmé, cassé, perdu, retour fournisseur)",
     description:
-      'raison obligatoire (400 MOTIF_REQUIS) : PERIME (mouvement PEREMPTION), CASSE, PERDU, AUTRE (PERTE, AUTRE exige un commentaire), RETOUR_FOURNISSEUR (RETOUR). Quantité en BOITE (unités par boîte du lot) ou UNITE. 404 lot introuvable pour ce médicament, 409 STOCK_LOT_NEGATIF au-delà du stock du lot, id client pour rejouer sans doublon (409 IDENTIFIANT_DEJA_UTILISE). Pièce SORTIE_MANUELLE attribuée, sans coût.',
+      'Permission : stock:write. Succès : 200. raison obligatoire (400 MOTIF_REQUIS) : PERIME (mouvement PEREMPTION), CASSE, PERDU, AUTRE (PERTE, AUTRE exige un commentaire), RETOUR_FOURNISSEUR (RETOUR). Quantité en BOITE (unités par boîte du lot) ou UNITE. 404 lot introuvable pour ce médicament, 409 STOCK_LOT_NEGATIF au-delà du stock du lot, id client pour rejouer sans doublon (409 IDENTIFIANT_DEJA_UTILISE). Pièce SORTIE_MANUELLE attribuée, sans coût.',
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   enregistrerSortie(
@@ -65,7 +65,7 @@ export class InventairesController {
   @ApiOperation({
     summary: 'Enregistrer un inventaire (comptage par lot)',
     description:
-      "Quantité comptée absolue par lot : quantiteComptee (unités) ou nombreBoites (unités par boîte du lot) et unitesEnPlus. Lot : lotId, sinon numéro de lot, sinon date de péremption, sinon lot unique en stock ; plusieurs lots possibles : 409 LOT_REQUIS (lots dans details) ; boîtes d'un lot inconnu : nouveau lot (date obligatoire, 400 DATE_PEREMPTION_REQUISE). Un mouvement INVENTAIRE par lot compté, même à écart nul. Écart de la fiche au-delà de sa tolérance : anomalie ECART_INVENTAIRE attribuée à l'auteur. Les ventes faites sans stock sont rattachées aux lots comptés, qui finissent à la quantité comptée. id client pour rejouer sans doublon.",
+      "Permission : inventaire:write. Succès : 200. Quantité comptée absolue par lot : quantiteComptee (unités) ou nombreBoites (unités par boîte du lot) et unitesEnPlus. Lot : lotId, sinon numéro de lot, sinon date de péremption, sinon lot unique en stock ; plusieurs lots possibles : 409 LOT_REQUIS (lots dans details) ; boîtes d'un lot inconnu : nouveau lot (date obligatoire, 400 DATE_PEREMPTION_REQUISE). Un mouvement INVENTAIRE par lot compté, même à écart nul. Écart de la fiche au-delà de sa tolérance : anomalie ECART_INVENTAIRE attribuée à l'auteur. Les ventes faites sans stock sont rattachées aux lots comptés, qui finissent à la quantité comptée. id client pour rejouer sans doublon (409 IDENTIFIANT_DEJA_UTILISE s'il appartient à une autre pharmacie). 400 VALIDATION (quantité, lot en double, date mal formée), 404 STOCK_INTROUVABLE (lignes dans details), 404 lot introuvable.",
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   enregistrerInventaire(
@@ -79,7 +79,11 @@ export class InventairesController {
 
   @Get(':structureId/inventaires')
   @RequirePermissions(PERMISSIONS.INVENTAIRE_WRITE)
-  @ApiOperation({ summary: 'Lister les inventaires (20 par page)' })
+  @ApiOperation({
+    summary: 'Lister les inventaires (20 par page)',
+    description:
+      'Permission : inventaire:write. Succès : 200. data : inventaires, page, parPage (20), total.',
+  })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   listerInventaires(
     @Req() req: RequestWithUser,
@@ -91,7 +95,11 @@ export class InventairesController {
 
   @Get(':structureId/inventaires/:inventaireId')
   @RequirePermissions(PERMISSIONS.INVENTAIRE_WRITE)
-  @ApiOperation({ summary: "Détail d'un inventaire" })
+  @ApiOperation({
+    summary: "Détail d'un inventaire",
+    description:
+      "Permission : inventaire:write. Succès : 200. Lignes comptées par lot, avec théorique et écart. 404 si l'inventaire est introuvable.",
+  })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiParam({
     name: 'inventaireId',

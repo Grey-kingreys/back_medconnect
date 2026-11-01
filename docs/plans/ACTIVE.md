@@ -29,7 +29,9 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | PB16 | Alertes de péremption, marge et étanchéité des coûts, deux sous-fiches commitées dans l'ordre : tasks/PB16a-alertes-peremption-marge.md, tasks/PB16b-etancheite-couts.md (D601 à D610) | spécifié | validé (PB16a, PB16b ; D601 à D611, rapports/PB16a-chef.md, PB16b-chef.md) | 1 |
 | PB17 | Clôture journalière, trois sous-fiches commitées dans l'ordre : tasks/PB17a-cloture-journaliere.md, tasks/PB17b-export-cloture.md, tasks/PB17c-verrou-journee-ecrivains.md (D612 à D628) | dur | validé (PB17a, PB17b, PB17c ; D612 à D629, rapports/PB17a-chef.md, PB17b-chef.md, PB17c-chef.md) | 1 |
 | PB18 | Synchronisation desktop, quatre sous-fiches commitées dans l'ordre : tasks/PB18a-plages-catalogue-cors.md, tasks/PB18b-moteur-rejeu-caisse.md, tasks/PB18c-rejeu-ventes.md, tasks/PB18d-remontee-apres-cloture.md (D630 à D661) | dur | validé (PB18a, PB18b, PB18c, PB18d ; D630 à D667, rapports/PB18a-chef.md, PB18b-chef.md, PB18c-chef.md, PB18d-chef.md) | 1 |
-| PB19 | Seeds, démo et documentation, deux sous-fiches à commiter dans l'ordre : tasks/PB19a-jeu-demo-pharmacie.md, tasks/PB19b-documentation-swagger-variables.md (D668 à D682) | spécifié | PB19a validé (D668 à D676, D681, D682, rapports/PB19a-chef.md) ; PB19b à faire | 1 |
+| PB19 | Seeds, démo et documentation, deux sous-fiches à commiter dans l'ordre : tasks/PB19a-jeu-demo-pharmacie.md, tasks/PB19b-documentation-swagger-variables.md (D668 à D682) | spécifié | validé (PB19a, PB19b ; D668 à D682, rapports/PB19a-chef.md, PB19b-chef.md) | 1 |
+
+Back de la tranche (PB01 à PB19) validé ; bilan, décisions à faire valider par le porteur et consignes pour le front : rapports/PB19b-chef.md. Prochaine étape : front web PF01 à PF06 (PLAN.md, section « Front web »), dans le dépôt front_medconnect.
 
 ## Faites (preuve = commit)
 
@@ -40,6 +42,8 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 
 - Porteur : Q01, Q02, Q05 à Q14, Q16, Q17 de PLAN.md section 7, défauts du plan appliqués (A6), à remonter au rapport final.
 - Porteur, après PB19 (D679) : outil de rejeu d'un événement mis de côté, rapprochement de l'argent des régularisations hors clôture, paiement arrivé après la fermeture d'une caisse du jour non compté par le bilan figé.
+- Porteur, après PB19b : `GET .../caisse/sessions/courante` montre à tout vendeur (`caisse:utiliser`) la caisse ouverte du poste, fond et comptage d'ouverture compris (voulu, D528). Durcir en masquant `fondCaisse`, `fondCompte` et `comptageOuverture` à un appelant qui n'est ni le titulaire de la caisse ni `caisse:superviser` (nom du titulaire gardé, utile à PF03) ?
+- Porteur, après PB19b : décisions D601 à D682 de cette reprise à valider (liste et révisions de décisions antérieures dans rapports/PB19b-chef.md).
 - Reprises du run parqué 2026-10-22-lot8 : voir son decisions.md et l'historique git de ce fichier (questions TB3, B2, B4, U1, B8, B10, B11, B12, B14 toujours ouvertes).
 
 ## Dernières décisions (5 max, historique complet dans decisions.md)

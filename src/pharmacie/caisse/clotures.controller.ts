@@ -42,7 +42,7 @@ export class ClotureController {
   @ApiOperation({
     summary: "Préparation de la clôture d'une journée",
     description:
-      "Préparation de la clôture d'une journée : sessions, caisses encore ouvertes, postes attendus nommés (session ouverte, ventes à envoyer, synchro incomplète, D616), totaux par mode des caisses fermées, peutCloturer, peutForcer ; pour une journée clôturée, la clôture. 400 VALIDATION (dateValide, jourFutur), 400 JOUR_AVANT_DEBUT_CAISSE.",
+      "Permission : cloture:gerer. Succès : 200. Préparation de la clôture d'une journée : sessions, caisses encore ouvertes, postes attendus nommés (session ouverte, ventes à envoyer, synchro incomplète, D616), totaux par mode des caisses fermées, peutCloturer, peutForcer ; pour une journée clôturée, la clôture. 400 VALIDATION (dateValide, jourFutur), 400 JOUR_AVANT_DEBUT_CAISSE.",
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiParam({ name: 'jour', description: 'Jour métier, AAAA-MM-JJ' })
@@ -60,7 +60,7 @@ export class ClotureController {
   @ApiOperation({
     summary: "Export CSV d'une journée clôturée",
     description:
-      "Export CSV (séparateur point-virgule, UTF-8 avec BOM pour Excel) d'une journée clôturée : une ligne par pièce, par paiement et par mouvement de caisse (montant signé), sans coût, sans client, sans médicament. 409 JOURNEE_NON_CLOTUREE, 400 VALIDATION, 400 JOUR_AVANT_DEBUT_CAISSE.",
+      "Permission : cloture:gerer. Succès : 200, fichier cloture-AAAA-MM-JJ.csv. Export CSV (séparateur point-virgule, UTF-8 avec BOM pour Excel) d'une journée clôturée : une ligne par pièce, par paiement et par mouvement de caisse (montant signé), sans coût, sans client, sans médicament. 409 JOURNEE_NON_CLOTUREE, 400 VALIDATION, 400 JOUR_AVANT_DEBUT_CAISSE.",
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiParam({ name: 'jour', description: 'Jour métier, AAAA-MM-JJ' })
@@ -86,7 +86,7 @@ export class ClotureController {
   @ApiOperation({
     summary: 'Clôturer une journée',
     description:
-      'Clôture la journée : caisses fermées incluses, totaux par mode figés. 409 CLOTURE_INCOMPLETE (details : postes attendus) sans forcer ; forcer avec motif (400 MOTIF_REQUIS) seulement si tous les postes attendus sont des postes desktop, sinon 409 CAISSES_A_FERMER ; 409 JOURNEE_DEJA_CLOTUREE.',
+      'Permission : cloture:gerer. Succès : 200. Clôture la journée : caisses fermées incluses, totaux par mode figés. 409 CLOTURE_INCOMPLETE (details : postes attendus) sans forcer ; forcer avec motif (400 MOTIF_REQUIS) seulement si tous les postes attendus sont des postes desktop, sinon 409 CAISSES_A_FERMER ; 409 JOURNEE_DEJA_CLOTUREE.',
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   cloturer(
@@ -102,7 +102,8 @@ export class ClotureController {
   @RequirePermissions(PERMISSIONS.CLOTURE_GERER)
   @ApiOperation({
     summary: 'Clôtures du mois',
-    description: 'Clôtures du mois (AAAA-MM, défaut mois en cours).',
+    description:
+      'Permission : cloture:gerer. Succès : 200. Clôtures du mois (AAAA-MM, défaut mois en cours). 400 VALIDATION si le mois est mal formé.',
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   lister(

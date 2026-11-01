@@ -35,7 +35,7 @@ export class AnomaliesController {
   @ApiOperation({
     summary: "File d'anomalies de la pharmacie",
     description:
-      "20 par page, les plus récentes d'abord. statut OUVERTE par défaut, filtre type. Une anomalie STOCK_NEGATIF porte rattachement (etat EN_ATTENTE, PARTIELLE, RATTACHEE ou VENTE_ANNULEE) : le stock a-t-il depuis été rattaché à un lot. ouvertes = nombre d'anomalies à traiter.",
+      "Permission : anomalie:gerer. Succès : 200. 20 par page, les plus récentes d'abord. statut OUVERTE par défaut, filtre type. Une anomalie STOCK_NEGATIF porte rattachement (etat EN_ATTENTE, PARTIELLE, RATTACHEE ou VENTE_ANNULEE) : le stock a-t-il depuis été rattaché à un lot. ouvertes = nombre d'anomalies à traiter.",
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   lister(
@@ -51,7 +51,7 @@ export class AnomaliesController {
   @ApiOperation({
     summary: 'Traiter une anomalie',
     description:
-      'Commentaire obligatoire (3 à 500 caractères, 400 MOTIF_REQUIS). Une seule fois : 409 ANOMALIE_DEJA_TRAITEE.',
+      'Permission : anomalie:gerer. Succès : 200. Commentaire obligatoire (3 à 500 caractères, 400 MOTIF_REQUIS). Une seule fois : 409 ANOMALIE_DEJA_TRAITEE.',
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiParam({ name: 'anomalieId', description: "Identifiant de l'anomalie" })

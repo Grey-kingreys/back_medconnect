@@ -44,6 +44,8 @@ export class SessionsCaisseController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Ouvrir la caisse d’un poste (idempotent pour le même vendeur)',
+    description:
+      'Permission : caisse:utiliser. Succès : 200 (cree: false et ouverteMaintenant: false quand la caisse existait déjà ou que l’identifiant client est rejoué). Une seule caisse ouverte par poste ; le comptage d’ouverture est facultatif. 409 POSTE_INCONNU, SESSION_AUTRE_UTILISATEUR, IDENTIFIANT_DEJA_UTILISE, SESSION_FERMEE, JOURNEE_CLOTUREE ; 400 VALIDATION, MODE_PAIEMENT_INCONNU.',
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiResponse({
@@ -65,7 +67,11 @@ export class SessionsCaisseController {
 
   @Get(':structureId/caisse/sessions/courante')
   @RequirePermissions(PERMISSIONS.CAISSE_UTILISER)
-  @ApiOperation({ summary: 'Caisse ouverte sur un poste, s’il y en a une' })
+  @ApiOperation({
+    summary: 'Caisse ouverte sur un poste, s’il y en a une',
+    description:
+      'Permission : caisse:utiliser. Succès : 200 (data nul s’il n’y a pas de caisse ouverte sur ce poste). Volontairement sans contrôle du vendeur (D528) : renvoie la caisse ouverte du poste quel qu’en soit le titulaire (nom, fond et comptage d’ouverture compris, sans bilan ni montant d’activité), pour savoir qui occupe un poste. 409 POSTE_INCONNU (poste inconnu ou technique).',
+  })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiResponse({
     status: 409,
@@ -81,7 +87,11 @@ export class SessionsCaisseController {
 
   @Get(':structureId/caisse/sessions')
   @RequirePermissions(PERMISSIONS.CAISSE_SUPERVISER)
-  @ApiOperation({ summary: 'Sessions de caisse d’un jour' })
+  @ApiOperation({
+    summary: 'Sessions de caisse d’un jour',
+    description:
+      'Permission : caisse:superviser. Succès : 200. Sessions du jour métier (paramètre jour, défaut aujourd’hui) de tous les vendeurs, hors session technique. 400 VALIDATION si la date est mal formée.',
+  })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiResponse({ status: 400, description: 'Date invalide (VALIDATION).' })
   listerDuJour(
@@ -97,6 +107,8 @@ export class SessionsCaisseController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Enregistrer le comptage d’ouverture ou de fermeture',
+    description:
+      'Permission : caisse:utiliser. Succès : 200 (cree: false au rejeu du même identifiant). Coupures du référentiel actif seulement ; relevés Orange Money et MTN MoMo à la fermeture seulement. 409 SESSION_FERMEE, COMPTAGE_DEJA_SAISI, IDENTIFIANT_DEJA_UTILISE ; 400 VALIDATION, MODE_PAIEMENT_INCONNU ; 409 JOURNEE_CLOTUREE si le jour de la caisse est clôturé.',
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiParam({ name: 'sessionId', description: 'Identifiant de la session' })
@@ -129,6 +141,8 @@ export class SessionsCaisseController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Enregistrer un prélèvement, un apport ou un remboursement',
+    description:
+      'Permission : caisse:utiliser. Succès : 200 (cree: false au rejeu du même identifiant). Motif obligatoire. 409 SESSION_FERMEE, IDENTIFIANT_DEJA_UTILISE ; 400 MOTIF_REQUIS, MODE_PAIEMENT_INCONNU ; 409 JOURNEE_CLOTUREE si le jour de la caisse est clôturé.',
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiParam({ name: 'sessionId', description: 'Identifiant de la session' })
@@ -158,7 +172,11 @@ export class SessionsCaisseController {
 
   @Get(':structureId/caisse/sessions/:sessionId/bilan')
   @RequirePermissions(PERMISSIONS.CAISSE_UTILISER)
-  @ApiOperation({ summary: 'Bilan d’une session de caisse' })
+  @ApiOperation({
+    summary: 'Bilan d’une session de caisse',
+    description:
+      'Permission : caisse:utiliser. Succès : 200. Activité, théorique par mode (fond, paiements, apports, prélèvements, remboursements), compté et écart signé ; une session fermée rejoue son bilan figé. Un vendeur ne lit que sa propre caisse (403 sinon, sauf caisse:superviser).',
+  })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiParam({ name: 'sessionId', description: 'Identifiant de la session' })
   bilan(
@@ -172,7 +190,11 @@ export class SessionsCaisseController {
   @Post(':structureId/caisse/sessions/:sessionId/fermer')
   @RequirePermissions(PERMISSIONS.CAISSE_UTILISER)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Fermer une session de caisse' })
+  @ApiOperation({
+    summary: 'Fermer une session de caisse',
+    description:
+      'Permission : caisse:utiliser. Succès : 200. Fige le bilan par mode et crée les anomalies FOND_NON_COMPTE et ECART_CAISSE attribuées à l’administrateur de la pharmacie. 400 COMPTAGE_FERMETURE_REQUIS, COMMENTAIRE_ECART_REQUIS (écart au-delà de seuilEcartCaisse) ; 409 COMPTAGE_DEJA_SAISI, JOURNEE_CLOTUREE.',
+  })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiParam({ name: 'sessionId', description: 'Identifiant de la session' })
   @ApiResponse({

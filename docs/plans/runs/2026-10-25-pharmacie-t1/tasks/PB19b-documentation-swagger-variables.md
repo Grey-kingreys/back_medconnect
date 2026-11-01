@@ -103,7 +103,9 @@ Chemin de l'artefact + preuve (commande lancée, résultat en une ligne) + liste
 ## Historique
 
 <!-- une ligne par tentative : AAAA-MM-JJ | tier | résultat | raison si échec -->
+2026-11-01 | spécifié (codeur Sonnet, vérificateur Sonnet) | PASS du vérificateur (rapports/PB19b-verification.md), validé par le chef après corrections (rapports/PB19b-chef.md) | chef : puces PB08 et PB10 de `CLAUDE.md` recollées par la suppression de la phrase PB08 (saut de ligne rétabli) ; `GET courante` documenté comme voulu (D528) dans la puce PB10 et dans Swagger ; puce PB14c (« seul le mode livraison existe ») reformulée ; durcissement de `GET courante` parqué pour le porteur
 
 ## Validation
 
 <!-- commande relancée par l'orchestrateur | résultat en une ligne | hash du commit -->
+docker compose restart backend ; docker compose exec -T backend npx tsc --noEmit ; npx eslint (12 fichiers .ts) ; npm test ; npm run test:db | démarrage propre ; 0 erreur ; 0 erreur (7 avertissements anciens) ; 101 suites, 1112 réussis, 3 ignorés ; 35 suites, 409 réussis | commit « docs(pharmacie): contrats exacts, Swagger et variables de la tranche (PB19b) » (hash : git log de orch/pharmacie-t1-back, non inscrit ici pour éviter un amend)

@@ -45,7 +45,7 @@ export class VenteController {
   @ApiOperation({
     summary: 'Enregistrer une vente au comptoir',
     description:
-      'Le serveur vérifie chaque ligne, prend les quantités dans les lots (reliquat puis péremption la plus proche), ouvre la caisse du vendeur si besoin, enregistre les paiements et la vente en une seule opération. Les deux prix (boîte, unité) viennent de la fiche du médicament, jamais du client. Sans paiements, la vente est réglée en espèces.',
+      'Permissions : vente:write et caisse:utiliser. Succès : 201. Le serveur vérifie chaque ligne, prend les quantités dans les lots (reliquat puis péremption la plus proche), ouvre la caisse du vendeur si besoin, enregistre les paiements et la vente en une seule opération. Les deux prix (boîte, unité) viennent de la fiche du médicament, jamais du client. Sans paiements, la vente est réglée en espèces. 409 JOURNEE_CLOTUREE si la caisse ouverte du vendeur compte pour une journée clôturée.',
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiHeader({
@@ -95,7 +95,7 @@ export class VenteController {
   @ApiOperation({
     summary: 'Lister les ventes d’un jour',
     description:
-      'Pièces du jour métier (défaut : aujourd’hui), ventes et annulations, avec le total signé des pièces validées et leur nombre.',
+      'Permission : vente:read. Succès : 200. Pièces du jour métier (défaut : aujourd’hui), ventes et annulations, avec le total signé des pièces validées et leur nombre.',
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiResponse({ status: 400, description: 'Date invalide (VALIDATION).' })
@@ -111,7 +111,8 @@ export class VenteController {
   @RequirePermissions(PERMISSIONS.VENTE_READ)
   @ApiOperation({
     summary: 'Détail d’une vente (reçu)',
-    description: 'Même forme que la réponse de création.',
+    description:
+      'Permission : vente:read. Succès : 200, même forme que la réponse de création. 404 si la vente est introuvable.',
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiParam({ name: 'venteId', description: 'Identifiant de la vente' })
@@ -135,7 +136,7 @@ export class VenteController {
   @ApiOperation({
     summary: 'Annuler une vente',
     description:
-      "Crée une pièce d'annulation qui pointe la vente : lignes, lots et paiements opposés, quantités remises dans les lots d'origine, remboursement enregistré dans la caisse de l'auteur (ouverte automatiquement si besoin) et rattaché au jour de cette caisse. Aucune limite de date. Réservé aux permissions vente:annuler et caisse:utiliser.",
+      "Permissions : vente:annuler et caisse:utiliser. Succès : 200. Crée une pièce d'annulation qui pointe la vente : lignes, lots et paiements opposés, quantités remises dans les lots d'origine, remboursement enregistré dans la caisse de l'auteur (ouverte automatiquement si besoin) et rattaché au jour de cette caisse. Aucune limite de date. Motif de 3 à 300 caractères (400 VALIDATION). 409 JOURNEE_CLOTUREE si la caisse de l'auteur compte pour une journée clôturée.",
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiParam({ name: 'venteId', description: 'Identifiant de la vente' })

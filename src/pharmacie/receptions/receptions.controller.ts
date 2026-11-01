@@ -40,7 +40,11 @@ export class ReceptionsController {
 
   @Get(':structureId/fournisseurs')
   @RequirePermissions(PERMISSIONS.RECEPTION_WRITE)
-  @ApiOperation({ summary: 'Liste des fournisseurs de la pharmacie' })
+  @ApiOperation({
+    summary: 'Liste des fournisseurs de la pharmacie',
+    description:
+      'Permission : reception:write. Succès : 200. Fournisseurs de la pharmacie, par nom.',
+  })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   listerFournisseurs(
     @Req() req: RequestWithUser,
@@ -55,7 +59,7 @@ export class ReceptionsController {
   @ApiOperation({
     summary: 'Enregistrer un fournisseur',
     description:
-      'Le nom est unique dans la pharmacie, sans tenir compte des majuscules (409 FOURNISSEUR_EXISTANT).',
+      'Permission : reception:write. Succès : 200. Le nom est unique dans la pharmacie, sans tenir compte des majuscules (409 FOURNISSEUR_EXISTANT).',
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   creerFournisseur(
@@ -78,7 +82,7 @@ export class ReceptionsController {
   @ApiOperation({
     summary: 'Enregistrer une réception de médicaments',
     description:
-      "Une réception et un lot par ligne. Quantité : nombreBoites (multiplié par le nombre d'unités par boîte de la fiche) ou quantiteUnites. Coût par unité = coût d'achat de la boîte divisé par ce nombre, arrondi au GNF, figé sur le lot. Date de péremption obligatoire sauf sansPeremption (400 DATE_PEREMPTION_REQUISE), jamais passée (400 DATE_PEREMPTION_PASSEE). 404 STOCK_INTROUVABLE, 404 fournisseur, 409 IDENTIFIANT_DEJA_UTILISE. Coûts retirés sans marge:read. Les ventes faites sans stock sur ces médicaments sont rattachées aux lots (FEFO, lots non périmés) : allocation provisoire remplacée, mouvements de pièce RESOLUTION, réponse resolutions.",
+      "Permission : reception:write. Succès : 200. Une réception et un lot par ligne. Quantité : nombreBoites (multiplié par le nombre d'unités par boîte de la fiche) ou quantiteUnites. Coût par unité = coût d'achat de la boîte divisé par ce nombre, arrondi au GNF, figé sur le lot. Date de péremption obligatoire sauf sansPeremption (400 DATE_PEREMPTION_REQUISE), jamais passée (400 DATE_PEREMPTION_PASSEE). 400 VALIDATION (quantité manquante, double ou trop grande, date mal formée), 404 STOCK_INTROUVABLE, 404 fournisseur, 409 IDENTIFIANT_DEJA_UTILISE, 409 JOURNEE_CLOTUREE (réception datée d'un jour antérieur clôturé). Coûts retirés sans marge:read. Les ventes faites sans stock sur ces médicaments sont rattachées aux lots (FEFO, lots non périmés) : allocation provisoire remplacée, mouvements de pièce RESOLUTION, réponse resolutions.",
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   enregistrer(
@@ -92,7 +96,11 @@ export class ReceptionsController {
 
   @Get(':structureId/receptions')
   @RequirePermissions(PERMISSIONS.RECEPTION_WRITE)
-  @ApiOperation({ summary: 'Liste des réceptions, les plus récentes d’abord' })
+  @ApiOperation({
+    summary: 'Liste des réceptions, les plus récentes d’abord',
+    description:
+      'Permission : reception:write. Succès : 200. 20 par page ; coûts retirés sans marge:read.',
+  })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   lister(
     @Req() req: RequestWithUser,
@@ -104,7 +112,11 @@ export class ReceptionsController {
 
   @Get(':structureId/receptions/:receptionId')
   @RequirePermissions(PERMISSIONS.RECEPTION_WRITE)
-  @ApiOperation({ summary: 'Détail d’une réception et de ses lots' })
+  @ApiOperation({
+    summary: 'Détail d’une réception et de ses lots',
+    description:
+      'Permission : reception:write. Succès : 200. 404 si la réception est introuvable ; coûts retirés sans marge:read.',
+  })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiParam({ name: 'receptionId', description: 'Identifiant de la réception' })
   detail(
@@ -119,6 +131,8 @@ export class ReceptionsController {
   @RequirePermissions(PERMISSIONS.STOCK_READ)
   @ApiOperation({
     summary: 'Lots en stock d’un médicament, dans l’ordre de sortie',
+    description:
+      'Permission : stock:read. Succès : 200. Lots à solde positif d’une fiche, dans l’ordre de sortie ; coûts retirés sans marge:read. 404 si la fiche est introuvable.',
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiParam({
@@ -138,7 +152,7 @@ export class ReceptionsController {
   @ApiOperation({
     summary: 'Corriger la date de péremption d’un lot',
     description:
-      'Motif obligatoire (400 MOTIF_REQUIS), correction enregistrée dans le journal d’audit.',
+      'Permission : reception:write. Succès : 200. Motif obligatoire (400 MOTIF_REQUIS), correction enregistrée dans le journal d’audit. 404 si le lot est introuvable.',
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiParam({ name: 'lotId', description: 'Identifiant du lot' })

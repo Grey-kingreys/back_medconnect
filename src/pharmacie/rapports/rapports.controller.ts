@@ -25,7 +25,7 @@ export class RapportsController {
   @ApiOperation({
     summary: 'Alertes de péremption par lot',
     description:
-      "Lots à surveiller : horizons des paramètres (défaut 90, 30, 7 jours), chaque lot dans le plus petit horizon qui le contient, périmés à part, lots sans date comptés. valeurVente au prix de la boîte ; valeurCout, coutConnu et nombreLotsCoutInconnu seulement avec marge:read ; un lot à coût inconnu (reprise, trouvé à l'inventaire, reçu sans coût) n'est jamais compté pour 0.",
+      "Permission : stock:read. Succès : 200. Lots à surveiller : horizons des paramètres (défaut 90, 30, 7 jours), chaque lot dans le plus petit horizon qui le contient, périmés à part, lots sans date comptés. valeurVente au prix de la boîte ; valeurCout, coutConnu et nombreLotsCoutInconnu seulement avec marge:read ; un lot à coût inconnu (reprise, trouvé à l'inventaire, reçu sans coût) n'est jamais compté pour 0.",
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   alertesPeremption(
@@ -40,7 +40,7 @@ export class RapportsController {
   @ApiOperation({
     summary: 'Rapport de marge',
     description:
-      "Marge réelle depuis les allocations de lot, pièces d'annulation comprises par leur signe. Une vente dont un lot a un coût inconnu ou est un lot technique est non valorisable (à part, jamais comptée à 100 %) ; une ligne vendue sans stock attend son rattachement (provisoires). Période de 92 jours au plus (400 VALIDATION). debutFiabilite : avant cette date, les ventes n'ont pas de coût.",
+      "Permission : marge:read. Succès : 200. Marge réelle depuis les allocations de lot, pièces d'annulation comprises par leur signe. Une vente dont un lot a un coût inconnu ou est un lot technique est non valorisable (à part, jamais comptée à 100 %) ; une ligne vendue sans stock attend son rattachement (provisoires). Période de 92 jours au plus (400 VALIDATION). debutFiabilite : avant cette date, les ventes n'ont pas de coût.",
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   rapportMarge(
