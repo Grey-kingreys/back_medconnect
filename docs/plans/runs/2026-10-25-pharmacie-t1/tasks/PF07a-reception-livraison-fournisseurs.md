@@ -118,7 +118,10 @@ Chemin de l'artefact + preuve (commande lancée, résultat en une ligne). Ou un 
 ## Historique
 
 <!-- une ligne par tentative : AAAA-MM-JJ | tier | résultat | raison si échec -->
+2026-11-01 | spécifié (Sonnet) | PASS avec réserves | R1 à R5 (rapports/PF07a-verification.md)
+2026-11-01 | chef (Opus) | validé | R1 à R5 corrigées, garde des sous-pages (D708), 5 tests ajoutés (rapports/PF07a-chef.md)
 
 ## Validation
 
 <!-- commande relancée par l'orchestrateur | résultat en une ligne | hash du commit -->
+front : tsc, eslint (8 fichiers), `vitest run`, `npm run build` local | 0 erreur, 0 erreur, 65 fichiers et 562 tests verts, build réussi | front 1d2197f
