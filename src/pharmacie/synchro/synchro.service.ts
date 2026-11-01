@@ -22,20 +22,36 @@ import {
   type SessionChargee,
 } from '../caisse/sessions-caisse.service';
 import { CODE_ESPECES } from '../domaine/caisse';
+import { reliquatLot } from '../domaine/quantites';
+import { estPerime } from '../domaine/selection-lots';
+import { ecrirePieceVente } from '../ecriture-vente';
 import { jourConakry, jourLisible } from '../jour-metier';
 import type { Reponse } from '../points-de-vente.service';
-import { jourVersDate } from '../stock/lecture-stock';
+import {
+  dateVersJour,
+  jourVersDate,
+  lireLotsCandidats,
+} from '../stock/lecture-stock';
 import { MouvementsStockService } from '../stock/mouvements-stock.service';
+import {
+  allouerLignes,
+  formaterNumeroTicket,
+  preparerPaiements,
+  type LigneAAllouer,
+} from '../vente-regles';
 import {
   CorpsComptageSaisiDto,
   CorpsMouvementCaisseDto,
   CorpsSessionFermeeDto,
   CorpsSessionOuverteDto,
+  CorpsVenteDto,
   TYPES_EVENEMENT,
   type RecevoirEvenementsDto,
 } from '../dto/synchro.dto';
 import {
+  anomaliesApplication,
   ARenvoyerSynchro,
+  calculerLigneRejeu,
   codeRejetDepuisHttp,
   contientNul,
   corpsIllisible,
@@ -45,9 +61,12 @@ import {
   horodatageBorne,
   MESSAGES_REJET,
   messageSynthese,
+  numeroHorsPlage,
+  numeroSecours as formaterNumeroSecours,
   RejetSynchro,
   resumeEvenement,
   SEUIL_ECHECS_IMPREVUS,
+  verifierCoherenceVente,
   type StatutResultat,
 } from './rejeu-regles';
 import { validerCorps } from './valider-corps';
@@ -675,7 +694,13 @@ export class SynchroService {
       | 'EVENEMENT_REJETE'
       | 'SEQUENCE_MANQUANTE'
       | 'ECART_CAISSE'
-      | 'REMONTEE_APRES_CLOTURE',
+      | 'REMONTEE_APRES_CLOTURE'
+      | 'PRIX_DIVERGENT'
+      | 'VENTE_UNITE_INTERDITE'
+      | 'ORDONNANCE_NON_CONFIRMEE'
+      | 'PRODUIT_ARCHIVE'
+      | 'CONDITIONNEMENT_CONCURRENT'
+      | 'PLAGE_EPUISEE',
     pieceType: string,
     pieceId: string,
     details: Prisma.InputJsonObject,
@@ -737,9 +762,18 @@ export class SynchroService {
     const borne = horodatageBorne(local, new Date());
 
     switch (type) {
-      case 'VENTE':
-        // PB18c remplace cette ligne.
-        throw new ARenvoyerSynchro('SERVICE_INDISPONIBLE');
+      case 'VENTE': {
+        const corps = await this.corpsValide(CorpsVenteDto, e.corps);
+        return this.appliquerVente(
+          tx,
+          ctx,
+          e,
+          corps,
+          utilisateur,
+          local,
+          borne,
+        );
+      }
       case 'SESSION_OUVERTE': {
         const corps = await this.corpsValide(CorpsSessionOuverteDto, e.corps);
         return this.ouvrirSession(tx, ctx, e, corps, utilisateur, local, borne);
@@ -818,6 +852,358 @@ export class SynchroService {
       throw new RejetSynchro('SESSION_INCONNUE');
     }
     return this.sessionsCaisse.verrouillerSession(tx, session.id);
+  }
+
+  // ------------------------------------------------------ gestionnaire vente
+
+  /** Vente faite sur le poste : le serveur réalloue les lots selon son état, jamais de refus de fond (D651 à D658). */
+  private async appliquerVente(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    e: EvenementBrut,
+    corps: CorpsVenteDto,
+    utilisateur: UtilisateurCharge,
+    local: Date,
+    borne: Date,
+  ): Promise<ResultatApplication> {
+    const structureId = ctx.structure.id;
+    const pointDeVenteId = ctx.poste.pointDeVenteId;
+    const s = await this.sessionDuPoste(tx, ctx, corps.sessionId);
+    // Caisse fermée ou d'un jour clôturé : régularisation, reprise en PB18d (D658).
+    if (
+      s.statut !== 'OUVERTE' ||
+      (await estJourCloture(tx, pointDeVenteId, dateVersJour(s.jourMetier)))
+    ) {
+      throw new ARenvoyerSynchro('REGULARISATION_INDISPONIBLE');
+    }
+    const existante = await tx.vente.findUnique({
+      where: { id: corps.venteId },
+      select: { id: true },
+    });
+    if (existante) throw new RejetSynchro('IDENTIFIANT_DEJA_UTILISE');
+
+    const coherence = verifierCoherenceVente(corps);
+    if (!coherence.ok) {
+      throw new RejetSynchro('EVENEMENT_INVALIDE', {
+        champs: coherence.champs,
+      });
+    }
+    const prepares = preparerPaiements(
+      corps.total,
+      corps.paiements.map((p) => ({
+        mode: p.mode,
+        montant: p.montant,
+        reference: p.reference,
+        montantRecu: p.montantRecu,
+      })),
+      await tx.modePaiement.findMany(),
+    );
+    if (!prepares.ok) {
+      throw new RejetSynchro('EVENEMENT_INVALIDE', { champs: ['paiements'] });
+    }
+
+    const ids = [...new Set(corps.lignes.map((l) => l.stockId))];
+    await this.mouvementsStock.verrouillerFiches(tx, ids);
+    // Lues après les verrous : le coefficient est à jour (D560).
+    const fiches = await tx.stockMedicament.findMany({
+      where: { id: { in: ids }, structureId },
+      include: {
+        medicament: {
+          select: { id: true, nom: true, ordonnanceRequise: true },
+        },
+      },
+    });
+    const parId = new Map(fiches.map((f) => [f.id, f]));
+    if (ids.some((id) => !parId.has(id))) {
+      throw new RejetSynchro('STOCK_INTROUVABLE');
+    }
+
+    const jourVente = jourConakry(borne);
+    const lotsParFiche = await lireLotsCandidats(tx, pointDeVenteId, ids);
+    const lignes = corps.lignes.map((l) => {
+      const fiche = parId.get(l.stockId)!;
+      const calcul = calculerLigneRejeu({
+        unite: l.unite,
+        nombre: l.nombre,
+        prixTicket: l.prixUnitaire,
+        coefficientBoite: fiche.coefficientBoite,
+      });
+      // Sortie manuelle gardée seulement si le lot a encore du stock au serveur.
+      const sortieManuelle =
+        l.sortieManuelle &&
+        (lotsParFiche.get(l.stockId) ?? []).some(
+          (c) => c.id === l.sortieManuelle?.lotId,
+        )
+          ? { lotId: l.sortieManuelle.lotId, motif: l.sortieManuelle.motif }
+          : null;
+      return { l, fiche, calcul, sortieManuelle };
+    });
+
+    // Deux postes ont chacun entamé une boîte : seul le serveur le voit (D654).
+    const concurrents: { stockId: string; nom: string }[] = [];
+    for (const { l, fiche } of lignes) {
+      if (l.unite !== 'UNITE' || l.ouvertureConditionnement !== true) continue;
+      if (concurrents.some((c) => c.stockId === fiche.id)) continue;
+      const entame = (lotsParFiche.get(fiche.id) ?? []).some(
+        (c) =>
+          !estPerime(c.dateExpiration, jourVente) &&
+          reliquatLot(c.solde, c.coefficientReception) > 0,
+      );
+      if (entame) {
+        concurrents.push({ stockId: fiche.id, nom: fiche.medicament.nom });
+      }
+    }
+
+    const aAllouer: LigneAAllouer[] = lignes.map((c, index) => ({
+      index,
+      stockMedicamentId: c.fiche.id,
+      unite: c.calcul.uniteAffichee,
+      quantiteUm: c.calcul.quantiteUm,
+      sortieManuelle: c.sortieManuelle,
+    }));
+    const allouees = allouerLignes(jourVente, aAllouer, lotsParFiche);
+
+    // Numéro (D655) : jamais de refus, la base reste sans doublon.
+    const { ordre, code: posteCode } = ctx.poste;
+    let numero: string;
+    let numeroTicket: number | null = null;
+    let secours = false;
+    let horsPlage: { numeroImprime: string } | null = null;
+    const horsPlageDe = (numeroImprime: string) => {
+      horsPlage = { numeroImprime };
+      return numeroHorsPlage(ordre, posteCode, e.sequence);
+    };
+    if (corps.numeroTicket !== undefined) {
+      const n = corps.numeroTicket;
+      const plage = await tx.plageTicket.findFirst({
+        where: { posteId: ctx.poste.id, debut: { lte: n }, fin: { gte: n } },
+        select: { id: true },
+      });
+      const prise = await tx.vente.findFirst({
+        where: { pointDeVenteId, numeroTicket: n },
+        select: { id: true },
+      });
+      if (plage && !prise) {
+        numero = formaterNumeroTicket(ordre, n);
+        numeroTicket = n;
+      } else {
+        numero = horsPlageDe(formaterNumeroTicket(ordre, n));
+      }
+    } else {
+      const secoursNumero = formaterNumeroSecours(
+        ordre,
+        posteCode,
+        corps.numeroSecours as number,
+      );
+      const pris = await tx.vente.findFirst({
+        where: { structureId, numero: secoursNumero },
+        select: { id: true },
+      });
+      if (pris) {
+        numero = horsPlageDe(secoursNumero);
+      } else {
+        numero = secoursNumero;
+        secours = true;
+      }
+    }
+
+    const nomVendeur = `${utilisateur.prenom} ${utilisateur.nom}`.trim();
+    const ecrit = await ecrirePieceVente(tx, this.mouvementsStock, {
+      id: corps.venteId,
+      structureId,
+      adminId: ctx.structure.adminId,
+      pointDeVenteId,
+      posteId: ctx.poste.id,
+      posteCode,
+      sessionId: s.id,
+      typePiece: 'VENTE',
+      numero,
+      numeroTicket,
+      jourMetier: s.jourMetier,
+      jourMetierOrigine: null,
+      vendeur: { id: utilisateur.id, nom: nomVendeur },
+      clientNom: corps.clientNom || null,
+      clientTelephone: corps.clientTelephone || null,
+      ordonnanceVerifiee: corps.ordonnanceVerifiee,
+      total: corps.total,
+      cleIdempotence: null,
+      horodatageLocal: local,
+      sequencePoste: e.sequence,
+      lignes: lignes.map((c, index) => ({
+        fiche: {
+          id: c.fiche.id,
+          medicamentId: c.fiche.medicamentId,
+          nom: c.fiche.medicament.nom,
+        },
+        calcul: c.calcul,
+        allocation: allouees[index],
+        detailsAnomalie: {
+          origine: 'SYNCHRO',
+          quantiteProvisoireLocale: c.l.quantiteProvisoireLocale ?? 0,
+          perimesDisponibles: allouees[index].lotsPerimesDisponibles.length,
+          evenementId: e.evenementId,
+        },
+        anomalieMemeSansProvisoire: (c.l.quantiteProvisoireLocale ?? 0) > 0,
+      })),
+      paiements: prepares.paiements,
+      evenementIdMouvement: (i, lotId) =>
+        `synchro:${e.evenementId}:${i}:${lotId ?? 'provisoire'}`,
+    });
+
+    // Anomalies d'application, au titulaire : la vente est toujours appliquée (D653).
+    const anomalies: { type: string; id: string }[] = [...ecrit.anomalies];
+    const jour = dateVersJour(s.jourMetier);
+    const causes = anomaliesApplication(
+      lignes.map((c) => ({
+        fiche: {
+          id: c.fiche.id,
+          nom: c.fiche.medicament.nom,
+          prixUnitaire: c.fiche.prixUnitaire,
+          prixUnite: c.fiche.prixUnite,
+          deconditionnable: c.fiche.deconditionnable,
+          ordonnanceRequise: c.fiche.medicament.ordonnanceRequise,
+          archive: c.fiche.archiveLe !== null,
+        },
+        unite: c.l.unite,
+        prixTicket: c.l.prixUnitaire,
+      })),
+      corps.ordonnanceVerifiee,
+    );
+    const detailsVente = (
+      lignesEnCause: Prisma.InputJsonValue,
+      message: string,
+    ): Prisma.InputJsonObject => ({
+      numero,
+      posteCode,
+      utilisateurId: utilisateur.id,
+      utilisateurNom: nomVendeur,
+      jourMetier: jour,
+      horodatageLocal: local.toISOString(),
+      lignes: lignesEnCause,
+      message,
+    });
+    const nombre = (n: number) => `${n} médicament(s)`;
+    const aSignaler: {
+      type:
+        | 'PRIX_DIVERGENT'
+        | 'VENTE_UNITE_INTERDITE'
+        | 'ORDONNANCE_NON_CONFIRMEE'
+        | 'PRODUIT_ARCHIVE'
+        | 'CONDITIONNEMENT_CONCURRENT';
+      lignes: Prisma.InputJsonValue[];
+      message: string;
+    }[] = [
+      {
+        type: 'PRIX_DIVERGENT',
+        lignes: causes.prixDivergents,
+        message: `La vente ${numero} a été faite sur le poste à un prix différent du prix enregistré pour ${nombre(causes.prixDivergents.length)} : le prix du ticket a été gardé. Vérifiez les prix de ces fiches.`,
+      },
+      {
+        type: 'VENTE_UNITE_INTERDITE',
+        lignes: causes.uniteInterdite,
+        message: `La vente ${numero} contient un médicament vendu à l'unité alors que sa fiche ne le permet pas.`,
+      },
+      {
+        type: 'ORDONNANCE_NON_CONFIRMEE',
+        lignes: causes.ordonnance,
+        message: `La vente ${numero} contient un médicament sur ordonnance sans que l'ordonnance ait été confirmée.`,
+      },
+      {
+        type: 'PRODUIT_ARCHIVE',
+        lignes: causes.archives,
+        message: `La vente ${numero} contient un médicament retiré du stock (archivé) : vérifiez sa fiche.`,
+      },
+      {
+        type: 'CONDITIONNEMENT_CONCURRENT',
+        lignes: concurrents,
+        message: `Pour la vente ${numero}, le poste a entamé une nouvelle boîte alors qu'une boîte entamée existait déjà : comptez les boîtes ouvertes de ce médicament.`,
+      },
+    ];
+    for (const a of aSignaler) {
+      if (a.lignes.length === 0) continue;
+      anomalies.push(
+        await this.creerAnomalie(
+          tx,
+          ctx,
+          a.type,
+          'VENTE',
+          corps.venteId,
+          detailsVente(a.lignes, a.message),
+        ),
+      );
+    }
+    if (secours) {
+      const ouverte = await tx.anomalie.findFirst({
+        where: {
+          pointDeVenteId,
+          type: 'PLAGE_EPUISEE',
+          statut: 'OUVERTE',
+          pieceType: 'Poste',
+          pieceId: ctx.poste.id,
+        },
+        select: { id: true },
+      });
+      if (!ouverte) {
+        anomalies.push(
+          await this.creerAnomalie(
+            tx,
+            ctx,
+            'PLAGE_EPUISEE',
+            'Poste',
+            ctx.poste.id,
+            {
+              raison: 'PLAGE_EPUISEE',
+              posteCode,
+              numero,
+              jourMetier: jour,
+              message: `Le poste ${ctx.poste.libelle} n'avait plus de numéros de tickets réservés : il a utilisé des numéros de secours (${numero}). Connectez-le pour qu'il recharge ses numéros.`,
+            },
+          ),
+        );
+      }
+    }
+    const imprime = horsPlage as { numeroImprime: string } | null;
+    if (imprime) {
+      anomalies.push(
+        await this.creerAnomalie(
+          tx,
+          ctx,
+          'PLAGE_EPUISEE',
+          'VENTE',
+          corps.venteId,
+          {
+            raison: 'NUMERO_HORS_PLAGE',
+            posteCode,
+            numeroImprime: imprime.numeroImprime,
+            numero,
+            message: `Le ticket ${imprime.numeroImprime} du poste ${ctx.poste.libelle} porte un numéro qui ne lui était pas réservé : la vente est enregistrée sous le numéro ${numero}.`,
+          },
+        ),
+      );
+    }
+
+    await tx.auditLog.create({
+      data: {
+        userId: utilisateur.id,
+        action: 'create',
+        entityType: 'Vente',
+        entityId: corps.venteId,
+        ip: ctx.ip ?? null,
+        metadata: {
+          numero,
+          total: corps.total,
+          nombreLignes: lignes.length,
+          provisoire: allouees.some((a) => a.resteProvisoire > 0),
+          origine: 'synchro',
+          posteCode,
+          sequence: e.sequence,
+        },
+      },
+    });
+    return {
+      piece: { type: 'VENTE', id: corps.venteId, numero },
+      anomalies,
+    };
   }
 
   // ------------------------------------------------------ gestionnaires caisse

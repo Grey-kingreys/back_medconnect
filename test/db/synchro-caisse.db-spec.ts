@@ -817,18 +817,33 @@ describe('Synchro desktop : moteur de rejeu et événements de caisse, sur base 
     expect(statuts(ferme)).toEqual(['APPLIQUE']);
   });
 
-  it('14. vente pas encore prise en charge', async () => {
+  it('14. vente sur une caisse fermée : renvoyée plus tard', async () => {
     const n = (await derniere()) + 1;
     const lignesAvant = await compter(
       'SELECT count(*) AS n FROM "EvenementSynchro"',
     );
     const r = await envoyer([
-      ev(n, 'VENTE', { venteId: randomUUID(), sessionId: randomUUID() }),
-      ev(n + 1, 'MOUVEMENT_CAISSE', {}),
+      ev(n, 'VENTE', {
+        venteId: randomUUID(),
+        sessionId: S1,
+        numeroTicket: 1,
+        lignes: [
+          {
+            stockId: 'stk-quelconque',
+            unite: 'BOITE',
+            nombre: 1,
+            prixUnitaire: 1000,
+          },
+        ],
+        paiements: [{ mode: 'ESPECES', montant: 1000 }],
+        total: 1000,
+        ordonnanceVerifiee: true,
+      }),
+      ev(n + 1, 'MOUVEMENT_CAISSE', { sessionId: S1 }),
     ]);
     expect(statuts(r)).toEqual(['A_RENVOYER', 'A_RENVOYER']);
     expect(r.data.resultats.map((x) => x.code)).toEqual([
-      'SERVICE_INDISPONIBLE',
+      'REGULARISATION_INDISPONIBLE',
       'SERVICE_INDISPONIBLE',
     ]);
     expect(await compter('SELECT count(*) AS n FROM "EvenementSynchro"')).toBe(

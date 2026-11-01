@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import type { CorpsVenteDto } from '../dto/synchro.dto';
+import { arrondiGnf } from '../domaine/quantites';
 
 /** Règles pures du rejeu des opérations d'un poste desktop (PB18b, D637 à D660). */
 
@@ -272,4 +274,147 @@ export function resumeEvenement(type: unknown, corps: unknown): Resume {
     default:
       return {};
   }
+}
+
+// ------------------------------------------------------------------ ventes (PB18c)
+
+/** Ligne d'une vente rejouée, exprimée en unités minimales (D652). */
+export function calculerLigneRejeu(e: {
+  unite: 'BOITE' | 'UNITE';
+  nombre: number;
+  prixTicket: number;
+  coefficientBoite: number;
+}): {
+  prixAppliqueParUm: number;
+  quantiteUm: number;
+  montantLigne: number;
+  uniteAffichee: 'BOITE' | 'UNITE';
+  nombreAffiche: number;
+  coefficientApplique: number;
+} {
+  const montantLigne = e.nombre * e.prixTicket;
+  if (e.unite === 'BOITE') {
+    return {
+      prixAppliqueParUm: arrondiGnf(e.prixTicket / e.coefficientBoite),
+      quantiteUm: e.nombre * e.coefficientBoite,
+      montantLigne,
+      uniteAffichee: 'BOITE',
+      nombreAffiche: e.nombre,
+      coefficientApplique: e.coefficientBoite,
+    };
+  }
+  return {
+    prixAppliqueParUm: e.prixTicket,
+    quantiteUm: e.nombre,
+    montantLigne,
+    uniteAffichee: 'UNITE',
+    nombreAffiche: e.nombre,
+    coefficientApplique: 1,
+  };
+}
+
+/** Cohérence interne du corps d'une vente : un seul numéro, total égal à la somme des lignes. */
+export function verifierCoherenceVente(
+  c: CorpsVenteDto,
+): { ok: true } | { ok: false; champs: string[] } {
+  const champs: string[] = [];
+  if ((c.numeroTicket === undefined) === (c.numeroSecours === undefined)) {
+    champs.push('numeroTicket');
+  }
+  const somme = c.lignes.reduce((s, l) => s + l.nombre * l.prixUnitaire, 0);
+  if (somme !== c.total) champs.push('total');
+  return champs.length === 0 ? { ok: true } : { ok: false, champs };
+}
+
+/** Numéro d'une vente faite avec un numéro de secours du poste (D655). */
+export function numeroSecours(
+  ordre: number,
+  codePoste: string,
+  n: number,
+): string {
+  return `S${ordre}-${codePoste}-${n}`;
+}
+
+/** Numéro d'une vente dont le numéro imprimé est hors plage ou déjà pris (D655). */
+export function numeroHorsPlage(
+  ordre: number,
+  codePoste: string,
+  sequence: number,
+): string {
+  return `N${ordre}-${codePoste}-${sequence}`;
+}
+
+export interface FicheRejeu {
+  id: string;
+  nom: string;
+  prixUnitaire: number | null;
+  prixUnite: number | null;
+  deconditionnable: boolean;
+  ordonnanceRequise: boolean;
+  archive: boolean;
+}
+
+/** Causes d'anomalie d'une vente rejouée : une entrée par fiche et par cause, dans l'ordre des lignes (D653). */
+export function anomaliesApplication(
+  lignes: {
+    fiche: FicheRejeu;
+    unite: 'BOITE' | 'UNITE';
+    prixTicket: number;
+  }[],
+  ordonnanceVerifiee: boolean,
+): {
+  prixDivergents: {
+    stockId: string;
+    nom: string;
+    unite: 'BOITE' | 'UNITE';
+    prixTicket: number;
+    prixFiche: number | null;
+  }[];
+  uniteInterdite: { stockId: string; nom: string }[];
+  ordonnance: { stockId: string; nom: string }[];
+  archives: { stockId: string; nom: string }[];
+} {
+  const vus = {
+    prix: new Set<string>(),
+    unite: new Set<string>(),
+    ordonnance: new Set<string>(),
+    archive: new Set<string>(),
+  };
+  const resultat: ReturnType<typeof anomaliesApplication> = {
+    prixDivergents: [],
+    uniteInterdite: [],
+    ordonnance: [],
+    archives: [],
+  };
+  for (const { fiche, unite, prixTicket } of lignes) {
+    const ref = { stockId: fiche.id, nom: fiche.nom };
+    // Unité sur une fiche non déconditionnable : seule l'anomalie d'unité, pas de prix divergent (D666)
+    const uniteInterdite = unite === 'UNITE' && !fiche.deconditionnable;
+    if (uniteInterdite && !vus.unite.has(fiche.id)) {
+      vus.unite.add(fiche.id);
+      resultat.uniteInterdite.push(ref);
+    }
+    const prixFiche = unite === 'BOITE' ? fiche.prixUnitaire : fiche.prixUnite;
+    if (
+      !uniteInterdite &&
+      prixFiche !== prixTicket &&
+      !vus.prix.has(fiche.id)
+    ) {
+      vus.prix.add(fiche.id);
+      resultat.prixDivergents.push({ ...ref, unite, prixTicket, prixFiche });
+    }
+    if (
+      fiche.ordonnanceRequise &&
+      !ordonnanceVerifiee &&
+      !vus.ordonnance.has(fiche.id)
+    ) {
+      vus.ordonnance.add(fiche.id);
+      resultat.ordonnance.push(ref);
+    }
+    if (fiche.archive && !vus.archive.has(fiche.id)) {
+      vus.archive.add(fiche.id);
+      resultat.archives.push(ref);
+    }
+  }
+  return resultat;
 }

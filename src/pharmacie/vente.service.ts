@@ -27,6 +27,7 @@ import {
   SessionsCaisseService,
 } from './caisse/sessions-caisse.service';
 import { calculerLigne, type UniteVente } from './domaine/prix';
+import { ecrirePieceVente } from './ecriture-vente';
 import { jourConakry } from './jour-metier';
 import { masquerCouts } from './masquer-couts';
 import { assurerPointDeVente } from './point-de-vente';
@@ -710,150 +711,39 @@ export class VenteService {
       });
     }
 
-    // 13. Vente
-    const vente = await tx.vente.create({
-      data: {
+    // 13 à 16. Pièce, paiements, mouvements et anomalies de stock négatif (D657)
+    const { venteId, apresParFiche } = await ecrirePieceVente(
+      tx,
+      this.mouvementsStock,
+      {
         structureId,
+        adminId: structure.adminId,
         pointDeVenteId,
         posteId,
-        sessionCaisseId: sessionId,
+        posteCode,
+        sessionId,
         typePiece: 'VENTE',
         numero,
         numeroTicket: Number(numeroTicket),
         jourMetier,
-        vendeurId: user.id,
-        vendeurNom: utilisateurNom,
+        vendeur: { id: user.id, nom: utilisateurNom },
         clientNom: dto.clientNom?.trim() || null,
         clientTelephone: dto.clientTelephone?.trim() || null,
         ordonnanceVerifiee: dto.ordonnanceVerifiee === true,
         total,
         cleIdempotence: cle,
-        lignes: {
-          create: lignesCalculees.map((c, index) => {
-            const a = allouees[index];
-            return {
-              medicamentId: c.fiche.medicamentId,
-              stockMedicamentId: c.fiche.id,
-              nomMedicament: c.fiche.medicament.nom,
-              prixUnitaire: c.calcul.prixAppliqueParUm,
-              quantite: c.calcul.quantiteUm,
-              sousTotal: c.calcul.montantLigne,
-              uniteAffichee: c.calcul.uniteAffichee,
-              nombreAffiche: c.calcul.nombreAffiche,
-              coefficientApplique: c.calcul.coefficientApplique,
-              allocations: {
-                create: [
-                  ...a.allocations.map((al) => ({
-                    lotId: al.lotId,
-                    numeroLot: al.numeroLot,
-                    dateExpiration: al.dateExpiration
-                      ? jourVersDate(al.dateExpiration)
-                      : null,
-                    quantite: al.quantite,
-                    coutUnitaire: al.coutUnitaire,
-                    lotTechnique: al.lotTechnique,
-                    statut: 'DEFINITIVE' as const,
-                    sortieManuelle: al.sortieManuelle,
-                    motif: al.motif,
-                    auteurId: user.id,
-                  })),
-                  ...(a.resteProvisoire > 0
-                    ? [
-                        {
-                          lotId: null,
-                          numeroLot: null,
-                          dateExpiration: null,
-                          quantite: a.resteProvisoire,
-                          coutUnitaire: 0,
-                          lotTechnique: false,
-                          statut: 'PROVISOIRE' as const,
-                          sortieManuelle: false,
-                          motif: null,
-                          auteurId: user.id,
-                        },
-                      ]
-                    : []),
-                ],
-              },
-            };
-          }),
-        },
-      },
-      select: { id: true },
-    });
-
-    // 14. Paiements
-    await tx.paiement.createMany({
-      data: paiements.map((p) => ({
-        venteId: vente.id,
-        sessionCaisseId: sessionId,
-        modePaiementId: p.modePaiementId,
-        montant: p.montant,
-        referenceExterne: p.referenceExterne,
-        montantRecu: p.montantRecu,
-      })),
-    });
-
-    // 15. Mouvements de stock
-    const apresParFiche = new Map<string, number>();
-    for (const [index, c] of lignesCalculees.entries()) {
-      const a = allouees[index];
-      for (const al of a.allocations) {
-        const ecrit = await this.mouvementsStock.ecrire(tx, {
-          pointDeVenteId,
-          stockMedicamentId: c.fiche.id,
-          lotId: al.lotId,
-          type: 'VENTE',
-          quantite: -al.quantite,
-          pieceOrigineType: 'VENTE',
-          pieceOrigineId: vente.id,
-          motif: al.sortieManuelle ? al.motif : null,
-          auteurId: user.id,
-          posteId,
-        });
-        apresParFiche.set(c.fiche.id, ecrit.soldeProduit);
-      }
-      if (a.resteProvisoire > 0) {
-        const ecrit = await this.mouvementsStock.ecrire(tx, {
-          pointDeVenteId,
-          stockMedicamentId: c.fiche.id,
-          lotId: null,
-          type: 'VENTE',
-          quantite: -a.resteProvisoire,
-          pieceOrigineType: 'VENTE',
-          pieceOrigineId: vente.id,
-          motif: null,
-          auteurId: user.id,
-          posteId,
-        });
-        apresParFiche.set(c.fiche.id, ecrit.soldeProduit);
-      }
-    }
-
-    // 16. Anomalies de stock négatif (jamais de donnée du client)
-    for (const [index, c] of lignesCalculees.entries()) {
-      const a = allouees[index];
-      if (a.resteProvisoire <= 0) continue;
-      await tx.anomalie.create({
-        data: {
-          pointDeVenteId,
-          type: 'STOCK_NEGATIF',
-          attribueeAId: structure.adminId,
-          pieceType: 'VENTE',
-          pieceId: vente.id,
-          details: {
-            stockId: c.fiche.id,
+        lignes: lignesCalculees.map((c, index) => ({
+          fiche: {
+            id: c.fiche.id,
+            medicamentId: c.fiche.medicamentId,
             nom: c.fiche.medicament.nom,
-            quantiteProvisoire: a.resteProvisoire,
-            soldeProduit: apresParFiche.get(c.fiche.id) ?? 0,
-            posteCode,
-            utilisateurId: user.id,
-            utilisateurNom,
-            jourMetier: dateVersJour(jourMetier),
           },
-        },
-      });
-    }
+          calcul: c.calcul,
+          allocation: allouees[index],
+        })),
+        paiements,
+      },
+    );
 
     // 17. Audit
     const provisoire = allouees.some((a) => a.resteProvisoire > 0);
@@ -862,7 +752,7 @@ export class VenteService {
         userId: user.id,
         action: 'create',
         entityType: 'Vente',
-        entityId: vente.id,
+        entityId: venteId,
         ip: ip ?? null,
         metadata: {
           numero,
@@ -892,7 +782,7 @@ export class VenteService {
 
     // 19. Relecture (les paiements sont créés après la vente)
     const complete = await tx.vente.findUniqueOrThrow({
-      where: { id: vente.id },
+      where: { id: venteId },
       include: INCLUDE_VENTE,
     });
     return { vente: complete, passages, ouverteAutomatiquement };

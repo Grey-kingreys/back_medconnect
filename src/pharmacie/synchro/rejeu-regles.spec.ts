@@ -1,4 +1,7 @@
+import type { CorpsVenteDto } from '../dto/synchro.dto';
 import {
+  anomaliesApplication,
+  calculerLigneRejeu,
   codeRejetDepuisHttp,
   contientNul,
   corpsIllisible,
@@ -8,7 +11,11 @@ import {
   horodatageBorne,
   jsonCanonique,
   messageSynthese,
+  numeroHorsPlage,
+  numeroSecours,
   resumeEvenement,
+  verifierCoherenceVente,
+  type FicheRejeu,
 } from './rejeu-regles';
 
 describe('caractère NUL (D664)', () => {
@@ -197,5 +204,229 @@ describe('resumeEvenement', () => {
 
   it('rend un objet vide pour un type inconnu', () => {
     expect(resumeEvenement('ANNULATION', { sessionId: 's' })).toEqual({});
+  });
+});
+
+describe('calculerLigneRejeu (D652)', () => {
+  it('une boîte de 10 à 1 200 : 10 unités à 120', () => {
+    expect(
+      calculerLigneRejeu({
+        unite: 'BOITE',
+        nombre: 1,
+        prixTicket: 1200,
+        coefficientBoite: 10,
+      }),
+    ).toEqual({
+      prixAppliqueParUm: 120,
+      quantiteUm: 10,
+      montantLigne: 1200,
+      uniteAffichee: 'BOITE',
+      nombreAffiche: 1,
+      coefficientApplique: 10,
+    });
+  });
+
+  it('3 unités à 150 : coefficient 1, montant 450', () => {
+    expect(
+      calculerLigneRejeu({
+        unite: 'UNITE',
+        nombre: 3,
+        prixTicket: 150,
+        coefficientBoite: 10,
+      }),
+    ).toEqual({
+      prixAppliqueParUm: 150,
+      quantiteUm: 3,
+      montantLigne: 450,
+      uniteAffichee: 'UNITE',
+      nombreAffiche: 3,
+      coefficientApplique: 1,
+    });
+  });
+
+  it('une boîte de 3 à 1 000 : prix par unité arrondi à 333', () => {
+    const l = calculerLigneRejeu({
+      unite: 'BOITE',
+      nombre: 1,
+      prixTicket: 1000,
+      coefficientBoite: 3,
+    });
+    expect(l.prixAppliqueParUm).toBe(333);
+    expect(l.quantiteUm).toBe(3);
+    expect(l.montantLigne).toBe(1000);
+  });
+});
+
+describe('verifierCoherenceVente', () => {
+  const base = (surcharge: Partial<CorpsVenteDto>): CorpsVenteDto =>
+    ({
+      venteId: 'v',
+      sessionId: 's',
+      numeroTicket: 5,
+      lignes: [
+        { stockId: 'a', unite: 'BOITE', nombre: 2, prixUnitaire: 1000 },
+        { stockId: 'b', unite: 'UNITE', nombre: 3, prixUnitaire: 150 },
+      ],
+      paiements: [{ mode: 'ESPECES', montant: 2450 }],
+      total: 2450,
+      ordonnanceVerifiee: true,
+      ...surcharge,
+    }) as CorpsVenteDto;
+
+  it('accepte un corps juste', () => {
+    expect(verifierCoherenceVente(base({}))).toEqual({ ok: true });
+    expect(
+      verifierCoherenceVente(
+        base({ numeroTicket: undefined, numeroSecours: 3 }),
+      ),
+    ).toEqual({ ok: true });
+  });
+
+  it('refuse deux numéros ou aucun', () => {
+    expect(verifierCoherenceVente(base({ numeroSecours: 3 }))).toEqual({
+      ok: false,
+      champs: ['numeroTicket'],
+    });
+    expect(verifierCoherenceVente(base({ numeroTicket: undefined }))).toEqual({
+      ok: false,
+      champs: ['numeroTicket'],
+    });
+  });
+
+  it('refuse un total faux', () => {
+    expect(verifierCoherenceVente(base({ total: 2000 }))).toEqual({
+      ok: false,
+      champs: ['total'],
+    });
+  });
+});
+
+describe('numéros de ticket hors compteur (D655)', () => {
+  it('formats de secours et hors plage', () => {
+    expect(numeroSecours(1, 'D2', 4)).toBe('S1-D2-4');
+    expect(numeroHorsPlage(1, 'D2', 17)).toBe('N1-D2-17');
+  });
+});
+
+describe('anomaliesApplication (D653)', () => {
+  const fiche = (surcharge: Partial<FicheRejeu> = {}): FicheRejeu => ({
+    id: 'f1',
+    nom: 'Paracétamol',
+    prixUnitaire: 1000,
+    prixUnite: 150,
+    deconditionnable: true,
+    ordonnanceRequise: false,
+    archive: false,
+    ...surcharge,
+  });
+
+  it('rien à signaler pour une vente conforme', () => {
+    expect(
+      anomaliesApplication(
+        [{ fiche: fiche(), unite: 'BOITE', prixTicket: 1000 }],
+        true,
+      ),
+    ).toEqual({
+      prixDivergents: [],
+      uniteInterdite: [],
+      ordonnance: [],
+      archives: [],
+    });
+  });
+
+  it('prix de boîte différent', () => {
+    const r = anomaliesApplication(
+      [{ fiche: fiche(), unite: 'BOITE', prixTicket: 900 }],
+      true,
+    );
+    expect(r.prixDivergents).toEqual([
+      {
+        stockId: 'f1',
+        nom: 'Paracétamol',
+        unite: 'BOITE',
+        prixTicket: 900,
+        prixFiche: 1000,
+      },
+    ]);
+  });
+
+  it('prix à l unité absent de la fiche', () => {
+    const r = anomaliesApplication(
+      [{ fiche: fiche({ prixUnite: null }), unite: 'UNITE', prixTicket: 150 }],
+      true,
+    );
+    expect(r.prixDivergents).toHaveLength(1);
+    expect(r.prixDivergents[0].prixFiche).toBeNull();
+  });
+
+  it('unité interdite, ordonnance et archive', () => {
+    const r = anomaliesApplication(
+      [
+        {
+          fiche: fiche({
+            deconditionnable: false,
+            ordonnanceRequise: true,
+            archive: true,
+            prixUnite: null,
+          }),
+          unite: 'UNITE',
+          prixTicket: 150,
+        },
+      ],
+      false,
+    );
+    expect(r.uniteInterdite).toEqual([{ stockId: 'f1', nom: 'Paracétamol' }]);
+    expect(r.ordonnance).toEqual([{ stockId: 'f1', nom: 'Paracétamol' }]);
+    expect(r.archives).toEqual([{ stockId: 'f1', nom: 'Paracétamol' }]);
+    // Une seule anomalie pour l'unité interdite, jamais un prix divergent en plus (D666)
+    expect(r.prixDivergents).toEqual([]);
+  });
+
+  it('unité interdite : le prix est contrôlé sur une autre ligne à la boîte (D666)', () => {
+    const f = fiche({ deconditionnable: false, prixUnite: null });
+    const r = anomaliesApplication(
+      [
+        { fiche: f, unite: 'UNITE', prixTicket: 150 },
+        { fiche: f, unite: 'BOITE', prixTicket: 900 },
+      ],
+      true,
+    );
+    expect(r.uniteInterdite).toEqual([{ stockId: 'f1', nom: 'Paracétamol' }]);
+    expect(r.prixDivergents).toEqual([
+      {
+        stockId: 'f1',
+        nom: 'Paracétamol',
+        unite: 'BOITE',
+        prixTicket: 900,
+        prixFiche: 1000,
+      },
+    ]);
+  });
+
+  it('ordonnance confirmée : aucune anomalie', () => {
+    const r = anomaliesApplication(
+      [
+        {
+          fiche: fiche({ ordonnanceRequise: true }),
+          unite: 'BOITE',
+          prixTicket: 1000,
+        },
+      ],
+      true,
+    );
+    expect(r.ordonnance).toEqual([]);
+  });
+
+  it('une fiche sur deux lignes ne donne qu une entrée par cause', () => {
+    const r = anomaliesApplication(
+      [
+        { fiche: fiche({ archive: true }), unite: 'BOITE', prixTicket: 900 },
+        { fiche: fiche({ archive: true }), unite: 'BOITE', prixTicket: 800 },
+      ],
+      true,
+    );
+    expect(r.prixDivergents).toHaveLength(1);
+    expect(r.prixDivergents[0].prixTicket).toBe(900);
+    expect(r.archives).toHaveLength(1);
   });
 });

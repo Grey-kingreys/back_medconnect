@@ -1,6 +1,7 @@
 import {
   Allow,
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsDefined,
@@ -194,4 +195,130 @@ export class CorpsSessionFermeeDto {
   @Transform(rognerTexte)
   @MaxLength(500)
   commentaire?: string;
+}
+
+export class SortieManuelleRejeuDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  lotId: string;
+
+  @IsString()
+  @Transform(rognerTexte)
+  @Length(3, 300)
+  motif: string;
+}
+
+export class LigneVenteRejeuDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  stockId: string;
+
+  @IsIn(['BOITE', 'UNITE'])
+  unite: 'BOITE' | 'UNITE';
+
+  @IsInt()
+  @Min(1)
+  @Max(10_000)
+  nombre: number;
+
+  /** Prix du ticket pour une boîte (BOITE) ou une unité (UNITE). */
+  @IsInt()
+  @Min(0)
+  @Max(2147483647)
+  prixUnitaire: number;
+
+  /** Unités non couvertes par un lot sur le poste. */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100_000_000)
+  quantiteProvisoireLocale?: number;
+
+  /** Le poste a entamé une boîte pour cette ligne. */
+  @IsOptional()
+  @IsBoolean()
+  ouvertureConditionnement?: boolean;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SortieManuelleRejeuDto)
+  sortieManuelle?: SortieManuelleRejeuDto;
+}
+
+export class PaiementRejeuDto {
+  @IsString()
+  @Matches(MOTIF_CODE_MODE)
+  mode: string;
+
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  montant: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  reference?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(2147483647)
+  montantRecu?: number;
+}
+
+export class CorpsVenteDto {
+  @IsUUID('all')
+  venteId: string;
+
+  @IsUUID('all')
+  sessionId: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  numeroTicket?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  numeroSecours?: number;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => LigneVenteRejeuDto)
+  lignes: LigneVenteRejeuDto[];
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(5)
+  @ValidateNested({ each: true })
+  @Type(() => PaiementRejeuDto)
+  paiements: PaiementRejeuDto[];
+
+  @IsInt()
+  @Min(0)
+  @Max(2147483647)
+  total: number;
+
+  @IsOptional()
+  @IsString()
+  @Transform(rognerTexte)
+  @MaxLength(100)
+  clientNom?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(rognerTexte)
+  @MaxLength(30)
+  clientTelephone?: string;
+
+  @IsBoolean()
+  ordonnanceVerifiee: boolean;
 }

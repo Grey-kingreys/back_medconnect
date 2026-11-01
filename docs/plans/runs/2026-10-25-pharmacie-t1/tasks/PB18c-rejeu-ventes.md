@@ -111,7 +111,7 @@ export function numeroSecours(ordre: number, codePoste: string, n: number): stri
 export function numeroHorsPlage(ordre: number, codePoste: string, sequence: number): string // `N${ordre}-${codePoste}-${sequence}`
 export interface FicheRejeu { id: string; nom: string; prixUnitaire: number | null; prixUnite: number | null; deconditionnable: boolean; ordonnanceRequise: boolean; archive: boolean }
 export function anomaliesApplication(lignes: { fiche: FicheRejeu; unite: 'BOITE' | 'UNITE'; prixTicket: number }[], ordonnanceVerifiee: boolean): {
-  prixDivergents: { stockId; nom; unite; prixTicket; prixFiche: number | null }[];   // prix fiche de l'unité vendue (boîte : prixUnitaire, unité : prixUnite) nul ou différent
+  prixDivergents: { stockId; nom; unite; prixTicket; prixFiche: number | null }[];   // prix fiche de l'unité vendue (boîte : prixUnitaire, unité : prixUnite) nul ou différent ; jamais pour une ligne à l'unité interdite (D666)
   uniteInterdite: { stockId; nom }[];                                                  // UNITE sur fiche non déconditionnable
   ordonnance: { stockId; nom }[];                                                      // ordonnanceRequise et ordonnanceVerifiee faux
   archives: { stockId; nom }[];
@@ -156,7 +156,7 @@ Dans `appliquer`, la ligne `VENTE` devient : `validerCorps(CorpsVenteDto, corps)
 1. `calculerLigneRejeu` : boîte de 10 à 1 200 : quantité 10, prix par unité 120, montant 1 200 ; 3 unités à 150 : quantité 3, coefficient 1, montant 450 ; boîte de 3 à 1 000 : prix par unité 333.
 2. `verifierCoherenceVente` : deux numéros, aucun numéro, total faux, cas juste.
 3. `numeroSecours`, `numeroHorsPlage` : formats.
-4. `anomaliesApplication` : prix boîte différent, prix unité nul, unité interdite, ordonnance, archivée, dédoublonnage d'une fiche sur deux lignes.
+4. `anomaliesApplication` : prix boîte différent, prix unité nul, unité interdite (sans prix divergent, D666 ; le prix reste contrôlé sur une ligne à la boîte de la même fiche), ordonnance, archivée, dédoublonnage d'une fiche sur deux lignes.
 
 `test/db/synchro-ventes.db-spec.ts` (nouveau ; préparation calquée sur `synchro-caisse.db-spec.ts` plus `VenteService`, `ReceptionsService`, `SortiesStockService` si utile ; postes desktop `D1` (`desktop-pb18c-1`) et `D2` (`desktop-pb18c-2`) avec une plage chacun par `postes.attribuerPlage` ; fiches créées par `nouvelleFiche` et lots par réception : F (coefficient 1, prix 1 000, 10 boîtes), G (coefficient 10, déconditionnable, prix boîte 1 200, prix unité 150, 3 boîtes), O (sur ordonnance, prix 500, 10 boîtes) ; aides `ouvrir(poste, seq, sessionId, utilisateur)`, `vendre(seq, sessionId, lignes, { numeroTicket | numeroSecours, ordonnanceVerifiee = true, poste })` qui construit un corps cohérent (paiement espèces du total) et prend le numéro suivant de la plage du poste ; les tests s'exécutent dans l'ordre) :
 1. « vente du poste rejouée » : D1 ouvre S1 (séq. 1), vend 2 boîtes de F (séq. 2) : `APPLIQUE` ; pièce d'id `venteId`, numéro `T1-<début de la plage>`, `numeroTicket`, type `VENTE`, `jourMetier` de S1, `horodatageLocal`, `sequencePoste` 2, `vendeurId` VENDEUR, `cleIdempotence` nulle ; ligne quantité 2, sous-total 2 000 ; une allocation DEFINITIVE de 2 sur le lot de F ; paiement 2 000 dans S1 ; mouvement `synchro:<evenementId>:0:<lot>` avec `posteId` et `sequencePoste` ; lot de F à 8 ; audit `origine: 'synchro'` ; aucune anomalie.
@@ -167,7 +167,7 @@ Dans `appliquer`, la ligne `VENTE` devient : `validerCorps(CorpsVenteDto, corps)
 6. « résolution d'allocation provisoire à la synchro » : fiche K réceptionnée (5 boîtes) après la photographie du poste ; D1 vend 2 boîtes avec `quantiteProvisoireLocale` 2 : allocation DEFINITIVE 2, aucune PROVISOIRE ; anomalie `STOCK_NEGATIF` avec `quantiteProvisoire` 0 et `quantiteProvisoireLocale` 2 ; `rattachement.etat` `RATTACHEE`.
 7. « il ne reste que du périmé » : fiche P dont l'unique lot (2 boîtes) a sa date corrigée à J-2 ; vente d'une boîte : PROVISOIRE 1, lot périmé inchangé, `STOCK_NEGATIF` avec `perimesDisponibles` 1 ; vente d'une boîte avec `sortieManuelle { lotId: lot périmé, motif: 'Dernière boîte, client prévenu' }` : DEFINITIVE sur le lot périmé, `sortieManuelle` vrai, motif copié sur l'allocation et le mouvement ; vente avec une sortie manuelle sur un lot inconnu : allocation automatique (provisoire), aucun refus.
 8. « CA23 : deux postes hors ligne vendent en même temps » : fiche F2 à 10 boîtes ; D1 (VENDEUR) : ouverture et 4 ventes de 2 boîtes (numéros de sa plage) ; D2 (RESPONSABLE) : ouverture et 3 ventes de 2 boîtes (numéros de sa plage) ; une vente web d'une boîte de F3 par `service.creerVente` lancée dans le même `Promise.all` : tout aboutit ; 7 pièces de F2 aux numéros tous différents, chacun dans la plage de son poste ; numéro de la vente web hors de toute plage ; somme des quantités 14 ; agrégat produit de F2 à -4 ; lot à 0 ; somme des PROVISOIRE 4 ; somme des `quantiteProvisoire` des `STOCK_NEGATIF` de F2 égale à 4 ; `verifierStock(base.client)` sans anomalie.
-9. « prix du ticket gardé et anomalies d'application » : F vendue à 900 au lieu de 1 000 : sous-total au prix du ticket, `PRIX_DIVERGENT` avec `lignes[0]` `{ prixTicket: 900, prixFiche: 1000 }` ; F vendue à l'unité (fiche non déconditionnable) : appliquée (coefficient 1) et `VENTE_UNITE_INTERDITE` ; O avec `ordonnanceVerifiee` faux : `ORDONNANCE_NON_CONFIRMEE` ; fiche archivée après la vente sur le poste : appliquée, stock diminué, `PRODUIT_ARCHIVE` ; aucune anomalie ne contient `clientNom` ni `clientTelephone` (vente envoyée avec un nom et un téléphone de client).
+9. « prix du ticket gardé et anomalies d'application » : F vendue à 900 au lieu de 1 000 : sous-total au prix du ticket, `PRIX_DIVERGENT` avec `lignes[0]` `{ prixTicket: 900, prixFiche: 1000 }` ; F vendue à l'unité (fiche non déconditionnable) : appliquée (coefficient 1), `VENTE_UNITE_INTERDITE` et aucune `PRIX_DIVERGENT` (D666) ; O avec `ordonnanceVerifiee` faux : `ORDONNANCE_NON_CONFIRMEE` ; fiche archivée après la vente sur le poste : appliquée, stock diminué, `PRODUIT_ARCHIVE` ; aucune anomalie ne contient `clientNom` ni `clientTelephone` (vente envoyée avec un nom et un téléphone de client).
 10. « boîte au coefficient du serveur » : G vendue 1 boîte à 1 200 : quantité 10, prix par unité 120, coefficient 10 ; 3 unités à 150 : quantité 3.
 11. « deux boîtes entamées » : après le test 10 (une boîte entamée de G au serveur), D2 vend 2 unités de G avec `ouvertureConditionnement` vrai : `CONDITIONNEMENT_CONCURRENT` ; un seul `ConditionnementOuvert` ouvert pour G.
 12. « numéros de secours et hors plage » : `numeroSecours` 1 sur D1 : numéro `S1-<code de D1>-1`, `numeroTicket` nul, une `PLAGE_EPUISEE` OUVERTE pièce `Poste` ; `numeroSecours` 2 : aucune nouvelle `PLAGE_EPUISEE` ; D1 envoie un numéro de la plage de D2 : numéro `N1-<code de D1>-<séquence>`, `numeroTicket` nul, `PLAGE_EPUISEE` raison `NUMERO_HORS_PLAGE` avec `numeroImprime` ; un numéro déjà pris : même traitement.
@@ -200,7 +200,13 @@ Chemin de l'artefact + preuve (commande lancée, résultat en une ligne). Ou un 
 ## Historique
 
 <!-- une ligne par tentative : AAAA-MM-JJ | tier | résultat | raison si échec -->
+2026-11-01 | dur (codeur Sonnet, vérificateur Sonnet) | PASS, validé par le chef (rapports/PB18c-verification.md, rapports/PB18c-chef.md) | code conforme ; extraction `ecrirePieceVente` identique pour la vente web ; `sed -i` du codeur sur `vente.service.ts` relu, diff propre ; une seule anomalie pour une vente à l'unité interdite (D666)
 
 ## Validation
 
 <!-- commande relancée par l'orchestrateur | résultat en une ligne | hash du commit -->
+docker compose exec -T backend npx tsc --noEmit | 0 erreur | voir commit
+docker compose exec -T backend npx eslint (8 fichiers .ts touchés) | 0 erreur | voir commit
+docker compose exec -T backend npm test | 99 suites, 1093 réussis, 3 ignorés, 0 échec | voir commit
+docker compose exec -T backend npm run test:db | 33 suites, 392 réussis, 0 échec | voir commit
+docker compose restart backend | « Nest application successfully started », 0 erreur de compilation | voir commit
