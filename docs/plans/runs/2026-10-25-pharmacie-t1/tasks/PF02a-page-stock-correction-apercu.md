@@ -45,7 +45,7 @@ Décisions applicables : D686, D687, D693, D697, D698, D700.
 - Colonne « Quantité » : `formaterQuantite(quantite, coefficientBoite ?? 1, uniteMinimale ?? "UNITE")`, et en dessous, si `reliquat` non vide, « boîte entamée » en `text-xs text-slate-600 dark:text-slate-400` ; plus de flèches.
 - Colonne « Prix (GNF) » : prix de la boîte (`formaterGNF`, « Non renseigné » si absent) et, si `prixUnite` existe, ligne « <formaterGNF(prixUnite)> le <singulier de l'unité> ».
 - Colonne « Statut » : « Rupture » si l'identifiant est dans `alertes.rupture`, « Stock bas » si dans `alertes.stockBas`, sinon « OK » ; pastille « À qualifier » en plus si `qualifie === false` (classes de la pastille « Faible » actuelle). Les classes de couleur gardent leur forme mais passent aux teintes AA : `text-rose-700 dark:text-rose-300`, `text-amber-700 dark:text-amber-300`, `text-emerald-700 dark:text-emerald-300` (fonds et bordures inchangés).
-- Colonne « Actions » : « Modifier » (inchangé), nouveau bouton « Corriger la quantité » (icône `SlidersHorizontal` de lucide, `aria-label="Corriger la quantité de <nom>"`, même classes que « Modifier »), « Archiver » (icône `Archive` au lieu de `Trash2`, `title` et `aria-label` « Archiver <nom> »). Les boutons existants reçoivent aussi un `aria-label` nommant le médicament.
+- Colonne « Actions » : « Modifier » (inchangé), nouveau bouton « Corriger la quantité » (icône `SlidersHorizontal` de lucide, `aria-label="Corriger la quantité de <nom>"`, même classes que « Modifier »), « Archiver » (icône `Archive` au lieu de `Trash2`, `title` et `aria-label` « Archiver <nom> »). Les boutons existants reçoivent aussi un `aria-label` nommant le médicament. Les trois icônes d'action passent aux teintes AA (contraste 3:1 des éléments d'interface en clair) : `text-slate-600 dark:text-slate-400`, survol `hover:text-amber-700 dark:hover:text-amber-300` (Modifier, Corriger) et `hover:text-rose-700 dark:hover:text-rose-300` (Archiver), fonds de survol inchangés.
 - Dialogue d'archivage : titre « Archiver ce médicament ? », texte « <nom> disparaîtra de la liste du stock et de la vente. Son historique (ventes, mouvements) est conservé. Vous pourrez le remettre en stock en l'ajoutant de nouveau. ».
 - Liste vide : filtre « Tous » sans aucune fiche : « Votre stock est vide. Ajoutez un médicament ou importez votre fichier Excel. » ; filtre actif sans résultat : « Aucun médicament dans ce filtre. ».
 
@@ -105,6 +105,17 @@ Chemin de l'artefact + preuve (commande lancée, résultat en une ligne). Ou un 
 
 <!-- une ligne par tentative : AAAA-MM-JJ | tier | résultat | raison si échec -->
 
+2026-11-01 | spécifié (codeur Sonnet) | livré | 8 fichiers autorisés, 517 tests (61 fichiers)
+2026-11-01 | vérificateur Sonnet | PASS | 3 remarques non bloquantes dont le contraste des icônes d'action (rapports/PF02a-verification.md)
+2026-11-01 | chef Opus | validé | icônes d'action aux teintes AA (`text-slate-600 dark:text-slate-400`, survols 700/300), fiche mise en cohérence ; texte du filtre actif sous 4,5:1 laissé en réserve (dette préexistante)
+
 ## Validation
 
 <!-- commande relancée par l'orchestrateur | résultat en une ligne | hash du commit -->
+
+docker compose exec -T frontend npx tsc --noEmit | exit 0 | 63bb9ad
+docker compose exec -T frontend npx eslint (dossier stock, api_pharmacie, apercu_pharmacie et test, ApercuPharmacie et test) | exit 0, aucune sortie | 63bb9ad
+docker compose exec -T frontend npx vitest run | 61 fichiers, 517 tests verts | 63bb9ad
+npm run build (local) | réussi | 63bb9ad
+grep « quantite < 10, quantite === 0, irréversible, Trash2 » sur stock/page.tsx ; U+2013 et U+2014 dans le diff | aucune ligne | 63bb9ad
+hook pre-commit du front (conteneur frontend) | passé | 63bb9ad
