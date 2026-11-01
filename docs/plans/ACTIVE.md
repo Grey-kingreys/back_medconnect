@@ -28,7 +28,7 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | PB15 | Inventaire, sorties manuelles, anomalies et import inventaire, trois sous-fiches commitées dans l'ordre : tasks/PB15a-sorties-anomalies.md, tasks/PB15b-inventaire-par-lot.md, tasks/PB15c-import-inventaire.md (D583 à D600) | spécifié | validé (PB15a, PB15b, PB15c ; rapports/PB15a-chef.md, PB15b-chef.md, PB15c-chef.md) | 1 |
 | PB16 | Alertes de péremption, marge et étanchéité des coûts, deux sous-fiches commitées dans l'ordre : tasks/PB16a-alertes-peremption-marge.md, tasks/PB16b-etancheite-couts.md (D601 à D610) | spécifié | validé (PB16a, PB16b ; D601 à D611, rapports/PB16a-chef.md, PB16b-chef.md) | 1 |
 | PB17 | Clôture journalière, trois sous-fiches commitées dans l'ordre : tasks/PB17a-cloture-journaliere.md, tasks/PB17b-export-cloture.md, tasks/PB17c-verrou-journee-ecrivains.md (D612 à D628) | dur | validé (PB17a, PB17b, PB17c ; D612 à D629, rapports/PB17a-chef.md, PB17b-chef.md, PB17c-chef.md) | 1 |
-| PB18 | Synchronisation desktop, quatre sous-fiches commitées dans l'ordre : tasks/PB18a-plages-catalogue-cors.md, tasks/PB18b-moteur-rejeu-caisse.md, tasks/PB18c-rejeu-ventes.md, tasks/PB18d-remontee-apres-cloture.md (D630 à D661) | dur | en cours : PB18a validé (D662, rapports/PB18a-chef.md) ; PB18b, PB18c, PB18d à faire | 1 |
+| PB18 | Synchronisation desktop, quatre sous-fiches commitées dans l'ordre : tasks/PB18a-plages-catalogue-cors.md, tasks/PB18b-moteur-rejeu-caisse.md, tasks/PB18c-rejeu-ventes.md, tasks/PB18d-remontee-apres-cloture.md (D630 à D661) | dur | en cours : PB18a validé (D662, rapports/PB18a-chef.md) ; PB18b validé (D663 à D665, rapports/PB18b-chef.md) ; PB18c, PB18d à faire | 1 |
 | PB19 | Seeds, démo et documentation | spécifié | à faire | 0 |
 
 ## Faites (preuve = commit)
@@ -43,8 +43,7 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 
 ## Dernières décisions (5 max, historique complet dans decisions.md)
 
-- D615 Caisse ouverte après la clôture du jour : rattachée au lendemain (`jourMetierOrigine` = jour réel), aucune vente refusée pour ce motif (révisable)
-- D624 Caisse d'un jour clôturé (desktop restée ouverte après clôture forcée) : 409 `JOURNEE_CLOTUREE` sur toute écriture web (révisable)
-- D625 Laissé à PB18 : verrou partagé par événement rejoué, régularisation et anomalie `REMONTEE_APRES_CLOTURE`, fermeture tardive acceptée, `dernierEtat` des postes (révisable)
+- D663 Révise D636 : 2 Mo et gzip pour la seule route de synchro, 100 Ko et 415 sur un corps compressé ailleurs (révisable)
+- D664 Événement empoisonné : NUL rejeté `EVENEMENT_INVALIDE`, 3e échec imprévu (hors panne passagère) mis de côté `EVENEMENT_INAPPLICABLE`, compteur dans `dernierEtat` (révisable)
 - D629 « Première instruction » prouvée par le test db 11 (six écrivains qui attendent la clôture avant toute lecture) ; tout nouvel écrivain, rejeu PB18 compris, s'y ajoute (révisable)
 - D662 Photographie du catalogue sans `jour` : rien qui dépende de l'heure dans l'ETag ; heure du serveur dans l'en-tête `Date`, exposé par le CORS (révisable)

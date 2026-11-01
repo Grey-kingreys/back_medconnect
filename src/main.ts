@@ -10,6 +10,7 @@ import { RedisIoAdapter } from './common/redis-io.adapter';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { fabriquerErreurValidation } from './common/filters/erreur-validation';
 import { originesCors } from './config/origines-cors';
+import { monterAnalyseursJson } from './config/analyseurs-corps';
 
 async function bootstrap() {
   // `bufferLogs` : conserve les logs émis avant que Pino ne soit prêt.
@@ -62,6 +63,10 @@ async function bootstrap() {
     // Date : heure du serveur lisible par le desktop pour repérer une horloge déréglée (D662).
     exposedHeaders: ['ETag', 'Date'],
   });
+
+  // Corps JSON : 2 Mo et gzip pour les seuls lots de synchronisation du desktop,
+  // 100 ko sans compression partout ailleurs (D636, D663).
+  monterAnalyseursJson(app);
 
   // Swagger : jamais exposé en production par défaut. La documentation publique
   // cartographie toute l'API (routes, champs, rôles) et élargit la surface

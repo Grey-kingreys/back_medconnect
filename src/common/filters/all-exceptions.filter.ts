@@ -23,6 +23,8 @@ export const MESSAGES = {
   referenceAbsente:
     "Cette opération fait référence à une information qui n'existe pas.",
   tropVolumineux: 'Le document envoyé est trop volumineux.',
+  formatNonPrisEnCharge:
+    "Le format de la demande n'est pas pris en charge. Mettez l'application à jour puis réessayez.",
   tropDeTentatives:
     'Trop de tentatives en peu de temps. Patientez une minute puis réessayez.',
   indisponible:
@@ -39,6 +41,7 @@ const LIBELLES: Record<number, string> = {
   404: 'Introuvable',
   409: 'Déjà existant',
   413: 'Document trop volumineux',
+  415: 'Format non pris en charge',
   426: 'Mise à jour requise',
   429: 'Trop de tentatives',
   500: 'Erreur interne',
@@ -206,6 +209,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
     // Corps trop gros rejeté par body-parser (erreur Express, pas HttpException).
     if ((exception as { status?: unknown } | null)?.status === 413) {
       return corps(HttpStatus.PAYLOAD_TOO_LARGE, MESSAGES.tropVolumineux);
+    }
+    // Corps compressé (ou encodage inconnu) refusé par body-parser : seule la route de
+    // synchro du desktop accepte gzip (D663).
+    if ((exception as { status?: unknown } | null)?.status === 415) {
+      return corps(
+        HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+        MESSAGES.formatNonPrisEnCharge,
+      );
     }
 
     return this.erreurInterne(exception, request);

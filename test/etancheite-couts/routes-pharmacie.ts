@@ -61,6 +61,11 @@ export const ROUTES_PHARMACIE = {
     porteCout: false,
     exigeMarge: false,
   },
+  'POST /pharmacie/:structureId/synchro/evenements': {
+    classe: J,
+    porteCout: false,
+    exigeMarge: false,
+  },
   'POST /pharmacie/:structureId/caisse/sessions': {
     classe: J,
     porteCout: false,

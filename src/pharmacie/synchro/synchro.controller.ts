@@ -1,8 +1,13 @@
 import {
+  Body,
   Controller,
   Get,
   Headers,
+  HttpCode,
+  HttpStatus,
+  Ip,
   Param,
+  Post,
   Query,
   Req,
   Res,
@@ -20,8 +25,12 @@ import { AuthGuard } from 'src/common/guards/auth.guard';
 import { PermissionsGuard } from 'src/common/rbac/permissions.guard';
 import { RequirePermissions } from 'src/common/rbac/require-permissions.decorator';
 import { PERMISSIONS } from 'src/common/rbac/permissions.constants';
-import { CatalogueSynchroQueryDto } from '../dto/synchro.dto';
+import {
+  CatalogueSynchroQueryDto,
+  RecevoirEvenementsDto,
+} from '../dto/synchro.dto';
 import { CatalogueSynchroService } from './catalogue-synchro.service';
+import { SynchroService } from './synchro.service';
 import {
   compresserJson,
   correspondEtag,
@@ -33,7 +42,34 @@ import {
 @Controller('pharmacie')
 @UseGuards(AuthGuard, PermissionsGuard)
 export class SynchroController {
-  constructor(private readonly catalogue: CatalogueSynchroService) {}
+  constructor(
+    private readonly catalogue: CatalogueSynchroService,
+    private readonly synchro: SynchroService,
+  ) {}
+
+  @Post(':structureId/synchro/evenements')
+  @RequirePermissions(PERMISSIONS.CAISSE_UTILISER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Recevoir les opérations de caisse d'un poste desktop",
+    description:
+      '200 opérations au plus par appel, triées par séquence, rejouables sans doublon (idempotent par evenementId). ' +
+      "Chaque opération reçoit un statut : APPLIQUE, DEJA_APPLIQUE, EN_ATTENTE (un numéro d'ordre manque avant elle), " +
+      "REJETE (mise de côté pour le responsable) ou A_RENVOYER (rien d'écrit, à renvoyer plus tard). " +
+      'Types et corps : SESSION_OUVERTE { sessionId } ; COMPTAGE_SAISI { comptageId, sessionId, moment, coupures, releves? } ; ' +
+      'MOUVEMENT_CAISSE { mouvementId, sessionId, type, montant, motif, mode? } ; ' +
+      "SESSION_FERMEE { sessionId, comptageFermeture?, commentaire? } ; VENTE (renvoyée A_RENVOYER pour l'instant). " +
+      "Corps JSON jusqu'à 2 Mo, compressé gzip accepté (Content-Encoding: gzip). Lot vide : battement de cœur. 409 POSTE_INCONNU.",
+  })
+  @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
+  recevoir(
+    @Req() req: RequestWithUser,
+    @Param('structureId') structureId: string,
+    @Body() dto: RecevoirEvenementsDto,
+    @Ip() ip: string,
+  ) {
+    return this.synchro.recevoir(structureId, req.user.userId, dto, ip);
+  }
 
   @Get(':structureId/synchro/catalogue')
   @RequirePermissions(PERMISSIONS.CAISSE_UTILISER)

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { HttpException } from '@nestjs/common';
 import type { Prisma } from 'generated/prisma/client';
 import type { PermissionsService } from 'src/common/rbac/permissions.service';
@@ -21,6 +22,7 @@ import { PointsDeVenteService } from 'src/pharmacie/points-de-vente.service';
 import { ReceptionsService } from 'src/pharmacie/receptions/receptions.service';
 import { jourVersDate } from 'src/pharmacie/stock/lecture-stock';
 import { MouvementsStockService } from 'src/pharmacie/stock/mouvements-stock.service';
+import { SynchroService } from 'src/pharmacie/synchro/synchro.service';
 import { VenteService } from 'src/pharmacie/vente.service';
 import {
   appliquerMigrations,
@@ -86,6 +88,7 @@ describe('Journée clôturée : verrou des écrivains, rattachement, CA20 et cou
   let mouvements: MouvementsStockService;
   let receptions: ReceptionsService;
   let clotures: ClotureService;
+  let synchro: SynchroService;
   let pv1: string;
   let compteurFiche = 0;
   const alertes = jest.fn().mockResolvedValue(undefined);
@@ -139,6 +142,7 @@ describe('Journée clôturée : verrou des écrivains, rattachement, CA20 et cou
     postes = new PointsDeVenteService(prisma, acces);
     receptions = new ReceptionsService(prisma, acces, mouvements, permissions);
     clotures = new ClotureService(prisma, acces);
+    synchro = new SynchroService(prisma, acces, mouvements, sessions);
     const pvs = await sql(
       'SELECT "id" FROM "PointDeVente" WHERE "structureId" = $1 AND "ordre" = 1',
       [PHARMACIE],
@@ -678,7 +682,7 @@ describe('Journée clôturée : verrou des écrivains, rattachement, CA20 et cou
   it('11. chaque écrivain de caisse attend la clôture avant toute lecture', async () => {
     // Chaque appel échouerait (ou rejouerait) aussitôt sur sa première lecture :
     // s'il attend, c'est que le verrou de journée partagé est bien sa première
-    // instruction (D613, D629). Six attentes simultanées sont exigées.
+    // instruction (D613, D629). Sept attentes simultanées sont exigées.
     const h = tenirJournees('exclusif');
     let tous: Promise<PromiseSettledResult<unknown>[]> | undefined;
     try {
@@ -705,14 +709,46 @@ describe('Journée clôturée : verrou des écrivains, rattachement, CA20 et cou
           motif: 'Monnaie',
         }),
         sessions.fermer(PHARMACIE, VENDEUR, SV, {}),
+        synchro.recevoir(
+          PHARMACIE,
+          RESPONSABLE,
+          {
+            posteId: D,
+            etat: { fileVide: true, sessionOuverte: true, versionApp: '0.1.0' },
+            evenements: [
+              {
+                evenementId: randomUUID(),
+                sequence: 1,
+                type: 'MOUVEMENT_CAISSE',
+                horodatageLocal: new Date().toISOString(),
+                utilisateurId: RESPONSABLE,
+                corps: {
+                  mouvementId: randomUUID(),
+                  sessionId: randomUUID(),
+                  type: 'APPORT',
+                  montant: 1000,
+                  motif: 'Monnaie',
+                },
+              },
+            ],
+          },
+          ip,
+        ),
       ]);
-      await attendreAttentes(6);
+      await attendreAttentes(7);
     } finally {
       h.liberer();
       await h.fin;
     }
-    const [vente, annulation, ouverture, comptage, mouvement, fermeture] =
-      await tous;
+    const [
+      vente,
+      annulation,
+      ouverture,
+      comptage,
+      mouvement,
+      fermeture,
+      rejeu,
+    ] = await tous;
     const code = (r: PromiseSettledResult<unknown>) =>
       r.status === 'rejected' && r.reason instanceof HttpException
         ? (r.reason.getResponse() as { code?: string }).code
@@ -729,5 +765,13 @@ describe('Journée clôturée : verrou des écrivains, rattachement, CA20 et cou
     expect(code(comptage)).toBe('SESSION_FERMEE');
     expect(code(mouvement)).toBe('SESSION_FERMEE');
     expect(fermeture.status).toBe('fulfilled');
+    expect(rejeu.status).toBe('fulfilled');
+    if (rejeu.status === 'fulfilled') {
+      const { data } = rejeu.value as {
+        data: { resultats: { statut: string; code?: string }[] };
+      };
+      expect(data.resultats[0].statut).toBe('REJETE');
+      expect(data.resultats[0].code).toBe('SESSION_INCONNUE');
+    }
   });
 });

@@ -71,7 +71,7 @@ async fermerSessionVerrouillee(
 
 ### 2. Limite de corps (D636)
 
-`src/main.ts`, juste après `enableCors` : `app.useBodyParser('json', { limit: LIMITE_CORPS_JSON });` avec le commentaire « Lots de synchronisation du desktop : jusqu'à 2 Mo, corps compressé gzip accepté (D636) ». Import de `LIMITE_CORPS_JSON` depuis `./config/origines-cors`.
+Révisé par le chef à la validation (D663) : `src/config/analyseurs-corps.ts` exporte `monterAnalyseursJson(app)`, appelé dans `src/main.ts` juste après `enableCors` : `app.use('/pharmacie/:structureId/synchro/evenements', json({ limit: LIMITE_CORPS_JSON }))` puis `app.useBodyParser('json', { limit: '100kb', inflate: false })`. 2 Mo et gzip pour la seule route de synchro ; 100 Ko et 415 sur un corps compressé partout ailleurs (`AllExceptionsFilter` traduit le 415). Le corps n'est lu qu'une fois.
 
 ### 3. DTO (`src/pharmacie/dto/synchro.dto.ts`, compléter)
 
@@ -120,7 +120,8 @@ Swagger sur l'enveloppe (`@ApiProperty`) ; les corps sont décrits dans la descr
 ```ts
 export type StatutResultat = 'APPLIQUE' | 'DEJA_APPLIQUE' | 'EN_ATTENTE' | 'REJETE' | 'A_RENVOYER';
 export type CodeRejet = 'EVENEMENT_INVALIDE' | 'EVENEMENT_MODIFIE' | 'SEQUENCE_DEJA_UTILISEE' | 'UTILISATEUR_NON_AUTORISE' | 'SESSION_INCONNUE'
-  | 'SESSION_FERMEE' | 'COMPTAGE_DEJA_SAISI' | 'IDENTIFIANT_DEJA_UTILISE' | 'STOCK_INTROUVABLE';
+  | 'SESSION_FERMEE' | 'COMPTAGE_DEJA_SAISI' | 'IDENTIFIANT_DEJA_UTILISE' | 'STOCK_INTROUVABLE'
+  | 'EVENEMENT_INAPPLICABLE';  // ajouté par le chef (D664)
 export type CodeARenvoyer = 'SERVICE_INDISPONIBLE' | 'REGULARISATION_INDISPONIBLE';
 export const MESSAGES_REJET: Record<CodeRejet | CodeARenvoyer, string>;
 export class RejetSynchro extends Error { constructor(readonly code: CodeRejet, readonly options: { stocker?: boolean; champs?: string[] } = {}) }  // stocker vrai par défaut
@@ -194,6 +195,8 @@ catch (erreur) {
   autre                   -> logger.warn(`synchro.evenement_echec posteId=.. sequence=.. evenementId=..`) (jamais le corps) ; A_RENVOYER SERVICE_INDISPONIBLE
 }
 ```
+
+Ajout du chef à la validation (D664) : une erreur « autre » (ou un échec de `enregistrerRejet`) passe par `echecImprevu` : une panne passagère de la base (`echecPassager`) reste un simple A_RENVOYER ; sinon le compteur `Poste.dernierEtat.echecImprevu { evenementId, nombre }` augmente, et au 3e échec du même événement il est stocké REJETE code `EVENEMENT_INAPPLICABLE` (anomalie `EVENEMENT_REJETE`, séquence avancée). En tête de `appliquer`, un caractère NUL dans `type`, `horodatageLocal`, `utilisateurId` ou le corps donne `EVENEMENT_INVALIDE` ; un tel corps est stocké `{ corpsIllisible: "<JSON échappé>" }` (`corpsStockable`). Clés inconnues d'un corps rendues `champInconnu`, 20 chemins au plus (D665).
 
 #### 6.3 `traiterDansTransaction(tx, ctx, e, empreinte, differe)`
 
@@ -297,8 +300,10 @@ Swagger : « Recevoir les opérations de caisse d'un poste desktop » ; descript
 15. « caisse restée ouverte après une clôture forcée » (D625) : S7 ouverte par événement avec `horodatageLocal` = hier 18:00 : `jourMetier` hier ; `clotures.cloturer(hier)` : 409 `CLOTURE_INCOMPLETE` ; avec `forcer` et motif : `forcee`, `postesManquants[0].sessionId` = S7 ; instantané de la veille (clôture, `TotalClotureMode`, sessions incluses, nombre de pièces du jour) ; puis `COMPTAGE_SAISI` OUVERTURE, `MOUVEMENT_CAISSE`, `SESSION_FERMEE` avec comptage sur S7 : trois `APPLIQUE` ; S7 FERMEE, `clotureJournaliereId` nul ; anomalie `REMONTEE_APRES_CLOTURE` attribuée à `usr-admin-p1`, `details.raison` `CAISSE_FERMEE_APRES_CLOTURE`, `clotureId`, `posteManquantDeLaCloture` vrai ; instantané de la veille identique ; puis `SESSION_OUVERTE` S8 avec `horodatageLocal` = hier 22:00 : `jourMetier` aujourd'hui, `jourMetierOrigine` hier ; S8 fermée par événement.
 16. « envois simultanés et clôture en cours » : le même lot de deux événements envoyé deux fois en `Promise.all` : pour chaque événement un `APPLIQUE` et un `DEJA_APPLIQUE`, aucune ligne en double ; puis une clôture tenue en exclusif (`tenirJournees` recopiée de `journee-cloturee.db-spec.ts`) : un envoi attend (`attendreAttentes(1)`) puis aboutit après libération.
 17. « séquences dans la photographie » : `catalogue.photographier(D)` : `sequenceAppliquee` = `derniereSequenceAppliquee`, et après une ligne EN_ATTENTE ajoutée par un envoi à `derniere + 3`, `sequenceMaxRecue` = cette séquence.
+18. (chef, D664) « caractère NUL » sur un poste dédié `D2` : NUL en attente puis rejeté en différé, NUL dans l'ordre, NUL dans le vendeur : `EVENEMENT_INVALIDE` (`champs` `corps` ou `utilisateurId`), corps relu sans perte depuis `corpsIllisible`, séquence avancée, rejeu sans nouvelle écriture.
+19. (chef, D664) « erreur imprévue répétée » : `enregistrerComptage` espionné qui lève une `TypeError` : deux A_RENVOYER (compteur 1 puis 2 dans `dernierEtat`), une panne P2024 non comptée, puis au troisième échec `REJETE` `EVENEMENT_INAPPLICABLE`, l'événement suivant `APPLIQUE`, compteur effacé.
 
-`test/db/synchro-http.db-spec.ts` (compléter) : l'application est créée par `createNestApplication<NestExpressApplication>()` avec `app.useBodyParser('json', { limit: LIMITE_CORPS_JSON })` avant `init` ; tests ajoutés :
+`test/db/synchro-http.db-spec.ts` (compléter) : l'application est créée par `createNestApplication<NestExpressApplication>()` avec `monterAnalyseursJson(app)` avant `init` (chef, D663) ; tests ajoutés (11 par le chef : plus de 100 Ko refusé en 413 et gzip en 415 sur la route des plages, petit corps accepté, plus de 100 Ko accepté sur la synchro ; 10 complété : `versionApp` avec NUL, 400) :
 8. « corps compressé gzip » : `POST .../synchro/evenements`, en-têtes `Content-Type: application/json` et `Content-Encoding: gzip`, corps `gzipSync` d'un battement de cœur : 200.
 9. « lot de 1,5 Mo accepté, 2,5 Mo refusé » : poste desktop dédié ; 200 événements de séquences 1001 à 1200 (donc `EN_ATTENTE`), corps contenant un texte de 7 500 caractères : 200 et 200 `EN_ATTENTE` ; avec 12 500 caractères : 413.
 10. « enveloppe refusée » : `evenementId` non UUID, 201 événements, `etat` absent : 400 `VALIDATION` ; poste web : 409 `POSTE_INCONNU`.
@@ -307,7 +312,7 @@ Swagger : « Recevoir les opérations de caisse d'un poste desktop » ; descript
 
 Faire uniquement ce qui est demandé : pas de refactors, helpers ou abstractions non demandés. Discipline de code dans l'ordre : réutiliser l'existant > ranger au bon endroit > n'abstraire qu'à la règle de trois. Règles d'audience, visuelles, typographiques et de langue : docs/ORCHESTRATOR.md. Ne pas modifier docs/plans/. Écrire les fichiers uniquement avec Write et Edit, jamais par redirection shell ni par script. Ne jamais afficher ni écrire une URL de base, un mot de passe ou une valeur de `.env`. Ne pas toucher à `docker-entrypoint.sh`. Ne pas commiter. Aucun tiret cadratin ni demi-cadratin. Aucun journal ne contient un corps d'événement, un nom de client ni un téléphone.
 
-Fichiers autorisés (et seulement eux) : `src/main.ts`, `src/pharmacie/caisse/sessions-caisse.service.ts`, `src/pharmacie/dto/synchro.dto.ts`, `src/pharmacie/synchro/rejeu-regles.ts`, `src/pharmacie/synchro/rejeu-regles.spec.ts`, `src/pharmacie/synchro/valider-corps.ts`, `src/pharmacie/synchro/valider-corps.spec.ts`, `src/pharmacie/synchro/synchro.service.ts`, `src/pharmacie/synchro/synchro.controller.ts`, `src/pharmacie/pharmacie.module.ts`, `test/etancheite-couts/routes-pharmacie.ts`, `test/db/etancheite-couts.db-spec.ts`, `test/db/journee-cloturee.db-spec.ts`, `test/db/synchro-caisse.db-spec.ts`, `test/db/synchro-http.db-spec.ts`, `CLAUDE.md`.
+Fichiers autorisés (et seulement eux) : `src/main.ts`, `src/config/analyseurs-corps.ts` et `src/common/filters/all-exceptions.filter.ts` avec son `.spec.ts` (ajoutés par le chef, D663), `src/pharmacie/caisse/sessions-caisse.service.ts`, `src/pharmacie/dto/synchro.dto.ts`, `src/pharmacie/synchro/rejeu-regles.ts`, `src/pharmacie/synchro/rejeu-regles.spec.ts`, `src/pharmacie/synchro/valider-corps.ts`, `src/pharmacie/synchro/valider-corps.spec.ts`, `src/pharmacie/synchro/synchro.service.ts`, `src/pharmacie/synchro/synchro.controller.ts`, `src/pharmacie/pharmacie.module.ts`, `test/etancheite-couts/routes-pharmacie.ts`, `test/db/etancheite-couts.db-spec.ts`, `test/db/journee-cloturee.db-spec.ts`, `test/db/synchro-caisse.db-spec.ts`, `test/db/synchro-http.db-spec.ts`, `CLAUDE.md`.
 
 ## CLAUDE.md du back (compléter la puce PB18)
 
@@ -320,7 +325,7 @@ Depuis `D:\souleymane\perso-archive-20260923\perso\medconnecte` :
 1. `docker compose exec -T backend npx tsc --noEmit` : aucune erreur.
 2. `docker compose exec -T backend npx eslint` sur les fichiers `.ts` autorisés : aucune erreur.
 3. `docker compose exec -T backend npm test` : tout vert, aucun test existant modifié.
-4. `docker compose exec -T backend npm run test:db` : tout vert, dont `synchro-caisse` (17), `synchro-http` (10), `journee-cloturee` (11, test 11 à sept attentes), `etancheite-couts` ; `sessions-caisse`, `clotures`, `vente`, `annulation` verts et inchangés.
+4. `docker compose exec -T backend npm run test:db` : tout vert, dont `synchro-caisse` (19 après le chef), `synchro-http` (11 après le chef), `journee-cloturee` (11, test 11 à sept attentes), `etancheite-couts` ; `sessions-caisse`, `clotures`, `vente`, `annulation` verts et inchangés.
 5. `git status --porcelain` ne liste que les fichiers autorisés (plus `docker-entrypoint.sh`) ; `git diff --stat -- prisma test/db/instantanes test/db/sessions-caisse.db-spec.ts test/db/clotures.db-spec.ts` vide.
 6. `grep -n "verrouillerJourneesPartage" src/pharmacie/synchro/synchro.service.ts` : présent en première instruction de chaque transaction du service (traitement, rejet, saut).
 7. Aucun caractère U+2014 ni U+2013 dans les lignes ajoutées ni dans les fichiers nouveaux.
@@ -332,7 +337,13 @@ Chemin de l'artefact + preuve (commande lancée, résultat en une ligne). Ou un 
 ## Historique
 
 <!-- une ligne par tentative : AAAA-MM-JJ | tier | résultat | raison si échec -->
+2026-11-01 | dur (codeur Sonnet, vérificateur Sonnet) | PASS, validé par le chef (rapports/PB18b-verification.md, rapports/PB18b-chef.md) | code conforme ; 2 Mo et gzip restreints à la route de synchro (D663) ; événement empoisonné borné : NUL rejeté, 3e échec imprévu mis de côté (D664) ; clés inconnues non recopiées (D665)
 
 ## Validation
 
 <!-- commande relancée par l'orchestrateur | résultat en une ligne | hash du commit -->
+docker compose exec -T backend npx tsc --noEmit | 0 erreur | voir commit
+docker compose exec -T backend npx eslint (18 fichiers .ts touchés) | 0 erreur, 1 avertissement préexistant (main.ts, `bootstrap()` non attendu) | voir commit
+docker compose exec -T backend npm test | 99 suites, 1079 réussis, 3 ignorés, 0 échec | voir commit
+docker compose exec -T backend npm run test:db | 32 suites, 377 réussis, 0 échec | voir commit
+docker compose restart backend | démarrage propre ; `/auth/login` 150 Ko : 413, gzip : 415 ; synchro 150 Ko et gzip : lus (401 de la garde), 2,5 Mo : 413 | voir commit

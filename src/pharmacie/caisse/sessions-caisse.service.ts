@@ -129,20 +129,20 @@ export interface BilanSession {
   fige: boolean;
 }
 
-const includeSession = {
+export const includeSession = {
   poste: true,
   comptages: {
     include: { lignes: true, releves: { include: { modePaiement: true } } },
   },
 } satisfies Prisma.SessionCaisseInclude;
 
-type SessionChargee = Prisma.SessionCaisseGetPayload<{
+export type SessionChargee = Prisma.SessionCaisseGetPayload<{
   include: typeof includeSession;
 }>;
 type ComptageCharge = SessionChargee['comptages'][number];
 type Client = PrismaService | Prisma.TransactionClient;
 
-interface EntreeComptage {
+export interface EntreeComptage {
   id?: string;
   coupures: { valeurFaciale: number; nombre: number }[];
   releves?: { mode: string; montant: number }[];
@@ -427,7 +427,7 @@ export class SessionsCaisseService {
 
     return this.prisma.$transaction(async (tx) => {
       await verrouillerJourneesPartage(tx, structureId);
-      let s = await this.verrouillerSession(tx, sessionId);
+      const s = await this.verrouillerSession(tx, sessionId);
       if (s.statut !== 'OUVERTE') {
         return {
           data: await this.calculerBilan(tx, s, structure),
@@ -442,102 +442,155 @@ export class SessionsCaisseService {
         jourSession,
         messageCaisseJourneeCloturee(jourSession),
       );
-      if (dto.comptageFermeture) {
-        await this.enregistrerComptage(
-          tx,
-          s,
-          'FERMETURE',
-          dto.comptageFermeture,
-          user.id,
-        );
-        s = await this.relire(tx, sessionId);
-      }
-      if (!s.comptages.some((c) => c.moment === 'FERMETURE')) {
-        throw new BadRequestException({
-          message: MESSAGE_COMPTAGE_FERMETURE_REQUIS,
-          code: 'COMPTAGE_FERMETURE_REQUIS',
-        });
-      }
-      const bilan = await this.calculerBilan(tx, s, structure);
-      const commentaire = dto.commentaire ?? '';
-      if (bilan.commentaireRequis && commentaire.length < 3) {
-        throw new BadRequestException({
-          message: messageCommentaireRequis(
-            bilan.ecartEspeces as number,
-            bilan.seuilEcartCaisse,
-          ),
-          code: 'COMMENTAIRE_ECART_REQUIS',
-        });
-      }
-      const avecCommentaire = commentaire.length >= 3;
-      await tx.sessionCaisse.update({
-        where: { id: sessionId },
-        data: {
-          statut: 'FERMEE',
-          fermeeLe: new Date(),
-          evenementFermetureId: `fermeture:${sessionId}`,
-          commentaireEcart: avecCommentaire ? commentaire : null,
-          commentaireParId: avecCommentaire ? user.id : null,
-        },
+      const { bilan } = await this.fermerSessionVerrouillee(tx, s, structure, {
+        auteurId: user.id,
+        comptageFermeture: dto.comptageFermeture,
+        commentaire: dto.commentaire,
+        exigerComptage: true,
+        exigerCommentaire: true,
+        evenementFermetureId: `fermeture:${sessionId}`,
       });
-      const modes = await this.modesReferentiel(tx);
-      const idParCode = new Map(modes.map((m) => [m.code, m.id]));
-      await tx.resultatSessionMode.createMany({
-        data: bilan.theorique.map((t, i) => ({
-          sessionCaisseId: sessionId,
-          modePaiementId: idParCode.get(t.mode) as string,
-          theorique: t.montant,
-          compte: bilan.compte[i].montant,
-          ecart: bilan.ecarts[i].ecart,
-        })),
-      });
-
-      const identite = {
-        posteCode: s.poste.code,
-        utilisateurId: s.utilisateurId,
-        utilisateurNom: s.utilisateurNom,
-        jourMetier: jourConakry(s.jourMetier),
-      };
-      if (!s.comptages.some((c) => c.moment === 'OUVERTURE')) {
-        await tx.anomalie.create({
-          data: {
-            pointDeVenteId: s.pointDeVenteId,
-            type: 'FOND_NON_COMPTE',
-            attribueeAId: structure.adminId,
-            pieceType: 'SessionCaisse',
-            pieceId: sessionId,
-            details: identite,
-          },
-        });
-      }
-      if (bilan.commentaireRequis) {
-        const indexEspeces = bilan.theorique.findIndex(
-          (t) => t.mode === CODE_ESPECES,
-        );
-        await tx.anomalie.create({
-          data: {
-            pointDeVenteId: s.pointDeVenteId,
-            type: 'ECART_CAISSE',
-            attribueeAId: structure.adminId,
-            pieceType: 'SessionCaisse',
-            pieceId: sessionId,
-            details: {
-              ...identite,
-              theorique: bilan.theorique[indexEspeces].montant,
-              compte: bilan.compte[indexEspeces].montant,
-              ecart: bilan.ecarts[indexEspeces].ecart,
-              seuilEcartCaisse: bilan.seuilEcartCaisse,
-            },
-          },
-        });
-      }
-      const fermee = await this.relire(tx, sessionId);
       return {
-        data: await this.calculerBilan(tx, fermee, structure),
+        data: bilan,
         message: 'Caisse fermée.',
         success: true as const,
       };
     });
+  }
+
+  /**
+   * Cœur de la fermeture, session déjà verrouillée et ouverte (D650) : partagé par
+   * la route web (qui exige comptage et commentaire) et le rejeu du desktop (qui ne
+   * refuse jamais une fermeture déjà faite sur le poste).
+   */
+  async fermerSessionVerrouillee(
+    tx: Prisma.TransactionClient,
+    s: SessionChargee,
+    structure: { id: string; nom: string; adminId: string | null },
+    options: {
+      auteurId: string;
+      comptageFermeture?: EntreeComptage;
+      commentaire?: string;
+      exigerComptage: boolean;
+      exigerCommentaire: boolean;
+      fermeeLeLocal?: Date | null;
+      evenementFermetureId: string;
+      horodatageLocalComptage?: Date | null;
+    },
+  ): Promise<{
+    bilan: BilanSession;
+    anomalies: { type: 'FOND_NON_COMPTE' | 'ECART_CAISSE'; id: string }[];
+  }> {
+    const sessionId = s.id;
+    if (options.comptageFermeture) {
+      await this.enregistrerComptage(
+        tx,
+        s,
+        'FERMETURE',
+        options.comptageFermeture,
+        options.auteurId,
+        options.horodatageLocalComptage,
+      );
+      s = await this.relire(tx, sessionId);
+    }
+    if (
+      options.exigerComptage &&
+      !s.comptages.some((c) => c.moment === 'FERMETURE')
+    ) {
+      throw new BadRequestException({
+        message: MESSAGE_COMPTAGE_FERMETURE_REQUIS,
+        code: 'COMPTAGE_FERMETURE_REQUIS',
+      });
+    }
+    const bilan = await this.calculerBilan(tx, s, structure);
+    const commentaire = options.commentaire ?? '';
+    if (
+      options.exigerCommentaire &&
+      bilan.commentaireRequis &&
+      commentaire.length < 3
+    ) {
+      throw new BadRequestException({
+        message: messageCommentaireRequis(
+          bilan.ecartEspeces as number,
+          bilan.seuilEcartCaisse,
+        ),
+        code: 'COMMENTAIRE_ECART_REQUIS',
+      });
+    }
+    const avecCommentaire = commentaire.length >= 3;
+    await tx.sessionCaisse.update({
+      where: { id: sessionId },
+      data: {
+        statut: 'FERMEE',
+        fermeeLe: new Date(),
+        fermeeLeLocal: options.fermeeLeLocal ?? null,
+        evenementFermetureId: options.evenementFermetureId,
+        commentaireEcart: avecCommentaire ? commentaire : null,
+        commentaireParId: avecCommentaire ? options.auteurId : null,
+      },
+    });
+    const modes = await this.modesReferentiel(tx);
+    const idParCode = new Map(modes.map((m) => [m.code, m.id]));
+    await tx.resultatSessionMode.createMany({
+      data: bilan.theorique.map((t, i) => ({
+        sessionCaisseId: sessionId,
+        modePaiementId: idParCode.get(t.mode) as string,
+        theorique: t.montant,
+        compte: bilan.compte[i].montant,
+        ecart: bilan.ecarts[i].ecart,
+      })),
+    });
+
+    const anomalies: {
+      type: 'FOND_NON_COMPTE' | 'ECART_CAISSE';
+      id: string;
+    }[] = [];
+    const identite = {
+      posteCode: s.poste.code,
+      utilisateurId: s.utilisateurId,
+      utilisateurNom: s.utilisateurNom,
+      jourMetier: jourConakry(s.jourMetier),
+    };
+    if (!s.comptages.some((c) => c.moment === 'OUVERTURE')) {
+      const creee = await tx.anomalie.create({
+        data: {
+          pointDeVenteId: s.pointDeVenteId,
+          type: 'FOND_NON_COMPTE',
+          attribueeAId: structure.adminId,
+          pieceType: 'SessionCaisse',
+          pieceId: sessionId,
+          details: identite,
+        },
+      });
+      anomalies.push({ type: 'FOND_NON_COMPTE', id: creee.id });
+    }
+    if (bilan.commentaireRequis) {
+      const indexEspeces = bilan.theorique.findIndex(
+        (t) => t.mode === CODE_ESPECES,
+      );
+      const creee = await tx.anomalie.create({
+        data: {
+          pointDeVenteId: s.pointDeVenteId,
+          type: 'ECART_CAISSE',
+          attribueeAId: structure.adminId,
+          pieceType: 'SessionCaisse',
+          pieceId: sessionId,
+          details: {
+            ...identite,
+            theorique: bilan.theorique[indexEspeces].montant,
+            compte: bilan.compte[indexEspeces].montant,
+            ecart: bilan.ecarts[indexEspeces].ecart,
+            seuilEcartCaisse: bilan.seuilEcartCaisse,
+          },
+        },
+      });
+      anomalies.push({ type: 'ECART_CAISSE', id: creee.id });
+    }
+    const fermee = await this.relire(tx, sessionId);
+    return {
+      bilan: await this.calculerBilan(tx, fermee, structure),
+      anomalies,
+    };
   }
 
   async listerDuJour(
@@ -752,7 +805,7 @@ export class SessionsCaisseService {
     throw new ForbiddenException(MESSAGE_SESSION_AUTRE_VENDEUR);
   }
 
-  private async verrouillerSession(
+  async verrouillerSession(
     tx: Prisma.TransactionClient,
     sessionId: string,
   ): Promise<SessionChargee> {
@@ -760,12 +813,13 @@ export class SessionsCaisseService {
     return this.relire(tx, sessionId);
   }
 
-  private async enregistrerComptage(
+  async enregistrerComptage(
     tx: Prisma.TransactionClient,
     session: SessionChargee,
     moment: 'OUVERTURE' | 'FERMETURE',
     dto: EntreeComptage,
     auteurId: string,
+    horodatageLocal?: Date | null,
   ): Promise<{ comptage: ComptageReponse; cree: boolean }> {
     const existant = session.comptages.find((c) => c.moment === moment);
     if (existant) {
@@ -866,6 +920,7 @@ export class SessionsCaisseService {
         totalEspeces: totalComptage(coupures),
         auteurId,
         evenementId: id,
+        horodatageLocal: horodatageLocal ?? null,
         lignes: {
           create: coupures.map((c) => ({
             valeurFaciale: c.valeurFaciale,
@@ -887,7 +942,7 @@ export class SessionsCaisseService {
     return { comptage: versComptageReponse(cree), cree: true };
   }
 
-  private async calculerBilan(
+  async calculerBilan(
     client: Client,
     session: SessionChargee,
     structure: { id: string; nom: string },

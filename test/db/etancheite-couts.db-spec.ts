@@ -390,6 +390,17 @@ describe('Étanchéité des coûts, sur base de test (PB16b, CA22)', () => {
         ),
       ];
     },
+    'POST /pharmacie/:structureId/synchro/evenements': async (c) => {
+      const poste = await enregistrerPosteDesktop(c);
+      return [
+        poste,
+        await c.en('post', `/pharmacie/${S}/synchro/evenements`).send({
+          posteId: id(c, 'posteDesktopId'),
+          etat: { fileVide: true, sessionOuverte: false, versionApp: '0.1.0' },
+          evenements: [],
+        }),
+      ];
+    },
     'POST /pharmacie/:structureId/caisse/sessions': async (c) => {
       const r = await c
         .en('post', `/pharmacie/${S}/caisse/sessions`)

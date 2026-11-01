@@ -25,6 +25,7 @@ import { ClotureController } from './caisse/clotures.controller';
 import { ClotureService } from './caisse/clotures.service';
 import { SynchroController } from './synchro/synchro.controller';
 import { CatalogueSynchroService } from './synchro/catalogue-synchro.service';
+import { SynchroService } from './synchro/synchro.service';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { AuthModule } from 'src/auth/auth.module';
 
@@ -61,6 +62,7 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
     RapportsService,
     ClotureService,
     CatalogueSynchroService,
+    SynchroService,
     PrismaService,
   ],
 })

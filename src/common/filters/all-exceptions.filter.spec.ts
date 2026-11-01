@@ -573,6 +573,20 @@ describe('AllExceptionsFilter', () => {
     expect(corpsRenvoye().message).toBe(MESSAGES.tropVolumineux);
   });
 
+  it('traduit le 415 de body-parser (corps compressé refusé, D663)', () => {
+    const erreur = Object.assign(new Error('content encoding unsupported'), {
+      status: 415,
+      type: 'encoding.unsupported',
+    });
+    filtre.catch(erreur, host);
+    expect(status).toHaveBeenCalledWith(415);
+    expect(corpsRenvoye()).toEqual({
+      statusCode: 415,
+      message: MESSAGES.formatNonPrisEnCharge,
+      error: 'Format non pris en charge',
+    });
+  });
+
   it('transforme P2002 en 409 sans code Prisma', () => {
     const erreur = new Prisma.PrismaClientKnownRequestError(
       'Unique constraint failed on the fields: (`email`)',

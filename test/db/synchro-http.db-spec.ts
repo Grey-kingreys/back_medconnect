@@ -1,15 +1,17 @@
 import { randomUUID } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import {
   ClassSerializerInterceptor,
   ExecutionContext,
-  INestApplication,
   Provider,
   Type,
   ValidationPipe,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
+import { monterAnalyseursJson } from 'src/config/analyseurs-corps';
 import { AllExceptionsFilter } from 'src/common/filters/all-exceptions.filter';
 import { fabriquerErreurValidation } from 'src/common/filters/erreur-validation';
 import { AuthGuard } from 'src/common/guards/auth.guard';
@@ -75,7 +77,7 @@ interface Photographie {
 describe('Photographie du catalogue en HTTP, sur base de test (PB18a)', () => {
   let base: BaseDeTest | undefined;
   let prisma: PrismaService;
-  let app: INestApplication;
+  let app: NestExpressApplication;
   let D: string;
   let ficheF: string;
   let ficheG: string;
@@ -218,7 +220,9 @@ describe('Photographie du catalogue en HTTP, sur base de test (PB18a)', () => {
         },
       })
       .compile();
-    app = module.createNestApplication();
+    app = module.createNestApplication<NestExpressApplication>();
+    // Mêmes analyseurs que main.ts (D663).
+    monterAnalyseursJson(app);
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -457,5 +461,155 @@ describe('Photographie du catalogue en HTTP, sur base de test (PB18a)', () => {
     expect(data.poste.plages.map((p) => p.id)).toEqual([id]);
     expect(data.poste.sequenceMaxRecue).toBe(5);
     expect(data.poste.sequenceAppliquee).toBe(0);
+  });
+
+  const battement = (posteId: string) => ({
+    posteId,
+    etat: { fileVide: true, sessionOuverte: false, versionApp: '0.1.0' },
+    evenements: [],
+  });
+
+  it('8. corps compressé gzip', async () => {
+    const poste = await enregistrerPoste('DESKTOP', 'desktop-synchro-gzip');
+    const r = await en(
+      'titulaire',
+      'post',
+      `/pharmacie/${S}/synchro/evenements`,
+    )
+      .set('Content-Type', 'application/json')
+      .set('Content-Encoding', 'gzip')
+      // Sans sérialiseur neutre, superagent réécrit le Buffer en JSON.
+      .serialize((corps: unknown) => corps as string)
+      .send(gzipSync(JSON.stringify(battement(poste))) as unknown as object);
+    expect(r.status).toBe(200);
+    expect(
+      (r.body as { data: { resultats: unknown[] } }).data.resultats,
+    ).toEqual([]);
+  });
+
+  it('9. lot de 1,5 Mo accepté, 2,5 Mo refusé', async () => {
+    const poste = await enregistrerPoste('DESKTOP', 'desktop-synchro-gros');
+    const lot = (taille: number) => ({
+      ...battement(poste),
+      evenements: Array.from({ length: 200 }, (_, i) => ({
+        evenementId: randomUUID(),
+        sequence: 1001 + i,
+        type: 'VENTE',
+        horodatageLocal: new Date().toISOString(),
+        utilisateurId: PROFILS.titulaire.userId,
+        corps: { texte: 'x'.repeat(taille) },
+      })),
+    });
+    const accepte = await en(
+      'titulaire',
+      'post',
+      `/pharmacie/${S}/synchro/evenements`,
+    ).send(lot(7_500));
+    expect(accepte.status).toBe(200);
+    const resultats = (
+      accepte.body as { data: { resultats: { statut: string }[] } }
+    ).data.resultats;
+    expect(resultats).toHaveLength(200);
+    expect(resultats.every((x) => x.statut === 'EN_ATTENTE')).toBe(true);
+
+    const refuse = await en(
+      'titulaire',
+      'post',
+      `/pharmacie/${S}/synchro/evenements`,
+    ).send(lot(12_500));
+    expect(refuse.status).toBe(413);
+  });
+
+  it('10. enveloppe refusée', async () => {
+    const poste = await enregistrerPoste('DESKTOP', 'desktop-synchro-env');
+    const evenement = (
+      sequence: number,
+      evenementId: string = randomUUID(),
+    ) => ({
+      evenementId,
+      sequence,
+      type: 'VENTE',
+      horodatageLocal: new Date().toISOString(),
+      utilisateurId: PROFILS.titulaire.userId,
+      corps: {},
+    });
+    const envoyer = (corps: unknown) =>
+      en('titulaire', 'post', `/pharmacie/${S}/synchro/evenements`).send(
+        corps as object,
+      );
+
+    const mauvaisId = await envoyer({
+      ...battement(poste),
+      evenements: [evenement(1, 'pas-un-uuid')],
+    });
+    expect(mauvaisId.status).toBe(400);
+    expect((mauvaisId.body as { code: string }).code).toBe('VALIDATION');
+
+    const trop = await envoyer({
+      ...battement(poste),
+      evenements: Array.from({ length: 201 }, (_, i) => evenement(i + 1)),
+    });
+    expect(trop.status).toBe(400);
+    expect((trop.body as { code: string }).code).toBe('VALIDATION');
+
+    const sansEtat = await envoyer({ posteId: poste, evenements: [] });
+    expect(sansEtat.status).toBe(400);
+    expect((sansEtat.body as { code: string }).code).toBe('VALIDATION');
+
+    const web = await enregistrerPoste('WEB', 'navigateur-synchro-2');
+    const refuse = await envoyer(battement(web));
+    expect(refuse.status).toBe(409);
+    expect((refuse.body as { code: string }).code).toBe('POSTE_INCONNU');
+
+    const nul = await envoyer({
+      ...battement(poste),
+      etat: { fileVide: true, sessionOuverte: false, versionApp: '0.1\u0000' },
+    });
+    expect(nul.status).toBe(400);
+    expect((nul.body as { code: string }).code).toBe('VALIDATION');
+  });
+
+  it('11. 2 Mo et gzip sur la seule route de synchro (D663)', async () => {
+    const poste = await enregistrerPoste('DESKTOP', 'desktop-synchro-limite');
+    const chemin = `/pharmacie/${S}/postes/${poste}/plages`;
+    // Plus de 100 ko sur une autre route JSON : refusé avant toute garde.
+    const gros = await en('titulaire', 'post', chemin).send({
+      id: randomUUID(),
+      bourrage: 'x'.repeat(150_000),
+    });
+    expect(gros.status).toBe(413);
+    // Corps compressé sur une autre route : refusé.
+    const compresse = await en('titulaire', 'post', chemin)
+      .set('Content-Type', 'application/json')
+      .set('Content-Encoding', 'gzip')
+      .serialize((corps: unknown) => corps as string)
+      .send(
+        gzipSync(JSON.stringify({ id: randomUUID() })) as unknown as object,
+      );
+    expect(compresse.status).toBe(415);
+    // Un petit corps y reste lu normalement (lu une seule fois).
+    const normal = await en('titulaire', 'post', chemin).send({
+      id: randomUUID(),
+    });
+    expect(normal.status).toBe(200);
+    // La route de synchro accepte toujours plus de 100 ko.
+    const synchro = await en(
+      'titulaire',
+      'post',
+      `/pharmacie/${S}/synchro/evenements`,
+    ).send({
+      ...battement(poste),
+      evenements: [
+        {
+          evenementId: randomUUID(),
+          sequence: 5000,
+          type: 'VENTE',
+          horodatageLocal: new Date().toISOString(),
+          utilisateurId: PROFILS.titulaire.userId,
+          corps: { texte: 'x'.repeat(150_000) },
+        },
+      ],
+    });
+    expect(synchro.status).toBe(200);
   });
 });
