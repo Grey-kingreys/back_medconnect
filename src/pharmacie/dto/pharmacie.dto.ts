@@ -95,13 +95,15 @@ export class UpsertStockDto {
   @IsString()
   medicamentId: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 50,
-    description: 'Quantité en stock, en unités minimales',
+    description:
+      'Quantité en stock, en unités minimales. Absente : aucune écriture de stock (prix et notes seulement).',
   })
+  @IsOptional()
   @IsInt({ message: 'La quantité doit être un nombre entier.' })
   @Min(0)
-  quantite: number;
+  quantite?: number;
 
   @ApiPropertyOptional({ example: 35000, description: 'Prix en GNF' })
   @IsOptional()

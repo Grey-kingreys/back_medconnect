@@ -574,10 +574,11 @@ export class PharmacieService {
           update: {
             prixUnitaire: dto.prixUnitaire,
             notes: dto.notes?.trim(),
-            archiveLe: null,
+            // Sans quantité, une fiche archivée reste archivée
+            archiveLe: dto.quantite === undefined ? undefined : null,
           },
         });
-        if (avant?.archiveLe) {
+        if (avant?.archiveLe && dto.quantite !== undefined) {
           await tx.auditLog.create({
             data: {
               userId: user.id,
@@ -595,6 +596,14 @@ export class PharmacieService {
 
         const { pointDeVente, parametres } =
           await this.pointDeVenteEtParametres(tx, structure);
+        // Sans quantité : aucune écriture de stock (ni lot, ni mouvement, ni contrôle de date)
+        if (dto.quantite === undefined) {
+          return {
+            ficheId: fiche.id,
+            seuilPrix: parametres.seuilAvertissementPrixPct,
+            seuilStockBas: parametres.seuilStockBas,
+          };
+        }
         await this.mouvementsStock.verrouillerFiches(tx, [fiche.id]);
         const etat = (await lireEtatsStock(tx, [fiche.id], jour)).get(
           fiche.id,
@@ -705,10 +714,11 @@ export class PharmacieService {
       seuilPrix,
     );
 
-    // Alerte stock bas ou épuisé (seuil en boîtes, A4)
+    // Alerte stock bas ou épuisé (seuil en boîtes, A4), seulement si le stock a pu changer
     if (
+      dto.quantite !== undefined &&
       etatStock(fiche.quantite, fiche.coefficientBoite, seuilStockBas) !==
-      'NORMAL'
+        'NORMAL'
     ) {
       await this.alerterStock(
         structureId,

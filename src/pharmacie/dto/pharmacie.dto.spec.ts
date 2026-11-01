@@ -94,3 +94,24 @@ describe('UpdateStockQuantiteDto et sansPeremption (PB08)', () => {
     expect(bon).toHaveLength(0);
   });
 });
+
+describe('UpsertStockDto : quantité facultative (D707)', () => {
+  it('accepte une quantité absente (prix et notes seulement)', async () => {
+    const erreurs = await validate(
+      plainToInstance(UpsertStockDto, {
+        medicamentId: 'med-1',
+        notes: 'Étagère 3',
+      }),
+    );
+    expect(erreurs).toHaveLength(0);
+  });
+
+  it('refuse toujours une quantité décimale ou négative quand elle est présente', async () => {
+    for (const quantite of [2.5, -1]) {
+      const erreurs = await validate(
+        plainToInstance(UpsertStockDto, { medicamentId: 'med-1', quantite }),
+      );
+      expect(erreurs.some((e) => e.property === 'quantite')).toBe(true);
+    }
+  });
+});

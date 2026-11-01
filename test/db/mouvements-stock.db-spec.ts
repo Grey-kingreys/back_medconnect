@@ -884,4 +884,55 @@ describe('Mouvements de stock et lectures recâblées sur base de test (PB08)', 
     const rapport = await verifierStock(base.client);
     expect(rapport.totalAnomalies).toBe(0);
   });
+
+  it('14. upsert sans quantité : prix et notes seulement, stock, lots et mouvements inchangés, fiche archivée non désarchivée (D707)', async () => {
+    const lotsAvant = await sql(
+      'SELECT "id", "dateExpiration" FROM "LotStock" WHERE "stockMedicamentId" = $1 ORDER BY "id"',
+      ['stk-06'],
+    );
+    const mouvementsAvant = await mouvementsDe('stk-06');
+    const avant = (await lireStock()).data.stocks.find(
+      (s) => s.id === 'stk-06',
+    );
+    expect(avant?.quantite).toBeGreaterThan(0);
+    expect(avant?.lots.length).toBeGreaterThan(0);
+
+    const r = await upsert('str-pharma-1', 'usr-admin-p1', {
+      medicamentId: 'med-06',
+      notes: 'Étagère du fond',
+      prixUnitaire: 4200,
+    });
+    expect(r.data.quantite).toBe(avant?.quantite);
+    expect(r.data.notes).toBe('Étagère du fond');
+    expect(r.data.prixUnitaire).toBe(4200);
+    expect(r.data.lots).toEqual(avant?.lots);
+    expect(await mouvementsDe('stk-06')).toEqual(mouvementsAvant);
+    const lotsApres = await sql(
+      'SELECT "id", "dateExpiration" FROM "LotStock" WHERE "stockMedicamentId" = $1 ORDER BY "id"',
+      ['stk-06'],
+    );
+    expect(lotsApres.rows).toEqual(lotsAvant.rows);
+
+    // Fiche archivée : reste archivée, aucune écriture de stock
+    await pharmacie.removeStockItem('str-pharma-1', 'stk-08', 'usr-admin-p1');
+    const mouvementsArchivee = await mouvementsDe('stk-08');
+    const archivee = await upsert('str-pharma-1', 'usr-admin-p1', {
+      medicamentId: 'med-08',
+      notes: 'Note sur fiche archivée',
+    });
+    expect(archivee.data.notes).toBe('Note sur fiche archivée');
+    const enBase = await sql(
+      'SELECT "archiveLe", "notes" FROM "StockMedicament" WHERE "id" = $1',
+      ['stk-08'],
+    );
+    expect(enBase.rows[0].archiveLe).not.toBeNull();
+    expect(enBase.rows[0].notes).toBe('Note sur fiche archivée');
+    expect(await mouvementsDe('stk-08')).toEqual(mouvementsArchivee);
+    const apresLecture = (await lireStock()).data.stocks;
+    expect(apresLecture.some((s) => s.id === 'stk-08')).toBe(false);
+
+    if (!base) throw new Error('Base de test non créée.');
+    const rapport = await verifierStock(base.client);
+    expect(rapport.totalAnomalies).toBe(0);
+  });
 });

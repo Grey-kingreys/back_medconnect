@@ -12,7 +12,7 @@ Dépôt: `front_medconnect`, branche `orch/pharmacie-t1-front`
 
 Quatrième sous-fiche (D685), après PF02a. La fenêtre « Ajouter au stock / Modifier le stock » devient la fiche produit de PB06 et PB13 : prix de la boîte et prix de l'unité indépendants, unité minimale, nombre d'unités par boîte, vente à l'unité, tolérance d'inventaire, confirmation de la fiche (qualification) avec le choix de conversion du stock à la première qualification, avertissement d'écart de prix non bloquant. À l'ajout, une quantité initiale exige une date de péremption ou la case « Sans date de péremption » (D701), saisie au format des factures (MM/AA) grâce à la règle commune `date_peremption.ts` créée ici (D684, réutilisée par PF07).
 
-Décisions applicables : D684, D686, D687, D693, D697, D701.
+Décisions applicables : D684, D686, D687, D693, D697, D701, D707 (révision après la première vérification : upsert du stock à quantité facultative dans le back, voir « Révision D707 » plus bas, qui prime sur les sections 3 et 4).
 
 ### Contexte vérifié dans le code front (ne pas re-découvrir)
 
@@ -86,11 +86,21 @@ Tout changement du nombre d'unités par boîte sur une fiche non qualifiée la q
 7. avertissement `ECART_PRIX` (`ecartPct: 32`) : texte exact et bouton « Fermer » seul ;
 8. 409 `CONVERSION_IMPOSSIBLE` : message du serveur affiché, fenêtre ouverte.
 
+### Révision D707 (après la première vérification, FAIL)
+
+L'upsert traite `quantite` comme une quantité absolue : l'étape (b) sur un médicament déjà en stock (actif ou archivé, un seul lot) remettait le stock à 0, et les notes envoyées avec `quantite: editItem.quantite` annulaient dans le stock les ventes faites depuis l'ouverture de la page. Révision :
+
+- **Back** (`back_medconnect`, branche `orch/pharmacie-t1-back`) : `UpsertStockDto.quantite` facultative (`@IsOptional`) ; dans `upsertStock`, sans quantité : création de la fiche si elle manque, prix et notes, puis retour avant tout verrou consultatif, lot, mouvement ou contrôle de date ; fiche archivée non désarchivée, pas d'audit de désarchivage, pas d'alerte de stock bas. Chemin avec quantité strictement inchangé. Tests : `src/pharmacie/dto/pharmacie.dto.spec.ts` (quantité absente acceptée, décimale et négative toujours refusées), `test/db/mouvements-stock.db-spec.ts` test 14 (lots, journal et quantité inchangés, fiche archivée qui reste archivée, `verifierStock` sans anomalie). `CLAUDE.md` du back (puce PB08) mis à jour.
+- **Ajout** (remplace l'envoi de la section 3) : (a) `createMedicament` si nouveau ; (b) `upsertStock({ medicamentId })` seul, sans prix, notes ni quantité ; si la réponse montre une fiche déjà en stock (quantité non nulle, `archiveLe`, ou lots), arrêt sans aucune autre écriture et message « Ce médicament est déjà dans votre stock. Pour ajouter des boîtes, utilisez « Réception ». » ; (c) `modifierFiche` avec `qualifie: true`, le prix de la boîte s'il est saisi et les champs du bloc « Vente et prix » différents des valeurs par défaut ; (c bis) si des notes sont saisies, `upsertStock({ medicamentId, notes })` sans quantité ; (d) si quantité de départ positive, `upsertStock({ medicamentId, quantite: boîtes x nombre d'unités par boîte renvoyé par (c), dateExpiration | sansPeremption: true })`. Après un échec réseau, la saisie reste verrouillée et « Réessayer » ne refait aucune étape réussie ; après un refus du serveur, la saisie se corrige et (c) ou (c bis) ne sont refaites que si leur contenu a changé.
+- **Modification** (remplace l'envoi de la section 3) : notes changées : `upsertStock({ medicamentId, notes })` sans quantité ; `modifierFiche` avec les seuls champs changés, prix compris.
+- **Médicament déjà dans la liste active** : `StockModal` reçoit `fichesActives` ; un médicament déjà présent est refusé dès la sélection dans la recherche (même message, bouton désactivé). Ligne ajoutée hors de la liste des fichiers autorisés : `src/app/dashboard/stock/page.tsx` (passage de `fichesActives={stockInfo?.stocks}` à `StockModal`), acceptée.
+- **Tests** ajoutés à `StockModal.test.tsx` (16 au total) : notes sans quantité en modification ; ajout d'un médicament déjà en stock (quantité, archivé, lots, et saisie avec prix et notes) : un seul upsert `{ medicamentId }`, aucun `modifierFiche` ; ordre (b), (c) avec le prix, (c bis), (d) ; échec réseau sur les notes puis sur la quantité : « Réessayer » ne refait que l'étape échouée ; coefficient lu dans la réponse de (c) ; refus dès la recherche.
+
 ## Contraintes
 
 Faire uniquement ce qui est demandé. Audience non-dev : jamais « coefficient », « qualifier », « UM » à l'écran (« nombre d'unités par boîte », « confirmer la fiche ») ; termes interdits absents. Visuel : classes de la fenêtre existante, clair et sombre, AA, libellés reliés aux champs (`htmlFor`). Écrire uniquement avec Write et Edit. Ne jamais afficher une valeur de `.env`. Ne pas toucher à `docs/plans/`. Ne pas commiter. Aucun tiret cadratin ni demi-cadratin.
 
-Fichiers autorisés : `src/lib/date_peremption.ts`, `src/lib/date_peremption.test.ts`, `src/lib/api_pharmacie.ts`, `src/components/modals/StockModal.tsx`, `src/components/modals/StockModal.test.tsx`.
+Fichiers autorisés : `src/lib/date_peremption.ts`, `src/lib/date_peremption.test.ts`, `src/lib/api_pharmacie.ts`, `src/components/modals/StockModal.tsx`, `src/components/modals/StockModal.test.tsx` ; après D707, en plus : `src/app/dashboard/stock/page.tsx` (une ligne) côté front, et côté back `src/pharmacie/dto/pharmacie.dto.ts`, `src/pharmacie/dto/pharmacie.dto.spec.ts`, `src/pharmacie/pharmacie.service.ts`, `test/db/mouvements-stock.db-spec.ts`, `CLAUDE.md`.
 
 ## Test à la main
 
@@ -114,7 +124,12 @@ Chemin de l'artefact + preuve (commande lancée, résultat en une ligne). Ou un 
 ## Historique
 
 <!-- une ligne par tentative : AAAA-MM-JJ | tier | résultat | raison si échec -->
+2026-11-01 | spécifié (Sonnet) | FAIL | upsert à quantité absolue : l'ajout d'un médicament déjà en stock et les notes en modification pouvaient détruire du stock (rapports/PF02b-verification.md, première passe)
+2026-11-01 | spécifié (Sonnet) | PASS | D707 appliquée dans le back et le front, seconde vérification (rapports/PF02b-verification.md, seconde passe)
+2026-11-01 | chef (Opus) | validé | durcissement de l'étape (b) (`medicamentId` seul), prix par la fiche, notes sans quantité, 4 tests ajoutés (rapports/PF02b-chef.md)
 
 ## Validation
 
 <!-- commande relancée par l'orchestrateur | résultat en une ligne | hash du commit -->
+front : tsc, eslint (6 fichiers), `vitest run`, `npm run build` local | 0 erreur, 0 erreur, 63 fichiers et 542 tests verts, build réussi | front 9faa963
+back : tsc, eslint (4 fichiers), `npm test`, `npm run test:db`, redémarrage du conteneur | 0 erreur, 0 erreur, 1114 verts (3 ignorés), 410 verts, démarrage propre | back : commit de ce fichier
