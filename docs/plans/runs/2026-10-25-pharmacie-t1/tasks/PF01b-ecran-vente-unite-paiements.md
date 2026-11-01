@@ -145,7 +145,13 @@ Chemin de l'artefact + preuve (commande lancée, résultat en une ligne). Ou un 
 ## Historique
 
 <!-- une ligne par tentative : AAAA-MM-JJ | tier | résultat | raison si échec -->
+2026-11-01 | spécifié (codeur Sonnet, vérificateur Sonnet) | PASS avec réserves | panier modifiable sous la même clé après un échec réseau (perte de vente possible), dialogue de sortie non réinitialisé entre deux fiches, repli `?? 0` sur le prix (rapports/PF01b-verification.md) ; écart déclaré accepté : une ligne de `src/lib/api_ventes.test.ts` (hors liste) passée de `STOCK_INSUFFISANT` à `SORTIE_MANUELLE_REQUISE`, imposée par le retrait du code de `CODES_ERREUR_VENTE`
+2026-11-01 | chef Opus | corrigé et validé | saisie verrouillée pendant l'envoi et après un échec réseau, « Réessayer » (même clé, même corps) et « Modifier la saisie » (nouvelle clé, avertissement) seuls proposés (D688, D706) ; `key` du dialogue de sortie par fiche ; prix de la ligne affiché seulement s'il est un nombre ; 2 tests ajoutés, 1 renforcé
 
 ## Validation
 
 <!-- commande relancée par l'orchestrateur | résultat en une ligne | hash du commit -->
+`docker compose exec -T frontend npx tsc --noEmit` | 0 erreur | front 646edfd
+`docker compose exec -T frontend npx eslint` (vente, ChoixLot, api_ventes) | 0 erreur | front 646edfd
+`docker compose exec -T frontend npx vitest run` | 60 fichiers, 503 tests verts (479 avant PF01b) | front 646edfd
+`npm run build` (local) | réussi | front 646edfd
