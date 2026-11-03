@@ -27,7 +27,7 @@ La dernière ligne va un peu plus loin que la formule « coefficient différent 
 ## Autres contrôles
 
 - `test/db/fiche-produit.db-spec.ts` : aucun changement par rapport au dépôt.
-- `plaquette.db-spec.ts` : parcours du porteur, photographie, tous les cas de D724 ci-dessus sauf les deux lignes « unité seule » sur fiche non qualifiée d'une autre unité, couverte seulement par son cas à conversion.
+- `plaquette.db-spec.ts` : parcours du porteur, photographie et cas de D724 ci-dessus. Le cas « coefficient différent de 1, unité et coefficient changés » n'a pas de test dédié, lu dans le code.
 - Migration additive entre `BEGIN` et `COMMIT`, valeur placée après `AMPOULE`, schéma dans le même ordre. Retour arrière refusé tant qu'une fiche utilise `PLAQUETTE`, enum recréé et défaut remis ; README à jour.
 - `coefficientReception` dans `LotExpose`, sans donnée de coût.
 
