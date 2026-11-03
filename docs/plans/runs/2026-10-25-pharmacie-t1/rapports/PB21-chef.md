@@ -38,8 +38,8 @@ Une reprise qualifiée en plaquettes à coefficient 1 compte ses 3 « boîtes »
 ## Preuves
 
 - Par le chef, après ses corrections : `npm run test:db -- --testPathPatterns plaquette`, 2 suites, 14 verts ; crochet pre-commit (`tsc`, `eslint`) passé.
-- Rendues par le codeur, non rejouées par le chef : 1151 unitaires, 431 `test:db`. La suite complète n'a pas été relancée depuis le test ajouté, ni par moi après le redémarrage du PC.
-- Migration non appliquée par le chef à la base de dev : elle le sera par `prisma migrate deploy` au prochain démarrage du backend.
+- Relancées par l'orchestrateur principal sur le code commité, test ajouté compris : `tsc` propre, 1151 unitaires, 432 `test:db`.
+- Migration déjà appliquée à la base de dev (redémarrage du PC), `migrate status` à jour, d'après l'orchestrateur principal.
 - `docker-entrypoint.sh` laissé hors du commit.
 
 ## Reste à présenter au porteur
