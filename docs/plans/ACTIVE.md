@@ -38,7 +38,7 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | Correctif D731 | Fenêtre d'ajout au stock : recherche seule avant un choix, « Déjà en stock », encadré livraison ou modification, hors fiche | spécifié | contrôlé par le chef (front 2e9fdd2, D731, rapports/PF03b-chef.md), test navigateur à faire | 1 |
 | PF04 | Annulation et ventes du jour : tasks/PF04-annulation-ventes-du-jour.md | spécifié | contrôlé par le chef (front de22bf0, rapports/PF04-chef.md), test navigateur à faire | 1 |
 | PF05 | Clôture journalière : tasks/PF05-cloture-journaliere.md | spécifié | contrôlé par le chef (front b1f2a69, rapports/PF05-chef.md), test navigateur à faire | 1 |
-| PF06 | Anomalies, alertes de péremption et marge : tasks/PF06a-file-anomalies.md, tasks/PF06b-alertes-peremption-marge.md | spécifié | PF06a contrôlé par le chef (front eca3842, rapports/PF06a-chef.md), test navigateur et build à faire ; PF06b fiche prête | 1 |
+| PF06 | Anomalies, alertes de péremption et marge : tasks/PF06a-file-anomalies.md, tasks/PF06b-alertes-peremption-marge.md | spécifié | PF06a contrôlé par le chef (front eca3842, rapports/PF06a-chef.md), test navigateur et build à faire ; PF06b contrôlé par le chef (front 0bdcbde, rapports/PF06b-chef.md), test navigateur et build à faire ; bilan du front : rapports/front-t1-chef.md | 1 |
 | PB20 | Vente en ligne refusée au-delà du stock, quantité jamais négative en sortie d'API, démo par le rejeu : tasks/PB20-vente-refusee-stock-jamais-negatif.md (D713 à D722, D727, D728) | dur | validé (rapports/PB20-chef.md) | 1 |
 | PF08 | Écran de vente sans attente de livraison, « 0 » et « N à régulariser » : tasks/PF08-vente-refusee-a-regulariser.md (dépend de PB20) | spécifié | validé (test navigateur OK, front 1cb3fee, rapports/PF08-chef.md) | 1 |
 | PB21 | Unité PLAQUETTE, coefficient de réception dans les lots : tasks/PB21-unite-plaquette.md (D723, D724, dépend de PB20) | spécifié | validé (rapports/PB21-chef.md) | 2 |
@@ -60,7 +60,7 @@ Back de la tranche (PB01 à PB19) validé ; bilan, décisions à faire valider p
 - Porteur, après PB19b : `GET .../caisse/sessions/courante` montre à tout vendeur (`caisse:utiliser`) la caisse ouverte du poste, fond et comptage d'ouverture compris (voulu, D528). Durcir en masquant `fondCaisse`, `fondCompte` et `comptageOuverture` à un appelant qui n'est ni le titulaire de la caisse ni `caisse:superviser` (nom du titulaire gardé, utile à PF03) ?
 - Porteur, après PB19b : décisions D601 à D682 de cette reprise à valider (liste et révisions de décisions antérieures dans rapports/PB19b-chef.md).
 - Porteur, après PF03b : attendu et écart sont visibles en direct pendant le comptage de fermeture, donc ajustables avant la confirmation (DEMANDE.md ligne 77 : « sa propre activité [...] et ensuite l'écart »). Recommandation de l'orchestrateur principal : les masquer jusqu'à la confirmation. Comportement inchangé en attendant.
-- Porteur, après PF04 : le reçu d'une vente en plaquettes dit « 6 unités de X » faute de libellé d'unité sur la ligne de vente. Ajouter ce libellé à la réponse du back ?
+- Porteur, après PF04 : le reçu d'une vente en plaquettes dit « 6 unités de X » faute de libellé d'unité sur la ligne de vente, et les alertes de péremption (PF06b) disent aussi « unités ». Ajouter ce libellé aux réponses du back ?
 - Reprises du run parqué 2026-10-22-lot8 : voir son decisions.md et l'historique git de ce fichier (questions TB3, B2, B4, U1, B8, B10, B11, B12, B14 toujours ouvertes).
 
 ## Dernières décisions (5 max, historique complet dans decisions.md)
