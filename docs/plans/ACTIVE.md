@@ -36,7 +36,7 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | Correctifs porteur 1 | Réception (champ Quantité), stock (colonne Péremption, lots en lecture seule), fiche produit (alerte de prix au détail), hors fiche | spécifié | validé (front 4f54bb3, D711, D712, rapports/correctifs-porteur-1-chef.md) ; réserve : `coefficientReception` à exposer par la tâche « plaquette » | 1 |
 | PF03 | Ma caisse : tasks/PF03a-ma-caisse-ouverture-comptage.md, tasks/PF03b-ma-caisse-mouvements-fermeture.md | spécifié | PF03a contrôlé par le chef (front add367c, D730, rapports/PF03a-chef.md), test navigateur à faire ; PF03b contrôlé par le chef (front dc60497, rapports/PF03b-chef.md), test navigateur à faire | 1 |
 | Correctif D731 | Fenêtre d'ajout au stock : recherche seule avant un choix, « Déjà en stock », encadré livraison ou modification, hors fiche | spécifié | contrôlé par le chef (front 2e9fdd2, D731, rapports/PF03b-chef.md), test navigateur à faire | 1 |
-| PF04 | Annulation et ventes du jour : tasks/PF04-annulation-ventes-du-jour.md | spécifié | spécifié par le chef, fiches prêtes | 0 |
+| PF04 | Annulation et ventes du jour : tasks/PF04-annulation-ventes-du-jour.md | spécifié | contrôlé par le chef (front de22bf0, rapports/PF04-chef.md), test navigateur à faire | 1 |
 | PF05 | Clôture journalière : tasks/PF05-cloture-journaliere.md | spécifié | spécifié par le chef, fiches prêtes | 0 |
 | PF06 | Anomalies, alertes de péremption et marge : tasks/PF06a-file-anomalies.md, tasks/PF06b-alertes-peremption-marge.md | spécifié | spécifié par le chef, fiches prêtes | 0 |
 | PB20 | Vente en ligne refusée au-delà du stock, quantité jamais négative en sortie d'API, démo par le rejeu : tasks/PB20-vente-refusee-stock-jamais-negatif.md (D713 à D722, D727, D728) | dur | validé (rapports/PB20-chef.md) | 1 |
@@ -60,6 +60,7 @@ Back de la tranche (PB01 à PB19) validé ; bilan, décisions à faire valider p
 - Porteur, après PB19b : `GET .../caisse/sessions/courante` montre à tout vendeur (`caisse:utiliser`) la caisse ouverte du poste, fond et comptage d'ouverture compris (voulu, D528). Durcir en masquant `fondCaisse`, `fondCompte` et `comptageOuverture` à un appelant qui n'est ni le titulaire de la caisse ni `caisse:superviser` (nom du titulaire gardé, utile à PF03) ?
 - Porteur, après PB19b : décisions D601 à D682 de cette reprise à valider (liste et révisions de décisions antérieures dans rapports/PB19b-chef.md).
 - Porteur, après PF03b : attendu et écart sont visibles en direct pendant le comptage de fermeture, donc ajustables avant la confirmation (DEMANDE.md ligne 77 : « sa propre activité [...] et ensuite l'écart »). Recommandation de l'orchestrateur principal : les masquer jusqu'à la confirmation. Comportement inchangé en attendant.
+- Porteur, après PF04 : le reçu d'une vente en plaquettes dit « 6 unités de X » faute de libellé d'unité sur la ligne de vente. Ajouter ce libellé à la réponse du back ?
 - Reprises du run parqué 2026-10-22-lot8 : voir son decisions.md et l'historique git de ce fichier (questions TB3, B2, B4, U1, B8, B10, B11, B12, B14 toujours ouvertes).
 
 ## Dernières décisions (5 max, historique complet dans decisions.md)
