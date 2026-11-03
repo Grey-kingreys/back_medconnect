@@ -15,7 +15,8 @@ import { jourVersDate } from 'src/pharmacie/stock/lecture-stock';
 import { MouvementsStockService } from 'src/pharmacie/stock/mouvements-stock.service';
 import type { ResolutionEcrite } from 'src/pharmacie/stock/resolution-provisoires';
 import type { CreerReceptionDto } from 'src/pharmacie/dto/receptions.dto';
-import type { CreerVenteDto } from 'src/pharmacie/dto/vente.dto';
+import { PointsDeVenteService } from 'src/pharmacie/points-de-vente.service';
+import { SynchroService } from 'src/pharmacie/synchro/synchro.service';
 import { VenteService } from 'src/pharmacie/vente.service';
 import {
   appliquerMigrations,
@@ -27,6 +28,7 @@ import {
   supprimerBaseDeTest,
 } from './harnais';
 import { chargerFormatActuel } from './fixtures/format-actuel';
+import { rejeuParDefaut } from './rejeu-provisoire';
 
 interface LotRep {
   id: string;
@@ -53,6 +55,7 @@ describe('Résolution des allocations provisoires, sur base de test (PB14b)', ()
   let base: BaseDeTest | undefined;
   let prisma: PrismaService;
   let service: VenteService;
+  let venteParRejeu: ReturnType<typeof rejeuParDefaut>;
   let receptions: ReceptionsService;
   let mouvements: MouvementsStockService;
   let pv1: string;
@@ -106,7 +109,21 @@ describe('Résolution des allocations provisoires, sur base de test (PB14b)', ()
       sessions,
     );
     receptions = new ReceptionsService(prisma, acces, mouvements, permissions);
+    venteParRejeu = rejeuParDefaut({
+      synchro: new SynchroService(prisma, acces, mouvements, sessions),
+      postes: new PointsDeVenteService(prisma, acces),
+      structureId: PHARMACIE,
+      vendeurId: VENDEUR,
+      responsableId: RESPONSABLE,
+      appareilId: 'desktop-pb20-resolution',
+    });
     pv1 = await pointDeVente(PHARMACIE);
+    // Poste et caisse du rejeu créés avant les essais de concurrence : ils ne
+    // doivent pas être comptés parmi les attentes de verrou
+    await venteParRejeu({
+      stockId: (await nouvelleFiche()).stockId,
+      nombre: 1,
+    });
   });
 
   afterAll(async () => {
@@ -180,15 +197,15 @@ describe('Résolution des allocations provisoires, sur base de test (PB14b)', ()
       ],
     });
 
+  /**
+   * Vente sans stock (provisoire) : seul le rejeu d'un poste l'accepte (D713.2). La
+   * route en ligne la refuse.
+   */
   async function vendre(stockId: string, quantite: number) {
-    const dto: CreerVenteDto = { lignes: [{ stockId, quantite }] };
-    return (await service.creerVente(
-      PHARMACIE,
-      VENDEUR,
-      dto,
-      undefined,
-      '127.0.0.1',
-    )) as unknown as VenteRep;
+    return (await venteParRejeu({
+      stockId,
+      nombre: quantite,
+    })) as unknown as VenteRep;
   }
 
   async function annuler(venteId: string) {

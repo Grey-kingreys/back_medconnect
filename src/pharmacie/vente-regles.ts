@@ -127,6 +127,100 @@ export function allouerLignes(
   });
 }
 
+export interface LigneAControler {
+  index: number;
+  stockMedicamentId: string;
+  nom: string;
+  unite: UniteVente;
+  /** Nombre demandé dans l'unité de la ligne. */
+  nombre: number;
+  quantiteUm: number;
+  /** 1 pour UNITE, coefficient appliqué pour BOITE. */
+  coefficientLigne: number;
+  sortieManuelle: boolean;
+}
+
+export interface LigneInsuffisante {
+  index: number;
+  stockMedicamentId: string;
+  nom: string;
+  unite: UniteVente;
+  demande: number;
+  /** Ce que cette ligne peut garder si les autres lignes de la fiche restent, dans l'unité de la ligne. */
+  disponible: number;
+  /** Reste de la fiche en unités minimales. */
+  disponibleUm: number;
+}
+
+/**
+ * Contrôle du stock d'une vente en ligne, par fiche et sur la somme de ses lignes
+ * (D713 à D715). `soldeProduit` est l'agrégat lu sous verrou, peut être négatif.
+ * Pur : ne modifie rien.
+ */
+export function controlerStockVente(entree: {
+  lignes: readonly LigneAControler[];
+  allouees: readonly LigneAllouee[];
+  soldeProduit: ReadonlyMap<string, number>;
+}): { insuffisantes: LigneInsuffisante[]; sortiesManuelles: LigneAllouee[] } {
+  const parIndex = new Map(entree.allouees.map((a) => [a.index, a]));
+  const parFiche = new Map<string, LigneAControler[]>();
+  for (const l of entree.lignes) {
+    const liste = parFiche.get(l.stockMedicamentId) ?? [];
+    liste.push(l);
+    parFiche.set(l.stockMedicamentId, liste);
+  }
+
+  const insuffisantes: LigneInsuffisante[] = [];
+  const sortiesManuelles: LigneAllouee[] = [];
+
+  for (const [ficheId, lignes] of parFiche) {
+    const allouees = lignes.map((l) => parIndex.get(l.index) as LigneAllouee);
+    const plafond = Math.max(0, entree.soldeProduit.get(ficheId) ?? 0);
+    const demandeUm = lignes.reduce((s, l) => s + l.quantiteUm, 0);
+    const restes = allouees.reduce((s, a) => s + a.resteProvisoire, 0);
+    const alloue = allouees.reduce((s, a) => s + a.quantiteAllouee, 0);
+    const manuelle = lignes.some((l) => l.sortieManuelle);
+    const avecPerimes = allouees.some(
+      (a) => a.lotsPerimesDisponibles.length > 0,
+    );
+
+    let disponibleFiche: number | null = null;
+    if (plafond === 0) {
+      disponibleFiche = 0;
+    } else if (restes > 0 && alloue === 0 && avecPerimes && !manuelle) {
+      sortiesManuelles.push(
+        ...allouees.filter(
+          (a) => a.resteProvisoire > 0 && a.lotsPerimesDisponibles.length > 0,
+        ),
+      );
+    } else if (restes > 0) {
+      disponibleFiche = Math.min(alloue, plafond);
+    } else if (demandeUm > plafond) {
+      disponibleFiche = plafond;
+    }
+
+    if (disponibleFiche === null) continue;
+    for (const l of lignes) {
+      const autres = demandeUm - l.quantiteUm;
+      insuffisantes.push({
+        index: l.index,
+        stockMedicamentId: l.stockMedicamentId,
+        nom: l.nom,
+        unite: l.unite,
+        demande: l.nombre,
+        disponible: Math.floor(
+          Math.max(0, disponibleFiche - autres) / l.coefficientLigne,
+        ),
+        disponibleUm: disponibleFiche,
+      });
+    }
+  }
+
+  insuffisantes.sort((a, b) => a.index - b.index);
+  sortiesManuelles.sort((a, b) => a.index - b.index);
+  return { insuffisantes, sortiesManuelles };
+}
+
 export interface ModeConnu {
   id: string;
   code: string;

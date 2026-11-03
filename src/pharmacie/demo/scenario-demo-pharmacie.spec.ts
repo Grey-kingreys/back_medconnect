@@ -2,6 +2,7 @@ import { MEDICAMENTS_DEMO, STOCKS_DEMO } from 'src/demo/demo.donnees';
 import {
   EVENEMENTS_POSTE_LOT_A,
   EVENEMENTS_POSTE_LOT_B,
+  EVENEMENTS_POSTE_LOT_C,
   FOURNISSEURS_SCENARIO,
   INVENTAIRE_SCENARIO,
   RECEPTIONS_SCENARIO,
@@ -13,7 +14,11 @@ import {
   type PaiementScenario,
 } from './scenario-demo-pharmacie.donnees';
 
-const EVENEMENTS_POSTE = [...EVENEMENTS_POSTE_LOT_A, ...EVENEMENTS_POSTE_LOT_B];
+const EVENEMENTS_POSTE = [
+  ...EVENEMENTS_POSTE_LOT_A,
+  ...EVENEMENTS_POSTE_LOT_B,
+  ...EVENEMENTS_POSTE_LOT_C,
+];
 const COUPURES_REFERENTIEL = [20000, 10000, 5000, 2000, 1000, 500];
 
 const fichesKaloum = new Map(
@@ -55,13 +60,28 @@ const lignesVendues = [
 );
 
 describe('Scénario pharmacie de démonstration : données', () => {
+  it('la vente de Ventoline sans stock passe par le poste, sur la caisse S3 du jour, ticket 10 (D721)', () => {
+    const vente = EVENEMENTS_POSTE_LOT_C.flatMap((e) =>
+      e.type === 'VENTE' ? [e] : [],
+    );
+    expect(vente).toHaveLength(1);
+    expect(vente[0].session).toBe('S3');
+    expect(vente[0].ticket).toBe(10);
+    expect(vente[0].lignes[0].medicament).toBe('Ventoline 100 µg');
+    expect(
+      VENTES_WEB_SCENARIO.some((w) =>
+        w.lignes.some((l) => l.medicament === 'Ventoline 100 µg'),
+      ),
+    ).toBe(false);
+  });
+
   it('chaque vente du poste et du web a un total égal à la somme de ses lignes et de ses paiements', () => {
-    expect(ventesPoste).toHaveLength(9);
+    expect(ventesPoste).toHaveLength(10);
     for (const v of ventesPoste) {
       expect(sommeLignes(v.lignes)).toBe(v.total);
       expect(sommePaiements(v.paiements)).toBe(v.total);
     }
-    expect(VENTES_WEB_SCENARIO).toHaveLength(3);
+    expect(VENTES_WEB_SCENARIO).toHaveLength(2);
     for (const w of VENTES_WEB_SCENARIO) {
       expect(sommeLignes(w.lignes)).toBe(w.total);
       if (w.paiements) expect(sommePaiements(w.paiements)).toBe(w.total);
@@ -94,7 +114,7 @@ describe('Scénario pharmacie de démonstration : données', () => {
       }
     }
     expect(comptages.map(valeurComptage)).toEqual([
-      200000, 211000, 200000, 224000,
+      200000, 211000, 200000, 224000, 200000,
     ]);
   });
 
@@ -159,9 +179,9 @@ describe('Scénario pharmacie de démonstration : données', () => {
     expect(STOCK_REPRIS_SCENARIO.expirationJours).toBeGreaterThan(0);
   });
 
-  it("les séquences du poste vont de 1 à 16 sans trou, dans l'ordre des horodatages", () => {
+  it("les séquences du poste vont de 1 à 19 sans trou, dans l'ordre des horodatages", () => {
     expect(EVENEMENTS_POSTE.map((e) => e.sequence)).toEqual(
-      Array.from({ length: 16 }, (_, i) => i + 1),
+      Array.from({ length: 19 }, (_, i) => i + 1),
     );
     const instant = (e: EvenementPosteScenario) =>
       `${String(e.jour + 100).padStart(3, '0')}T${e.heure}`;

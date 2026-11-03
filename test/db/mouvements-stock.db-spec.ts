@@ -935,4 +935,125 @@ describe('Mouvements de stock et lectures recâblées sur base de test (PB08)', 
     const rapport = await verifierStock(base.client);
     expect(rapport.totalAnomalies).toBe(0);
   });
+
+  /** Fiche de test et mouvement de vente sans lot (part à régulariser), écrit par le service du journal. */
+  async function ficheAvecPartARegulariser(
+    id: string,
+    unites: number,
+  ): Promise<string> {
+    await sql(
+      `INSERT INTO "Medicament" ("id", "nom", "categorie", "ordonnanceRequise", "updatedAt") VALUES ($1, $2, 'Test PB20', false, now())`,
+      [`med-${id}`, `Produit ${id}`],
+    );
+    await sql(
+      `INSERT INTO "StockMedicament" ("id", "medicamentId", "structureId", "quantite", "disponible", "prixUnitaire", "coefficientBoite", "qualifie", "updatedAt") VALUES ($1, $2, 'str-pharma-1', 0, false, 1000, 1, true, now())`,
+      [id, `med-${id}`],
+    );
+    await prisma.$transaction((tx) =>
+      mouvements.ecrire(tx, {
+        pointDeVenteId: pv1,
+        stockMedicamentId: id,
+        lotId: null,
+        type: 'VENTE',
+        quantite: -unites,
+        pieceOrigineType: 'VENTE',
+        pieceOrigineId: `piece-${id}`,
+        motif: null,
+        auteurId: 'usr-pharm-p1',
+      }),
+    );
+    return id;
+  }
+
+  it('PB20 : fiche à -1 lue 0 avec une unité à régulariser, upsert quantite 0 refusé en LOT_REQUIS', async () => {
+    const id = await ficheAvecPartARegulariser('stk-pb20-neg', 1);
+    const lue = (await lireStock()).data.stocks.find((s) => s.id === id) as
+      | (FicheLue & { quantiteARegulariser: number })
+      | undefined;
+    expect(lue).toMatchObject({
+      quantite: 0,
+      quantiteARegulariser: 1,
+      quantiteVendable: 0,
+      disponible: false,
+    });
+    const rupture = (
+      (await lireStock()) as unknown as {
+        data: { alertes: { rupture: { id: string }[] } };
+      }
+    ).data.alertes.rupture.find((r) => r.id === id);
+    expect(rupture).toMatchObject({ quantiteARegulariser: 1 });
+
+    const avant = await mouvementsDe(id);
+    const e = await refus(
+      upsert('str-pharma-1', 'usr-admin-p1', {
+        medicamentId: 'med-stk-pb20-neg',
+        quantite: 0,
+      }),
+    );
+    expect(e.statut).toBe(409);
+    expect(e.corps.code).toBe('LOT_REQUIS');
+    expect(await mouvementsDe(id)).toEqual(avant);
+    const agregat = await sql(
+      'SELECT "quantite" FROM "AgregatStockProduit" WHERE "stockMedicamentId" = $1',
+      [id],
+    );
+    expect(Number(agregat.rows[0].quantite)).toBe(-1);
+  });
+
+  it('PB20 : une correction à la baisse peut passer l’agrégat sous zéro seulement avec une part à régulariser, le message est écrêté (D718)', async () => {
+    const id = await ficheAvecPartARegulariser('stk-pb20-corr', 1);
+    const { lot } = await prisma.$transaction((tx) =>
+      mouvements.creerLot(tx, {
+        stockMedicamentId: id,
+        pointDeVenteId: pv1,
+        numeroLot: 'L-PB20',
+        dateExpiration: jourVersDate(jour(60)),
+        quantite: 3,
+        coutUnitaire: 0,
+        coutAchatBoite: null,
+        coefficientReception: 1,
+        fournisseurId: null,
+        receptionId: null,
+        lotTechnique: false,
+        auteurId: 'usr-admin-p1',
+        pieceOrigineType: 'RECEPTION',
+        pieceOrigineId: null,
+        motif: null,
+      }),
+    );
+    // Lot 3 et part à régulariser 1 : agrégat 2
+    const avant = (await lireStock()).data.stocks.find((s) => s.id === id) as
+      | (FicheLue & { quantiteARegulariser: number })
+      | undefined;
+    expect(avant).toMatchObject({
+      quantite: 2,
+      quantiteARegulariser: 1,
+      quantiteVendable: 2,
+    });
+
+    const r = (await corriger(id, {
+      variation: -3,
+      lotId: lot.id,
+      motif: 'Boîtes cassées',
+    })) as unknown as {
+      data: FicheLue & { quantiteARegulariser: number };
+      message: string;
+    };
+    // Agrégat -1 en base, jamais négatif en sortie
+    const agregat = await sql(
+      'SELECT "quantite" FROM "AgregatStockProduit" WHERE "stockMedicamentId" = $1',
+      [id],
+    );
+    expect(Number(agregat.rows[0].quantite)).toBe(-1);
+    expect(r.data.quantite).toBe(0);
+    expect(r.data.quantiteARegulariser).toBe(1);
+    expect(r.message).toBe('Stock réduit (nouvelle quantité : 0)');
+
+    // Le lot reste protégé
+    const e = await refus(
+      corriger(id, { variation: -1, lotId: lot.id, motif: 'Casse' }),
+    );
+    expect(e.statut).toBe(409);
+    expect(e.corps.code).toBe('STOCK_LOT_NEGATIF');
+  });
 });

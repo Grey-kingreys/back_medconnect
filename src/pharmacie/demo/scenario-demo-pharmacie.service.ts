@@ -17,6 +17,7 @@ import {
   CLOTURE_FORCEE_MOTIF,
   EVENEMENTS_POSTE_LOT_A,
   EVENEMENTS_POSTE_LOT_B,
+  EVENEMENTS_POSTE_LOT_C,
   FOURNISSEURS_SCENARIO,
   INVENTAIRE_SCENARIO,
   POSTE_SCENARIO,
@@ -213,10 +214,11 @@ export class ScenarioDemoPharmacieService {
     );
     const debutPlage = plage.data.debut;
 
-    // 5. Lot A du poste : caisse S2 de J-2 puis caisse S1 de J-1
+    // 5. Lot A du poste : caisse S2 de J-2 puis caisse S1 de J-1 (S3 : lot C, plus bas)
     const sessions: Record<CleSessionScenario, string> = {
       S1: randomUUID(),
       S2: randomUUID(),
+      S3: randomUUID(),
     };
     const coupures = (c: CoupureScenario[]) =>
       c.map((x) => ({ valeurFaciale: x.valeurFaciale, nombre: x.nombre }));
@@ -360,7 +362,11 @@ export class ScenarioDemoPharmacieService {
       null,
     );
 
-    // 9. Ventes web du jour (poste web par défaut, caisse ouverte automatiquement)
+    // 9. Lot C du poste : caisse S3 du jour, restée ouverte, avec la vente de Ventoline
+    // sans stock, rejouée par le poste (D721)
+    await envoyer(EVENEMENTS_POSTE_LOT_C, true);
+
+    // 9 bis. Ventes web du jour (poste web par défaut, caisse ouverte automatiquement)
     const idsVentes = new Map<string, string>();
     for (const w of VENTES_WEB_SCENARIO) {
       const lignes = await Promise.all(

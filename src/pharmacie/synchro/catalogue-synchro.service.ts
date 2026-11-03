@@ -37,7 +37,9 @@ export interface FicheSynchro {
   coefficientBoite: number;
   uniteMinimale: string;
   deconditionnable: boolean;
+  /** Jamais négative (D719) : le poste affiche 0 et `quantiteARegulariser`. */
   quantite: number;
+  quantiteARegulariser: number;
   lots: LotSynchro[];
 }
 
@@ -256,22 +258,31 @@ export class CatalogueSynchroService {
       lotsParFiche.set(lot.stockMedicamentId, liste);
     }
 
-    const fichesSynchro: FicheSynchro[] = lue.fiches.map((f) => ({
-      stockId: f.id,
-      medicamentId: f.medicament.id,
-      nom: f.medicament.nom,
-      nomGenerique: f.medicament.nomGenerique,
-      categorie: f.medicament.categorie,
-      formes: f.medicament.formes,
-      ordonnanceRequise: f.medicament.ordonnanceRequise,
-      prixUnitaire: f.prixUnitaire,
-      prixUnite: f.prixUnite,
-      coefficientBoite: f.coefficientBoite,
-      uniteMinimale: f.uniteMinimale,
-      deconditionnable: f.deconditionnable,
-      quantite: quantites.get(f.id) ?? 0,
-      lots: (lotsParFiche.get(f.id) ?? []).sort(comparerLots),
-    }));
+    const fichesSynchro: FicheSynchro[] = lue.fiches.map((f) => {
+      const lotsFiche = (lotsParFiche.get(f.id) ?? []).sort(comparerLots);
+      const agregat = quantites.get(f.id) ?? 0;
+      const sommeLots = lotsFiche.reduce(
+        (somme, l) => somme + Math.max(0, l.solde),
+        0,
+      );
+      return {
+        stockId: f.id,
+        medicamentId: f.medicament.id,
+        nom: f.medicament.nom,
+        nomGenerique: f.medicament.nomGenerique,
+        categorie: f.medicament.categorie,
+        formes: f.medicament.formes,
+        ordonnanceRequise: f.medicament.ordonnanceRequise,
+        prixUnitaire: f.prixUnitaire,
+        prixUnite: f.prixUnite,
+        coefficientBoite: f.coefficientBoite,
+        uniteMinimale: f.uniteMinimale,
+        deconditionnable: f.deconditionnable,
+        quantite: Math.max(0, agregat),
+        quantiteARegulariser: Math.max(0, sommeLots - agregat),
+        lots: lotsFiche,
+      };
+    });
     fichesSynchro.sort(
       (a, b) =>
         a.nom.localeCompare(b.nom, 'fr') ||

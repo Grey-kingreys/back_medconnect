@@ -12,6 +12,8 @@ import { ReceptionsService } from 'src/pharmacie/receptions/receptions.service';
 import { MouvementsStockService } from 'src/pharmacie/stock/mouvements-stock.service';
 import type { CreerReceptionDto } from 'src/pharmacie/dto/receptions.dto';
 import type { CreerVenteDto } from 'src/pharmacie/dto/vente.dto';
+import { PointsDeVenteService } from 'src/pharmacie/points-de-vente.service';
+import { SynchroService } from 'src/pharmacie/synchro/synchro.service';
 import { VenteService } from 'src/pharmacie/vente.service';
 import {
   appliquerMigrations,
@@ -23,6 +25,7 @@ import {
   supprimerBaseDeTest,
 } from './harnais';
 import { chargerFormatActuel } from './fixtures/format-actuel';
+import { rejeuParDefaut } from './rejeu-provisoire';
 
 async function refus<T>(
   promesse: Promise<T>,
@@ -108,6 +111,7 @@ describe('Alertes de péremption et rapport de marge, sur base de test (PB16a)',
   let base: BaseDeTest | undefined;
   let prisma: PrismaService;
   let service: VenteService;
+  let venteParRejeu: ReturnType<typeof rejeuParDefaut>;
   let receptions: ReceptionsService;
   let inventaires: InventairesService;
   let rapports: RapportsService;
@@ -170,6 +174,14 @@ describe('Alertes de péremption et rapport de marge, sur base de test (PB16a)',
       mouvements,
       sessions,
     );
+    venteParRejeu = rejeuParDefaut({
+      synchro: new SynchroService(prisma, acces, mouvements, sessions),
+      postes: new PointsDeVenteService(prisma, acces),
+      structureId: PHARMACIE,
+      vendeurId: VENDEUR,
+      responsableId: RESPONSABLE,
+      appareilId: 'desktop-pb20-rapports',
+    });
     receptions = new ReceptionsService(prisma, acces, mouvements, permissions);
     inventaires = new InventairesService(prisma, acces, mouvements);
     rapports = new RapportsService(prisma, acces, permissions);
@@ -475,7 +487,8 @@ describe('Alertes de péremption et rapport de marge, sur base de test (PB16a)',
     const { stockId } = await nouvelleFiche({ prix: 2000, coef: 1 });
 
     const avantVente = await rapportDuJour();
-    await vendre([{ stockId, quantite: 2 }]);
+    // Vente sans stock : seul le rejeu d'un poste l'accepte (prix du ticket : 2000)
+    await venteParRejeu({ stockId, nombre: 2, prixUnitaire: 2000 });
     const provisoire = await rapportDuJour();
     expect(provisoire.provisoires.nombreLignes).toBe(
       avantVente.provisoires.nombreLignes + 1,

@@ -24,6 +24,8 @@ import { MouvementsStockService } from 'src/pharmacie/stock/mouvements-stock.ser
 import type { CreerInventaireDto } from 'src/pharmacie/dto/inventaires.dto';
 import type { CreerReceptionDto } from 'src/pharmacie/dto/receptions.dto';
 import type { CreerVenteDto } from 'src/pharmacie/dto/vente.dto';
+import { PointsDeVenteService } from 'src/pharmacie/points-de-vente.service';
+import { SynchroService } from 'src/pharmacie/synchro/synchro.service';
 import { VenteService } from 'src/pharmacie/vente.service';
 import {
   appliquerMigrations,
@@ -35,6 +37,7 @@ import {
   supprimerBaseDeTest,
 } from './harnais';
 import { chargerFormatActuel } from './fixtures/format-actuel';
+import { rejeuParDefaut } from './rejeu-provisoire';
 
 async function refus<T>(
   promesse: Promise<T>,
@@ -118,6 +121,7 @@ describe('Inventaire par lot, sur base de test (PB15b)', () => {
   let base: BaseDeTest | undefined;
   let prisma: PrismaService;
   let service: VenteService;
+  let venteParRejeu: ReturnType<typeof rejeuParDefaut>;
   let receptions: ReceptionsService;
   let mouvements: MouvementsStockService;
   let inventaires: InventairesService;
@@ -177,6 +181,14 @@ describe('Inventaire par lot, sur base de test (PB15b)', () => {
       mouvements,
       sessions,
     );
+    venteParRejeu = rejeuParDefaut({
+      synchro: new SynchroService(prisma, acces, mouvements, sessions),
+      postes: new PointsDeVenteService(prisma, acces),
+      structureId: PHARMACIE,
+      vendeurId: VENDEUR,
+      responsableId: RESPONSABLE,
+      appareilId: 'desktop-pb20-inventaire',
+    });
     receptions = new ReceptionsService(prisma, acces, mouvements, permissions);
     inventaires = new InventairesService(prisma, acces, mouvements);
     pv1 = await pointDeVente(PHARMACIE);
@@ -678,12 +690,15 @@ describe('Inventaire par lot, sur base de test (PB15b)', () => {
     const { stockId } = await nouvelleFiche({ tolerance: 10 });
     const lotId = lotDe(await recevoirBoites(stockId, 5));
     await vendre(stockId, 5);
-    const v2 = await vendre(stockId, 2);
+    // La seconde vente se fait sans stock : seul le rejeu d'un poste l'accepte
+    const v2 = await venteParRejeu({ stockId, nombre: 2 });
     expect(await soldeProduit(stockId)).toBe(-2);
 
     const r = await inventorier([{ stockId, lotId, quantiteComptee: 3 }]);
+    // Le théorique n'est jamais exposé négatif (D717) ; l'écart reste signé
     expect(r.data.lignes[0]).toMatchObject({
-      quantiteTheorique: -2,
+      quantiteTheorique: 0,
+      quantiteARegulariser: 2,
       ecart: 5,
       sousTolerance: true,
     });
@@ -721,7 +736,7 @@ describe('Inventaire par lot, sur base de test (PB15b)', () => {
     const { stockId } = await nouvelleFiche();
     const lotId = lotDe(await recevoirBoites(stockId, 2));
     await vendre(stockId, 2);
-    const v2 = await vendre(stockId, 2);
+    const v2 = await venteParRejeu({ stockId, nombre: 2 });
     await receptions.corrigerDateLot(
       PHARMACIE,
       RESPONSABLE,
@@ -741,7 +756,7 @@ describe('Inventaire par lot, sur base de test (PB15b)', () => {
     const { stockId } = await nouvelleFiche();
     const lotId = lotDe(await recevoirBoites(stockId, 1));
     await vendre(stockId, 1);
-    const v2 = await vendre(stockId, 2);
+    const v2 = await venteParRejeu({ stockId, nombre: 2 });
     await annuler(v2.data.id);
     const lire = async () =>
       (

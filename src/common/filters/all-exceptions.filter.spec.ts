@@ -126,6 +126,39 @@ describe('AllExceptionsFilter', () => {
     ]);
   });
 
+  it('recopie unite et disponibleUm du 409 STOCK_INSUFFISANT, sans autre clé', () => {
+    filtre.catch(
+      new ConflictException({
+        message: 'Stock insuffisant.',
+        code: 'STOCK_INSUFFISANT',
+        details: [
+          {
+            stockId: 's1',
+            nom: 'Doliprane',
+            unite: 'BOITE',
+            demande: 2,
+            disponible: 1,
+            disponibleUm: 35,
+            interne: 'x',
+          },
+          { stockId: 's2', unite: 12, disponibleUm: '3' },
+        ],
+      }),
+      host,
+    );
+    expect(corpsRenvoye().details).toEqual([
+      {
+        stockId: 's1',
+        nom: 'Doliprane',
+        unite: 'BOITE',
+        demande: 2,
+        disponible: 1,
+        disponibleUm: 35,
+      },
+      { stockId: 's2' },
+    ]);
+  });
+
   it('recopie les lots périmés assainis du 409 SORTIE_MANUELLE_REQUISE', () => {
     filtre.catch(
       new ConflictException({

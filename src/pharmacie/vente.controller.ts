@@ -57,7 +57,7 @@ export class VenteController {
   @ApiResponse({
     status: 201,
     description:
-      "Vente enregistrée (ou rejouée avec rejeu: true). data : id, numero, statut, createdAt, total, ordonnanceVerifiee, clientNom, clientTelephone, vendeur { id, nom }, annuleeLe, annuleeParId, motifAnnulation, typePiece, numeroTicket, jourMetier, provisoire, poste { id, code }, session { id, ouverteAutomatiquement }, paiements [ { id, mode, libelle, montant, reference, montantRecu, rendu } ], annulation, venteOrigine, motif, lignes [ { id, stockId, medicamentId, nomMedicament, prixUnitaire, quantite, sousTotal, uniteAffichee, nombreAffiche, coefficientApplique, allocations [ ... ] } ], pharmacie { id, nom, adresse, ville, telephone, logoUrl }. Les coûts ne sont renvoyés qu'avec la permission marge:read.",
+      "Vente enregistrée (ou rejouée avec rejeu: true), jamais au-delà du stock vendable (sinon 409 STOCK_INSUFFISANT). data : id, numero, statut, createdAt, total, ordonnanceVerifiee, clientNom, clientTelephone, vendeur { id, nom }, annuleeLe, annuleeParId, motifAnnulation, typePiece, numeroTicket, jourMetier, provisoire, poste { id, code }, session { id, ouverteAutomatiquement }, paiements [ { id, mode, libelle, montant, reference, montantRecu, rendu } ], annulation, venteOrigine, motif, lignes [ { id, stockId, medicamentId, nomMedicament, prixUnitaire, quantite, sousTotal, uniteAffichee, nombreAffiche, coefficientApplique, allocations [ ... ] } ], pharmacie { id, nom, adresse, ville, telephone, logoUrl }. Les coûts ne sont renvoyés qu'avec la permission marge:read.",
   })
   @ApiResponse({
     status: 400,
@@ -72,7 +72,7 @@ export class VenteController {
   @ApiResponse({
     status: 409,
     description:
-      'Il ne reste que des lots périmés (SORTIE_MANUELLE_REQUISE, lots dans details), lot épuisé (STOCK_LOT_NEGATIF), poste inconnu (POSTE_INCONNU), caisse d’un autre utilisateur (SESSION_AUTRE_UTILISATEUR) ou appareil d’un autre type (POSTE_TYPE_DIFFERENT).',
+      'Stock insuffisant (STOCK_INSUFFISANT : details [ { stockId, nom, unite, demande, disponible, disponibleUm } ], le stock restant est dans le message), il ne reste que des lots périmés (SORTIE_MANUELLE_REQUISE, lots dans details), lot épuisé (STOCK_LOT_NEGATIF), poste inconnu (POSTE_INCONNU), caisse d’un autre utilisateur (SESSION_AUTRE_UTILISATEUR) ou appareil d’un autre type (POSTE_TYPE_DIFFERENT).',
   })
   creerVente(
     @Req() req: RequestWithUser,

@@ -23,9 +23,9 @@ const BILAN_SCENARIO = {
   receptions: 3,
   lotsRepris: 1,
   inventaires: 1,
-  evenementsAppliques: 16,
+  evenementsAppliques: 19,
   clotures: 2,
-  ventesWeb: 3,
+  ventesWeb: 2,
   annulations: 1,
   anomaliesTraitees: 1,
 };

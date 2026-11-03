@@ -14,7 +14,7 @@ import { PermissionsService } from 'src/common/rbac/permissions.service';
 import { REDIS_CLIENT } from 'src/common/redis/redis.module';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { VenteController } from './vente.controller';
-import { VenteService } from './vente.service';
+import { messageStockInsuffisant, VenteService } from './vente.service';
 
 /**
  * Routes de vente : vrai PermissionsGuard et vrai PermissionsService (Redis et Prisma
@@ -413,6 +413,56 @@ describe('Ventes en pharmacie (HTTP)', () => {
     expect(texte).not.toContain('coutUnitaire');
   });
 
+  it('4 bis. 409 STOCK_INSUFFISANT : details avec unite et disponibleUm, aucune clé interne', async () => {
+    creerVente.mockRejectedValue(
+      new ConflictException({
+        message: messageStockInsuffisant([
+          {
+            nom: 'Doliprane',
+            disponibleUm: 35,
+            coefficientBoite: 20,
+            uniteMinimale: 'COMPRIME',
+          },
+        ]),
+        code: 'STOCK_INSUFFISANT',
+        details: [
+          {
+            stockId: 'st1',
+            nom: 'Doliprane',
+            unite: 'BOITE',
+            demande: 2,
+            disponible: 1,
+            disponibleUm: 35,
+            interne: 'à ne pas exposer',
+          },
+        ],
+      }),
+    );
+
+    const res = await request(serveur())
+      .post('/pharmacie/s1/ventes')
+      .set('x-essai-user', 'pharmacien')
+      .send(corpsValide);
+
+    expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({
+      code: 'STOCK_INSUFFISANT',
+      message:
+        "Stock insuffisant pour « Doliprane » : il reste 1 boîte et 15 comprimés. Réduisez la quantité, ou faites enregistrer la livraison si ces boîtes viennent d'arriver.",
+      details: [
+        {
+          stockId: 'st1',
+          nom: 'Doliprane',
+          unite: 'BOITE',
+          demande: 2,
+          disponible: 1,
+          disponibleUm: 35,
+        },
+      ],
+    });
+    expect(JSON.stringify(res.body)).not.toContain('interne');
+  });
+
   it('liste et détail : la permission vente:read suffit', async () => {
     const liste = await request(serveur())
       .get('/pharmacie/s1/ventes?date=2026-10-22&page=2')
@@ -428,5 +478,58 @@ describe('Ventes en pharmacie (HTTP)', () => {
       .set('x-essai-user', 'pharmacien');
     expect(detail.status).toBe(200);
     expect(detailVente).toHaveBeenCalledWith('s1', 'v1', 'pharmacien');
+  });
+});
+
+describe('messageStockInsuffisant (D715, D727)', () => {
+  it('un médicament : stock restant en boîtes et unités', () => {
+    expect(
+      messageStockInsuffisant([
+        {
+          nom: 'Doliprane',
+          disponibleUm: 35,
+          coefficientBoite: 20,
+          uniteMinimale: 'COMPRIME',
+        },
+      ]),
+    ).toBe(
+      "Stock insuffisant pour « Doliprane » : il reste 1 boîte et 15 comprimés. Réduisez la quantité, ou faites enregistrer la livraison si ces boîtes viennent d'arriver.",
+    );
+  });
+
+  it('un médicament sans reste : il ne reste rien', () => {
+    expect(
+      messageStockInsuffisant([
+        {
+          nom: 'Ventoline',
+          disponibleUm: 0,
+          coefficientBoite: 1,
+          uniteMinimale: 'UNITE',
+        },
+      ]),
+    ).toBe(
+      "Stock insuffisant pour « Ventoline » : il ne reste rien. Réduisez la quantité, ou faites enregistrer la livraison si ces boîtes viennent d'arriver.",
+    );
+  });
+
+  it('plusieurs médicaments, pluriel', () => {
+    expect(
+      messageStockInsuffisant([
+        {
+          nom: 'Doliprane',
+          disponibleUm: 1,
+          coefficientBoite: 1,
+          uniteMinimale: 'UNITE',
+        },
+        {
+          nom: 'Flagyl',
+          disponibleUm: 0,
+          coefficientBoite: 1,
+          uniteMinimale: 'UNITE',
+        },
+      ]),
+    ).toBe(
+      "Stock insuffisant : Doliprane (il reste 1 boîte), Flagyl (il ne reste rien). Réduisez les quantités, ou faites enregistrer la livraison si ces boîtes viennent d'arriver.",
+    );
   });
 });

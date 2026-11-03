@@ -16,6 +16,7 @@ import type {
   ListerAnomaliesDto,
   TraiterAnomalieDto,
 } from '../dto/anomalies.dto';
+import { detailsLisibles } from './details-lisibles';
 
 export const MESSAGE_ANOMALIE_INTROUVABLE = 'Cette anomalie est introuvable.';
 export const MESSAGE_ANOMALIE_DEJA_TRAITEE =
@@ -273,7 +274,7 @@ export class AnomaliesService {
         creeLe: l.creeLe,
         pieceType: l.pieceType,
         pieceId: l.pieceId,
-        details: l.details,
+        details: detailsLisibles(l.type, l.details),
         attribueeA: personne(l.attribueeAId),
         traiteeLe: l.traiteeLe,
         traiteePar: personne(l.traiteeParId),

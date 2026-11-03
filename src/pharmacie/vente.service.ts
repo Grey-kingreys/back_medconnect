@@ -27,6 +27,10 @@ import {
   SessionsCaisseService,
 } from './caisse/sessions-caisse.service';
 import { calculerLigne, type UniteVente } from './domaine/prix';
+import {
+  formaterQuantiteLisible,
+  type UniteMinimaleLisible,
+} from './domaine/quantites';
 import { ecrirePieceVente } from './ecriture-vente';
 import { jourConakry } from './jour-metier';
 import { masquerCouts } from './masquer-couts';
@@ -46,6 +50,7 @@ import { estDoublonSur } from './stock/erreurs-base';
 import {
   allouerLignes,
   cleLigneVente,
+  controlerStockVente,
   deriverAnnulation,
   formaterNumeroTicket,
   lignesInverses,
@@ -106,6 +111,35 @@ export function messageSortieManuelleRequise(noms: string[]): string {
   return noms.length === 1
     ? `Le stock non périmé de « ${noms[0]} » ne suffit pas : il ne reste que des lots périmés. Réduisez la quantité, ou choisissez un lot et indiquez le motif de la sortie.`
     : `Le stock non périmé de ${noms.length} médicaments du panier ne suffit pas : il ne reste que des lots périmés. Réduisez les quantités, ou choisissez un lot et indiquez le motif de chaque sortie.`;
+}
+
+export interface FicheStockInsuffisant {
+  nom: string;
+  /** Reste vendable de la fiche, en unités minimales. */
+  disponibleUm: number;
+  coefficientBoite: number;
+  uniteMinimale: UniteMinimaleLisible;
+}
+
+/** Message du 409 STOCK_INSUFFISANT (D715, D727) : stock restant en boîtes et unités. */
+export function messageStockInsuffisant(
+  fiches: readonly FicheStockInsuffisant[],
+): string {
+  const reste = (f: FicheStockInsuffisant) =>
+    f.disponibleUm === 0
+      ? 'il ne reste rien'
+      : `il reste ${formaterQuantiteLisible(f.disponibleUm, f.coefficientBoite, f.uniteMinimale)}`;
+  if (fiches.length === 1) {
+    return `Stock insuffisant pour « ${fiches[0].nom} » : ${reste(fiches[0])}. Réduisez la quantité, ou faites enregistrer la livraison si ces boîtes viennent d'arriver.`;
+  }
+  const liste = fiches
+    .map((f) =>
+      f.disponibleUm === 0
+        ? `${f.nom} (il ne reste rien)`
+        : `${f.nom} (${reste(f)})`,
+    )
+    .join(', ');
+  return `Stock insuffisant : ${liste}. Réduisez les quantités, ou faites enregistrer la livraison si ces boîtes viennent d'arriver.`;
 }
 
 export function messagePaiementsIncoherents(
@@ -691,9 +725,50 @@ export class VenteService {
         : null,
     }));
     const allouees = allouerLignes(jour, aAllouer, lotsParFiche);
-    const aSortieManuelle = allouees.filter(
-      (a) => a.resteProvisoire > 0 && a.lotsPerimesDisponibles.length > 0,
-    );
+    // Contrôle du stock vendable, sous les verrous (D713 à D715) : d'abord le
+    // stock insuffisant, puis la sortie manuelle requise.
+    const { insuffisantes, sortiesManuelles: aSortieManuelle } =
+      controlerStockVente({
+        lignes: lignesCalculees.map((c, index) => ({
+          index,
+          stockMedicamentId: c.fiche.id,
+          nom: c.fiche.medicament.nom,
+          unite: c.calcul.uniteAffichee,
+          nombre: c.ligne.quantite,
+          quantiteUm: c.calcul.quantiteUm,
+          coefficientLigne:
+            c.calcul.uniteAffichee === 'UNITE'
+              ? 1
+              : c.calcul.coefficientApplique,
+          sortieManuelle: Boolean(c.ligne.sortieManuelle),
+        })),
+        allouees,
+        soldeProduit: avantParFiche,
+      });
+    if (insuffisantes.length > 0) {
+      const fichesEnCause = new Map<string, FicheStockInsuffisant>();
+      for (const i of insuffisantes) {
+        const f = parId.get(i.stockMedicamentId)!;
+        fichesEnCause.set(f.id, {
+          nom: f.medicament.nom,
+          disponibleUm: i.disponibleUm,
+          coefficientBoite: f.coefficientBoite,
+          uniteMinimale: f.uniteMinimale,
+        });
+      }
+      throw new ConflictException({
+        message: messageStockInsuffisant([...fichesEnCause.values()]),
+        code: 'STOCK_INSUFFISANT',
+        details: insuffisantes.map((i) => ({
+          stockId: i.stockMedicamentId,
+          nom: i.nom,
+          unite: i.unite,
+          demande: i.demande,
+          disponible: i.disponible,
+          disponibleUm: i.disponibleUm,
+        })),
+      });
+    }
     if (aSortieManuelle.length > 0) {
       const noms = aSortieManuelle.map(
         (a) => lignesCalculees[a.index].fiche.medicament.nom,
@@ -723,6 +798,7 @@ export class VenteService {
         posteCode,
         sessionId,
         typePiece: 'VENTE',
+        provisoireAutorise: false,
         numero,
         numeroTicket: Number(numeroTicket),
         jourMetier,
@@ -746,7 +822,6 @@ export class VenteService {
     );
 
     // 17. Audit
-    const provisoire = allouees.some((a) => a.resteProvisoire > 0);
     await tx.auditLog.create({
       data: {
         userId: user.id,
@@ -758,7 +833,6 @@ export class VenteService {
           numero,
           total,
           nombreLignes: lignesCalculees.length,
-          provisoire,
           sessionOuverteAutomatiquement: ouverteAutomatiquement,
         },
       },

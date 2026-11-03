@@ -22,10 +22,12 @@ import {
 import { cheminsCout } from 'src/pharmacie/masquer-couts';
 import { ReceptionsService } from 'src/pharmacie/receptions/receptions.service';
 import { verifierStock } from 'src/pharmacie/stock/commandes-stock';
+import { jourVersDate } from 'src/pharmacie/stock/lecture-stock';
 import { MouvementsStockService } from 'src/pharmacie/stock/mouvements-stock.service';
 import type { CreerSortieStockDto } from 'src/pharmacie/dto/inventaires.dto';
 import type { CreerReceptionDto } from 'src/pharmacie/dto/receptions.dto';
-import type { CreerVenteDto } from 'src/pharmacie/dto/vente.dto';
+import { PointsDeVenteService } from 'src/pharmacie/points-de-vente.service';
+import { SynchroService } from 'src/pharmacie/synchro/synchro.service';
 import { VenteService } from 'src/pharmacie/vente.service';
 import {
   appliquerMigrations,
@@ -37,6 +39,7 @@ import {
   supprimerBaseDeTest,
 } from './harnais';
 import { chargerFormatActuel } from './fixtures/format-actuel';
+import { rejeuParDefaut } from './rejeu-provisoire';
 
 async function refus<T>(
   promesse: Promise<T>,
@@ -109,6 +112,7 @@ describe("Sorties manuelles et file d'anomalies, sur base de test (PB15a)", () =
   let base: BaseDeTest | undefined;
   let prisma: PrismaService;
   let service: VenteService;
+  let venteParRejeu: ReturnType<typeof rejeuParDefaut>;
   let receptions: ReceptionsService;
   let mouvements: MouvementsStockService;
   let sorties: SortiesStockService;
@@ -165,6 +169,14 @@ describe("Sorties manuelles et file d'anomalies, sur base de test (PB15a)", () =
       sessions,
     );
     receptions = new ReceptionsService(prisma, acces, mouvements, permissions);
+    venteParRejeu = rejeuParDefaut({
+      synchro: new SynchroService(prisma, acces, mouvements, sessions),
+      postes: new PointsDeVenteService(prisma, acces),
+      structureId: PHARMACIE,
+      vendeurId: VENDEUR,
+      responsableId: RESPONSABLE,
+      appareilId: 'desktop-pb20-sorties',
+    });
     sorties = new SortiesStockService(prisma, acces, mouvements);
     anomalies = new AnomaliesService(prisma, acces);
     pv1 = await pointDeVente(PHARMACIE);
@@ -252,15 +264,15 @@ describe("Sorties manuelles et file d'anomalies, sur base de test (PB15a)", () =
       ],
     });
 
+  /**
+   * Vente sans stock (provisoire) : seul le rejeu d'un poste l'accepte (D713.2). La
+   * route en ligne la refuse.
+   */
   async function vendre(stockId: string, quantite: number) {
-    const dto: CreerVenteDto = { lignes: [{ stockId, quantite }] };
-    return (await service.creerVente(
-      PHARMACIE,
-      VENDEUR,
-      dto,
-      undefined,
-      '127.0.0.1',
-    )) as unknown as VenteRep;
+    return (await venteParRejeu({
+      stockId,
+      nombre: quantite,
+    })) as unknown as VenteRep;
   }
 
   async function annuler(venteId: string) {
@@ -405,6 +417,60 @@ describe("Sorties manuelles et file d'anomalies, sur base de test (PB15a)", () =
       pieceOrigineId: s.data.id,
       evenementId: 'sortie:' + s.data.id,
     });
+  });
+
+  it('sortie manuelle avec une part à régulariser : agrégat négatif permis, sortie écrêtée à 0 avec la part à part (D717, D718)', async () => {
+    const { stockId } = await nouvelleFiche();
+    // Une unité vendue sans stock par le rejeu, puis un lot de 3 sans rattachement :
+    // lot 3, agrégat 2, une unité à régulariser
+    await venteParRejeu({ stockId, nombre: 1 });
+    const { lot } = await prisma.$transaction((tx) =>
+      mouvements.creerLot(tx, {
+        stockMedicamentId: stockId,
+        pointDeVenteId: pv1,
+        numeroLot: 'L-PB20',
+        dateExpiration: jourVersDate(jour(60)),
+        quantite: 3,
+        coutUnitaire: 0,
+        coutAchatBoite: null,
+        coefficientReception: 1,
+        fournisseurId: null,
+        receptionId: null,
+        lotTechnique: false,
+        auteurId: RESPONSABLE,
+        pieceOrigineType: 'RECEPTION',
+        pieceOrigineId: null,
+        motif: null,
+      }),
+    );
+
+    const s = (await sortir({
+      stockId,
+      lotId: lot.id,
+      unite: 'UNITE',
+      quantite: 3,
+      raison: 'CASSE',
+    })) as unknown as SortieRep & {
+      data: { soldeProduit: number; quantiteARegulariser: number };
+    };
+
+    expect(await soldeProduit(stockId)).toBe(-1);
+    expect(s.data.soldeLot).toBe(0);
+    expect(s.data.soldeProduit).toBe(0);
+    expect(s.data.quantiteARegulariser).toBe(1);
+
+    // Le lot reste protégé : plus rien à sortir
+    const e = await refus(
+      sortir({
+        stockId,
+        lotId: lot.id,
+        unite: 'UNITE',
+        quantite: 1,
+        raison: 'CASSE',
+      }),
+    );
+    expect(e.statut).toBe(409);
+    expect(e.corps.code).toBe('STOCK_LOT_NEGATIF');
   });
 
   it('raisons : cassé, perdu, retour fournisseur et autre', async () => {
@@ -621,18 +687,14 @@ describe("Sorties manuelles et file d'anomalies, sur base de test (PB15a)", () =
       'UPDATE "StockMedicament" SET "deconditionnable" = true, "prixUnite" = 150 WHERE "id" = $1',
       [stockId],
     );
-    const v = (await service.creerVente(
-      PHARMACIE,
-      VENDEUR,
-      {
-        lignes: [
-          { stockId, quantite: 1 },
-          { stockId, quantite: 3, unite: 'UNITE' },
-        ],
-      },
-      undefined,
-      '127.0.0.1',
-    )) as unknown as VenteRep;
+    // Une boîte et trois unités de la même fiche, sans stock : deux lignes de rejeu
+    const v = (await venteParRejeu({
+      stockId,
+      nombre: 1,
+      unite: 'BOITE',
+      prixUnitaire: 1000,
+      autresLignes: [{ unite: 'UNITE', nombre: 3, prixUnitaire: 150 }],
+    })) as unknown as VenteRep;
     const deLaVente = async () =>
       (await lister({ type: 'STOCK_NEGATIF' })).data.anomalies.filter(
         (x) => x.pieceId === v.data.id,

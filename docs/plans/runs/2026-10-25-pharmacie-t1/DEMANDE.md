@@ -98,6 +98,8 @@ Chaque poste reçoit une plage de numéros de ticket réservée, attribuée au s
 
 Le stock négatif temporaire est accepté. Une vente ne se bloque jamais parce que le stock local dit zéro, l'anomalie est signalée à la synchronisation et remonte dans une file d'anomalies à traiter par le titulaire. Refuser la vente coûte plus cher que corriger l'écart après.
 
+> Note du 2026-11-03 : révisé par le porteur, voir D713 dans decisions.md. En ligne, la vente au-delà du stock vendable est refusée ; hors ligne, elle reste acceptée ; l'écran n'affiche jamais de quantité négative (« 0 » et « N à régulariser »).
+
 L'allocation de lot est différée dans ce cas précis. Quand aucun lot local ne peut recevoir la sortie, la ligne de vente est enregistrée avec une allocation marquée provisoire, portant le dernier lot connu pour ce produit ou aucun lot, et un coût d'acquisition nul. À la synchronisation, le serveur produit l'allocation définitive selon les règles du chantier 2 et ouvre une anomalie. L'invariant d'égalité entre la somme des allocations et la quantité de la ligne ne s'applique qu'aux lignes dont l'allocation est résolue, et une ligne provisoire est exclue du calcul de marge jusqu'à sa résolution.
 
 La synchronisation est un journal d'événements rejoué dans l'ordre, pas une comparaison d'états. Chaque événement porte un identifiant client stable, un horodatage local, un numéro de séquence par poste et l'identifiant du poste. Le rejeu est idempotent. L'ordre de rejeu est l'ordre de séquence par poste, et les conflits inter postes sont résolus par règle métier explicite et non par le dernier écrivain gagnant.
@@ -249,6 +251,7 @@ Chaque scénario doit être vérifiable par un test automatisé.
 - Un vendeur sans le droit de marge reçoit une réponse serveur sans aucune donnée de coût ni de marge, vérifié au niveau de l'endpoint et pas seulement de l'affichage.
 - Hors ligne, deux postes vendent simultanément, les numéros de ticket ne collisionnent pas, et la synchronisation rejoue les deux journaux sans doublon ni perte.
 - Hors ligne, une vente qui amène le stock local en négatif est acceptée avec une allocation provisoire, et la synchronisation produit l'allocation définitive plus une anomalie exploitable.
+  > Note du 2026-11-03 (CA24) : critère maintenu hors ligne ; l'écran montre 0 et « N à régulariser », jamais un négatif. Voir D713 dans decisions.md.
 - Rejouer deux fois le même journal de synchronisation ne crée aucun mouvement en double.
 - Chaque mouvement de stock, chaque session de caisse, chaque vente et chaque lot porte un identifiant de point de vente non nul.
 

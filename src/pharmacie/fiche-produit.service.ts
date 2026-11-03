@@ -327,13 +327,25 @@ export class FicheProduitService {
       data: {
         ...fiche,
         avertissements: avertissement ? [avertissement] : [],
-        conversion,
+        // Quantités écrêtées à la réponse seulement ; l'audit garde la vérité (D717)
+        conversion: conversion
+          ? {
+              ...conversion,
+              quantiteAvant: Math.max(0, conversion.quantiteAvant),
+              quantiteApres: Math.max(0, conversion.quantiteApres),
+              lots: conversion.lots.map((l) => ({
+                lotId: l.lotId,
+                quantiteAvant: Math.max(0, l.quantiteAvant),
+                quantiteApres: Math.max(0, l.quantiteApres),
+              })),
+            }
+          : null,
       },
       message: !modifiee
         ? MESSAGE_AUCUNE_MODIFICATION
         : conversion && conversion.quantiteAvant !== 0
           ? conversion.mode === 'MULTIPLIER'
-            ? messageStockMultiplie(conversion.quantiteApres)
+            ? messageStockMultiplie(Math.max(0, conversion.quantiteApres))
             : MESSAGE_STOCK_CONSERVE
           : MESSAGE_FICHE_ENREGISTREE,
       success: true,

@@ -32,6 +32,7 @@ describe('calculerEtatStock', () => {
   it('1. aucun lot, solde 0', () => {
     expect(calculerEtatStock(0, [], JOUR)).toEqual({
       quantite: 0,
+      quantiteARegulariser: 0,
       quantiteVendable: 0,
       dateExpiration: null,
       reliquat: [],
@@ -112,6 +113,52 @@ describe('calculerEtatStock', () => {
     const etat = calculerEtatStock(0, [lot('Z', '2027-01-01', 0)], JOUR);
     expect(etat.lots).toEqual([]);
     expect(etat.dateExpiration).toBeNull();
+  });
+});
+
+describe('stock jamais négatif en lecture (D713, D714, D717)', () => {
+  it('11. agrégat -1 sans lot : vérité -1, vendable 0, une unité à régulariser', () => {
+    const etat = calculerEtatStock(-1, [], JOUR);
+    expect(etat.quantite).toBe(-1);
+    expect(etat.quantiteARegulariser).toBe(1);
+    expect(etat.quantiteVendable).toBe(0);
+    const fiche = avecStock({ id: 'f', archiveLe: null }, etat);
+    expect(fiche.quantite).toBe(0);
+    expect(fiche.quantiteARegulariser).toBe(1);
+    expect(fiche.disponible).toBe(false);
+  });
+
+  it('12. lots 3 et part à régulariser 1 : agrégat 2, vendable 2, N 1', () => {
+    const etat = calculerEtatStock(2, [lot('A', '2027-01-01', 3)], JOUR);
+    expect(etat.quantite).toBe(2);
+    expect(etat.quantiteARegulariser).toBe(1);
+    expect(etat.quantiteVendable).toBe(2);
+  });
+
+  it('13. périmés 5 et part 3 : quantite 2, N 3, vendable 0', () => {
+    const etat = calculerEtatStock(2, [lot('P', '2026-01-01', 5)], JOUR);
+    expect(etat.quantite).toBe(2);
+    expect(etat.quantiteARegulariser).toBe(3);
+    expect(etat.quantiteVendable).toBe(0);
+  });
+
+  it('14. aucune part à régulariser quand l agrégat couvre les lots', () => {
+    const etat = calculerEtatStock(5, [lot('A', '2027-01-01', 5)], JOUR);
+    expect(etat.quantiteARegulariser).toBe(0);
+    expect(etat.quantiteVendable).toBe(5);
+  });
+
+  it('15. avecStock n expose jamais une quantité négative, avecStockPublic ne montre rien du négatif', () => {
+    for (const solde of [-7, -1, 0]) {
+      const etat = calculerEtatStock(solde, [lot('A', '2027-01-01', 2)], JOUR);
+      const fiche = avecStock({ id: 'f', archiveLe: null }, etat);
+      expect(fiche.quantite).toBeGreaterThanOrEqual(0);
+      expect(fiche.quantiteARegulariser).toBeGreaterThanOrEqual(0);
+      expect(fiche.quantiteVendable).toBeGreaterThanOrEqual(0);
+      const publique = avecStockPublic({ id: 'f' }, etat);
+      expect(publique.quantite).toBeGreaterThanOrEqual(0);
+      expect(publique).not.toHaveProperty('quantiteARegulariser');
+    }
   });
 });
 

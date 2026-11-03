@@ -16,6 +16,7 @@ import { SessionsCaisseService } from 'src/pharmacie/caisse/sessions-caisse.serv
 import { ScenarioDemoPharmacieService } from 'src/pharmacie/demo/scenario-demo-pharmacie.service';
 import { InventairesService } from 'src/pharmacie/inventaires/inventaires.service';
 import { jourConakry, joursAvant } from 'src/pharmacie/jour-metier';
+import { PharmacieService } from 'src/pharmacie/pharmacie.service';
 import { PointsDeVenteService } from 'src/pharmacie/points-de-vente.service';
 import { RapportsService } from 'src/pharmacie/rapports/rapports.service';
 import { ReceptionsService } from 'src/pharmacie/receptions/receptions.service';
@@ -86,9 +87,9 @@ const BILAN_ATTENDU = {
   receptions: 3,
   lotsRepris: 1,
   inventaires: 1,
-  evenementsAppliques: 16,
+  evenementsAppliques: 19,
   clotures: 2,
-  ventesWeb: 3,
+  ventesWeb: 2,
   annulations: 1,
   anomaliesTraitees: 1,
 };
@@ -158,6 +159,8 @@ describe('Jeu démo de pharmacie : création, scénario et purge, sur base de te
   let seeder: DemoSeeder;
   let clotures: ClotureService;
   let rapports: RapportsService;
+  let anomalies: AnomaliesService;
+  let pharmacie: PharmacieService;
 
   let kaloum: string;
   let niger: string;
@@ -194,10 +197,18 @@ describe('Jeu démo de pharmacie : création, scénario et purge, sur base de te
     const sessions = new SessionsCaisseService(prisma, acces, permissions);
     clotures = new ClotureService(prisma, acces);
     rapports = new RapportsService(prisma, acces, permissions);
+    const receptions = new ReceptionsService(
+      prisma,
+      acces,
+      mouvements,
+      permissions,
+    );
+    const inventaires = new InventairesService(prisma, acces, mouvements);
+    anomalies = new AnomaliesService(prisma, acces);
     const scenario = new ScenarioDemoPharmacieService(
       prisma,
-      new ReceptionsService(prisma, acces, mouvements, permissions),
-      new InventairesService(prisma, acces, mouvements),
+      receptions,
+      inventaires,
       new PointsDeVenteService(prisma, acces),
       new SynchroService(prisma, acces, mouvements, sessions),
       clotures,
@@ -210,8 +221,17 @@ describe('Jeu démo de pharmacie : création, scénario et purge, sur base de te
         mouvements,
         sessions,
       ),
-      new AnomaliesService(prisma, acces),
+      anomalies,
       mouvements,
+    );
+    pharmacie = new PharmacieService(
+      prisma,
+      notifications,
+      acces,
+      mouvements,
+      permissions,
+      receptions,
+      inventaires,
     );
     seeder = new DemoSeeder(
       prisma,
@@ -482,8 +502,9 @@ describe('Jeu démo de pharmacie : création, scénario et purge, sur base de te
         [kaloum],
       )
     ).rows;
-    expect(ventes).toHaveLength(3);
-    const [w1, w2, w3] = ventes;
+    // Deux ventes web seulement : la vente sans stock passe par le poste (D721)
+    expect(ventes).toHaveLength(2);
+    const [w1, w3] = ventes;
     for (const w of [w1, w3]) {
       expect(w).toMatchObject({
         statut: 'OUVERTE',
@@ -491,6 +512,48 @@ describe('Jeu démo de pharmacie : création, scénario et purge, sur base de te
         jour: jour(0),
       });
     }
+
+    // Vente de Ventoline : rejouée par le poste, ticket 10, sur la caisse S3 du jour
+    const d = await posteDesktop();
+    const debut = Number(
+      (
+        await sql('SELECT "debut" FROM "PlageTicket" WHERE "posteId" = $1', [
+          d.id,
+        ])
+      ).rows[0].debut,
+    );
+    const w2 = (
+      await sql(
+        `SELECT v."id", v."numero", v."typePiece"::text AS "typePiece", v."total", to_char(v."jourMetier", 'YYYY-MM-DD') AS "jour", s."id" AS "sessionId", s."statut"::text AS "statut", to_char(s."jourMetier", 'YYYY-MM-DD') AS "jourSession", s."utilisateurId"
+         FROM "Vente" v JOIN "SessionCaisse" s ON s."id" = v."sessionCaisseId"
+         WHERE v."posteId" = $1 AND v."numeroTicket" = $2`,
+        [d.id, debut + 9],
+      )
+    ).rows[0];
+    expect(w2).toMatchObject({
+      typePiece: 'VENTE',
+      total: 60000,
+      jour: jour(0),
+      statut: 'OUVERTE',
+      jourSession: jour(0),
+      utilisateurId: vendeur,
+    });
+    expect((await sessionDuJour(String(d.id), jour(0))).id).toBe(w2.sessionId);
+    // Le paiement Orange Money est dans la caisse du poste, plus dans la caisse web
+    const paiementsW2 = (
+      await sql(
+        `SELECT m."code" AS "mode", p."montant", p."referenceExterne" FROM "Paiement" p JOIN "ModePaiement" m ON m."id" = p."modePaiementId" WHERE p."venteId" = $1`,
+        [w2.id],
+      )
+    ).rows;
+    expect(paiementsW2).toEqual([
+      { mode: 'ORANGE_MONEY', montant: 60000, referenceExterne: 'OM-7815530' },
+    ]);
+    const orangeWeb = await compter(
+      `SELECT count(*)::int AS n FROM "Paiement" p JOIN "Vente" v ON v."id" = p."venteId" JOIN "Poste" po ON po."id" = v."posteId" JOIN "ModePaiement" m ON m."id" = p."modePaiementId" WHERE v."structureId" = $1 AND po."type" = 'WEB' AND m."code" = 'ORANGE_MONEY'`,
+      [kaloum],
+    );
+    expect(orangeWeb).toBe(0);
 
     const allocations = await sql(
       `SELECT a."statut"::text AS "statut" FROM "AllocationLot" a JOIN "LigneVente" l ON l."id" = a."ligneVenteId" WHERE l."venteId" = $1`,
@@ -507,8 +570,34 @@ describe('Jeu démo de pharmacie : création, scénario et purge, sur base de te
     expect(anomalieW2[0].attribueeAId).toBe(titulaire);
     const details = anomalieW2[0].details as Record<string, unknown>;
     expect(details.message).toBe(
-      `Ventoline 100 µg : 1 unité(s) vendue(s) sans stock disponible (vente ${String(w2.numero)}, poste ${details.posteCode as string}, Ousmane Keita). Le stock de ce médicament est à -1 unité(s) : enregistrez la réception ou l'inventaire qui rattachera ces unités à un lot.`,
+      `Ventoline 100 µg : 1 unité(s) vendue(s) sans stock disponible (vente ${String(w2.numero)}, poste ${details.posteCode as string}, Ousmane Keita). Le stock de ce médicament affiche 0 unité(s) et cette vente reste à régulariser : enregistrez la réception ou l'inventaire qui rattachera ces unités à un lot.`,
     );
+    // Le stockage garde la vérité, la lecture écrête (D720)
+    expect(details.soldeProduit).toBe(-1);
+    const lues = (
+      await anomalies.lister(kaloum, titulaire, { type: 'STOCK_NEGATIF' })
+    ).data.anomalies.filter((a) => a.pieceId === w2.id);
+    expect(lues).toHaveLength(1);
+    expect((lues[0].details as Record<string, unknown>).soldeProduit).toBe(0);
+
+    // Lecture du stock : jamais négatif, une boîte à régulariser (D713, D717)
+    const lecture = (await pharmacie.getStockPharmacie(kaloum, titulaire))
+      .data as unknown as {
+      stocks: {
+        quantite: number;
+        quantiteARegulariser: number;
+        medicament: { nom: string };
+      }[];
+      alertes: { rupture: { nom: string; quantiteARegulariser: number }[] };
+    };
+    const ventoline = lecture.stocks.find(
+      (s) => s.medicament.nom === 'Ventoline 100 µg',
+    );
+    expect(ventoline).toMatchObject({ quantite: 0, quantiteARegulariser: 1 });
+    expect(
+      lecture.alertes.rupture.find((r) => r.nom === 'Ventoline 100 µg'),
+    ).toMatchObject({ quantiteARegulariser: 1 });
+    expect(lecture.stocks.every((s) => s.quantite >= 0)).toBe(true);
 
     const annulation = (
       await sql(
@@ -562,7 +651,7 @@ describe('Jeu démo de pharmacie : création, scénario et purge, sur base de te
     // La vente T5 touche le lot d'ibuprofène reçu sans coût : non valorisable.
     expect(marge.nonValorisable.nombreVentes).toBe(1);
     expect(marge.nonValorisable.chiffreAffaires).toBe(12000);
-    // La vente web W2 de Ventoline n'a aucun lot : comptée à part, provisoire.
+    // La vente de Ventoline, rejouée par le poste, n'a aucun lot : comptée à part, provisoire.
     expect(marge.provisoires.nombreLignes).toBe(1);
     expect(marge.provisoires.chiffreAffaires).toBe(60000);
     expect(marge.chiffreAffairesValorise).toBeGreaterThan(0);
@@ -624,7 +713,7 @@ describe('Jeu démo de pharmacie : création, scénario et purge, sur base de te
       actif: true,
       code: 'D1',
       libelle: 'Comptoir principal',
-      derniereSequenceAppliquee: 16,
+      derniereSequenceAppliquee: 19,
     });
     expect((d.dernierEtat as Record<string, unknown>).fileVide).toBe(true);
     const plages = (
@@ -641,7 +730,7 @@ describe('Jeu démo de pharmacie : création, scénario et purge, sur base de te
         [d.id],
       )
     ).rows;
-    expect(evenements).toHaveLength(16);
+    expect(evenements).toHaveLength(19);
     expect(evenements.every((e) => e.statut === 'APPLIQUE')).toBe(true);
   });
 

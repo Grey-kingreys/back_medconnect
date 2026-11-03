@@ -22,6 +22,8 @@ import type {
 } from 'src/pharmacie/dto/pharmacie.dto';
 import type { CreerReceptionDto } from 'src/pharmacie/dto/receptions.dto';
 import type { CreerVenteDto } from 'src/pharmacie/dto/vente.dto';
+import { PointsDeVenteService } from 'src/pharmacie/points-de-vente.service';
+import { SynchroService } from 'src/pharmacie/synchro/synchro.service';
 import { VenteService } from 'src/pharmacie/vente.service';
 import {
   appliquerMigrations,
@@ -33,6 +35,7 @@ import {
   supprimerBaseDeTest,
 } from './harnais';
 import { chargerFormatActuel } from './fixtures/format-actuel';
+import { rejeuParDefaut } from './rejeu-provisoire';
 
 async function refus<T>(
   promesse: Promise<T>,
@@ -106,6 +109,7 @@ describe("Import Excel d'un inventaire, sur base de test (PB15c)", () => {
   let base: BaseDeTest | undefined;
   let prisma: PrismaService;
   let service: VenteService;
+  let venteParRejeu: ReturnType<typeof rejeuParDefaut>;
   let receptions: ReceptionsService;
   let pharmacie: PharmacieService;
   let pv1: string;
@@ -159,6 +163,14 @@ describe("Import Excel d'un inventaire, sur base de test (PB15c)", () => {
       mouvements,
       sessions,
     );
+    venteParRejeu = rejeuParDefaut({
+      synchro: new SynchroService(prisma, acces, mouvements, sessions),
+      postes: new PointsDeVenteService(prisma, acces),
+      structureId: PHARMACIE,
+      vendeurId: VENDEUR,
+      responsableId: RESPONSABLE,
+      appareilId: 'desktop-pb20-import-inventaire',
+    });
     receptions = new ReceptionsService(prisma, acces, mouvements, permissions);
     pharmacie = new PharmacieService(
       prisma,
@@ -525,7 +537,8 @@ describe("Import Excel d'un inventaire, sur base de test (PB15c)", () => {
       })
     ).data.lots[0].id;
     await vendre(f.stockId, 2);
-    const v2 = await vendre(f.stockId, 1);
+    // Vente sans stock : seul le rejeu d'un poste l'accepte
+    const v2 = await venteParRejeu({ stockId: f.stockId, nombre: 1 });
     expect(await soldeProduit(f.stockId)).toBe(-1);
 
     // Le lot est épuisé : la ligne le désigne par son numéro
@@ -553,7 +566,7 @@ describe("Import Excel d'un inventaire, sur base de test (PB15c)", () => {
       })
     ).data.lots[0].id;
     await vendre(f.stockId, 2);
-    const v2 = await vendre(f.stockId, 3);
+    const v2 = await venteParRejeu({ stockId: f.stockId, nombre: 3 });
     expect(await soldeProduit(f.stockId)).toBe(-3);
     expect(await soldeLot(lotId)).toBe(0);
     const lotsAvant = await nombreLots();
@@ -564,7 +577,9 @@ describe("Import Excel d'un inventaire, sur base de test (PB15c)", () => {
       statut: 'acceptee',
       lotId,
       nouveauLot: false,
-      quantiteTheorique: -3,
+      // Jamais négatif en sortie (D717) ; l'écart reste signé
+      quantiteTheorique: 0,
+      quantiteARegulariser: 3,
       quantiteComptee: 5,
       ecart: 8,
     });
@@ -577,7 +592,8 @@ describe("Import Excel d'un inventaire, sur base de test (PB15c)", () => {
       nouveauLot: false,
       quantiteAvant: 0,
       quantiteApres: 5,
-      quantiteTheorique: -3,
+      quantiteTheorique: 0,
+      quantiteARegulariser: 3,
       ecart: 8,
     });
     expect(await nombreLots()).toBe(lotsAvant);

@@ -218,6 +218,19 @@ export class SortiesStockService {
       },
       select: { quantite: true },
     });
+    const lotsEnStock = await this.prisma.lotStock.findMany({
+      where: {
+        stockMedicamentId: m.stockMedicamentId,
+        pointDeVenteId: m.pointDeVenteId,
+        agregat: { is: { quantite: { gt: 0 } } },
+      },
+      select: { agregat: { select: { quantite: true } } },
+    });
+    const sommeLots = lotsEnStock.reduce(
+      (somme, l) => somme + (l.agregat?.quantite ?? 0),
+      0,
+    );
+    const soldeProduit = produit?.quantite ?? 0;
     const dateExpiration = m.lot?.dateExpiration
       ? dateVersJour(m.lot.dateExpiration)
       : null;
@@ -234,7 +247,9 @@ export class SortiesStockService {
       motif: m.motif,
       quantite: -m.quantite,
       soldeLot: m.lot?.agregat?.quantite ?? 0,
-      soldeProduit: produit?.quantite ?? 0,
+      // Jamais négatif en sortie (D717) ; la part non couverte est à part
+      soldeProduit: Math.max(0, soldeProduit),
+      quantiteARegulariser: Math.max(0, sommeLots - soldeProduit),
       auteurId: m.auteurId,
       createdAt: m.horodatageServeur,
     };

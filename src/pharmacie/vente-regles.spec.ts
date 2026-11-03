@@ -2,6 +2,7 @@ import type { LotCandidat } from './domaine/selection-lots';
 import {
   allouerLignes,
   cleLigneVente,
+  controlerStockVente,
   deriverAnnulation,
   formaterNumeroTicket,
   lignesInverses,
@@ -10,6 +11,7 @@ import {
   passagesStockBas,
   preparerPaiements,
   type AllocationOrigine,
+  type LigneAControler,
   type LigneOrigine,
   type ModeConnu,
 } from './vente-regles';
@@ -686,5 +688,232 @@ describe('deriverAnnulation', () => {
     });
     expect(etat.statut).toBe('VALIDEE');
     expect(etat.annulation).toBeNull();
+  });
+});
+
+describe('controlerStockVente (D713 à D715)', () => {
+  const FICHE = 'f1';
+  const ligneC = (
+    index: number,
+    o: Partial<LigneAControler> & { quantiteUm: number },
+  ): LigneAControler => ({
+    index,
+    stockMedicamentId: FICHE,
+    nom: 'Doliprane',
+    unite: 'BOITE',
+    nombre: o.quantiteUm,
+    coefficientLigne: 1,
+    sortieManuelle: false,
+    ...o,
+  });
+
+  /** Alloue puis contrôle : `solde` est l'agrégat du produit, `lots` les lots à solde positif. */
+  function controler(
+    lignes: LigneAControler[],
+    lots: LotCandidat[],
+    solde: number,
+    manuelles: Record<number, string> = {},
+  ) {
+    const allouees = allouerLignes(
+      JOUR,
+      lignes.map((l) => ({
+        index: l.index,
+        stockMedicamentId: l.stockMedicamentId,
+        unite: l.unite,
+        quantiteUm: l.quantiteUm,
+        sortieManuelle: manuelles[l.index]
+          ? { lotId: manuelles[l.index], motif: 'Produit retiré' }
+          : null,
+      })),
+      new Map([[FICHE, lots]]),
+    );
+    return controlerStockVente({
+      lignes,
+      allouees,
+      soldeProduit: new Map([[FICHE, solde]]),
+    });
+  }
+
+  it('1. refus simple : stock vide, disponible 0', () => {
+    const r = controler([ligneC(0, { quantiteUm: 1 })], [], 0);
+    expect(r.sortiesManuelles).toEqual([]);
+    expect(r.insuffisantes).toEqual([
+      {
+        index: 0,
+        stockMedicamentId: FICHE,
+        nom: 'Doliprane',
+        unite: 'BOITE',
+        demande: 1,
+        disponible: 0,
+        disponibleUm: 0,
+      },
+    ]);
+  });
+
+  it('2. vente couverte : rien à signaler', () => {
+    const r = controler(
+      [ligneC(0, { quantiteUm: 3 })],
+      [lot('A', 5, { exp: '2027-01-01' })],
+      5,
+    );
+    expect(r).toEqual({ insuffisantes: [], sortiesManuelles: [] });
+  });
+
+  it('3. boîtes et unités : la somme est contrôlée, disponible par ligne', () => {
+    // Coefficient 20, 35 unités en stock (1 boîte et 15 unités)
+    const lots = [lot('A', 35, { exp: '2027-01-01', coef: 20 })];
+    const r = controler(
+      [
+        ligneC(0, { quantiteUm: 20, nombre: 1, coefficientLigne: 20 }),
+        ligneC(1, {
+          quantiteUm: 20,
+          nombre: 20,
+          unite: 'UNITE',
+          coefficientLigne: 1,
+        }),
+      ],
+      lots,
+      35,
+    );
+    expect(r.insuffisantes).toHaveLength(2);
+    // Boîte : 35 - 20 (unités) = 15 unités, soit 0 boîte
+    expect(r.insuffisantes[0]).toMatchObject({
+      index: 0,
+      unite: 'BOITE',
+      demande: 1,
+      disponible: 0,
+      disponibleUm: 35,
+    });
+    // Unités : 35 - 20 (boîte) = 15 unités
+    expect(r.insuffisantes[1]).toMatchObject({
+      index: 1,
+      unite: 'UNITE',
+      demande: 20,
+      disponible: 15,
+      disponibleUm: 35,
+    });
+  });
+
+  it('4. périmés seuls, agrégat positif : sortie manuelle requise', () => {
+    const r = controler(
+      [ligneC(0, { quantiteUm: 2 })],
+      [lot('P', 4, { exp: '2026-01-01' })],
+      4,
+    );
+    expect(r.insuffisantes).toEqual([]);
+    expect(r.sortiesManuelles).toHaveLength(1);
+    expect(r.sortiesManuelles[0].lotsPerimesDisponibles).toHaveLength(1);
+  });
+
+  it('5. stock non périmé partiel et lot périmé : insuffisant, jamais de sortie manuelle', () => {
+    const r = controler(
+      [ligneC(0, { quantiteUm: 5 })],
+      [lot('V', 2, { exp: '2027-01-01' }), lot('P', 4, { exp: '2026-01-01' })],
+      6,
+    );
+    expect(r.sortiesManuelles).toEqual([]);
+    expect(r.insuffisantes).toHaveLength(1);
+    expect(r.insuffisantes[0]).toMatchObject({
+      disponible: 2,
+      disponibleUm: 2,
+    });
+  });
+
+  it('6. agrégat négatif avec lot périmé : insuffisant, disponible 0', () => {
+    const r = controler(
+      [ligneC(0, { quantiteUm: 1 })],
+      [lot('P', 3, { exp: '2026-01-01' })],
+      -1,
+    );
+    expect(r.sortiesManuelles).toEqual([]);
+    expect(r.insuffisantes[0]).toMatchObject({
+      disponible: 0,
+      disponibleUm: 0,
+    });
+  });
+
+  it('7. lots 3 et part à régulariser 1 : 2 disponibles', () => {
+    const r = controler(
+      [ligneC(0, { quantiteUm: 3 })],
+      [lot('A', 3, { exp: '2027-01-01' })],
+      2,
+    );
+    expect(r.insuffisantes).toHaveLength(1);
+    expect(r.insuffisantes[0]).toMatchObject({
+      demande: 3,
+      disponible: 2,
+      disponibleUm: 2,
+    });
+    // Deux unités passent
+    expect(
+      controler(
+        [ligneC(0, { quantiteUm: 2 })],
+        [lot('A', 3, { exp: '2027-01-01' })],
+        2,
+      ).insuffisantes,
+    ).toEqual([]);
+  });
+
+  it('8. sortie manuelle au-delà du lot : insuffisant', () => {
+    const r = controler(
+      [ligneC(0, { quantiteUm: 5 })],
+      [lot('P', 3, { exp: '2026-01-01' })],
+      3,
+      { 0: 'P' },
+    );
+    expect(r.sortiesManuelles).toEqual([]);
+    expect(r.insuffisantes[0]).toMatchObject({
+      disponible: 3,
+      disponibleUm: 3,
+    });
+  });
+
+  it('9. sortie manuelle au-delà de l agrégat : insuffisant borné par l agrégat', () => {
+    const r = controler(
+      [ligneC(0, { quantiteUm: 3 })],
+      [lot('P', 3, { exp: '2026-01-01' })],
+      2,
+      { 0: 'P' },
+    );
+    expect(r.insuffisantes[0]).toMatchObject({ demande: 3, disponible: 2 });
+    // Dans la limite de l'agrégat, la sortie manuelle passe
+    expect(
+      controler(
+        [ligneC(0, { quantiteUm: 2 })],
+        [lot('P', 3, { exp: '2026-01-01' })],
+        2,
+        { 0: 'P' },
+      ),
+    ).toEqual({ insuffisantes: [], sortiesManuelles: [] });
+  });
+
+  it('10. plusieurs fiches : seules celles en cause sont signalées', () => {
+    const lignes = [
+      ligneC(0, { quantiteUm: 1 }),
+      ligneC(1, { quantiteUm: 1, stockMedicamentId: 'f2', nom: 'Flagyl' }),
+    ];
+    const allouees = allouerLignes(
+      JOUR,
+      lignes.map((l) => ({
+        index: l.index,
+        stockMedicamentId: l.stockMedicamentId,
+        unite: l.unite,
+        quantiteUm: l.quantiteUm,
+        sortieManuelle: null,
+      })),
+      new Map([
+        [FICHE, [lot('A', 5, { exp: '2027-01-01' })]],
+        ['f2', []],
+      ]),
+    );
+    const r = controlerStockVente({
+      lignes,
+      allouees,
+      soldeProduit: new Map([
+        [FICHE, 5],
+        ['f2', 0],
+      ]),
+    });
+    expect(r.insuffisantes.map((i) => i.nom)).toEqual(['Flagyl']);
   });
 });

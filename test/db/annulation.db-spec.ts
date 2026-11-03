@@ -13,6 +13,7 @@ import {
 import { verifierStock } from 'src/pharmacie/stock/commandes-stock';
 import { jourVersDate } from 'src/pharmacie/stock/lecture-stock';
 import { MouvementsStockService } from 'src/pharmacie/stock/mouvements-stock.service';
+import { SynchroService } from 'src/pharmacie/synchro/synchro.service';
 import type { CreerVenteDto } from 'src/pharmacie/dto/vente.dto';
 import {
   MESSAGE_PIECE_NON_ANNULABLE,
@@ -29,6 +30,7 @@ import {
   supprimerBaseDeTest,
 } from './harnais';
 import { chargerFormatActuel } from './fixtures/format-actuel';
+import { rejeuParDefaut } from './rejeu-provisoire';
 
 async function refus<T>(
   promesse: Promise<T>,
@@ -147,6 +149,7 @@ describe('Annulation par pièce inverse et jour métier, sur base de test (PB12)
   let sessions: SessionsCaisseService;
   let postes: PointsDeVenteService;
   let mouvements: MouvementsStockService;
+  let venteParRejeu: ReturnType<typeof rejeuParDefaut>;
   let pv1: string;
   let compteurFiche = 0;
   const alertes = jest.fn().mockResolvedValue(undefined);
@@ -196,6 +199,14 @@ describe('Annulation par pièce inverse et jour métier, sur base de test (PB12)
       sessions,
     );
     postes = new PointsDeVenteService(prisma, acces);
+    venteParRejeu = rejeuParDefaut({
+      synchro: new SynchroService(prisma, acces, mouvements, sessions),
+      postes,
+      structureId: PHARMACIE,
+      vendeurId: VENDEUR,
+      responsableId: RESPONSABLE,
+      appareilId: 'desktop-annul-1',
+    });
     const pvs = await sql(
       'SELECT "id" FROM "PointDeVente" WHERE "structureId" = $1 AND "ordre" = 1',
       [PHARMACIE],
@@ -885,7 +896,9 @@ describe('Annulation par pièce inverse et jour métier, sur base de test (PB12)
     it('(c) allocation provisoire annulée sans lot, anomalie intacte', async () => {
       const { stockId } = await nouvelleFiche();
       const lotId = await nouveauLot(stockId, { quantite: 2 });
-      const vente = await vendre({ lignes: [{ stockId, quantite: 5 }] });
+      // Vente sans stock : seul le rejeu d'un poste l'accepte (D713.2) ; l'annulation
+      // se fait ensuite depuis la caisse web
+      const vente = await venteParRejeu({ stockId, nombre: 5 });
       expect(await soldeProduit(stockId)).toBe(-3);
       expect(
         await compter(

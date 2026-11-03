@@ -2,7 +2,6 @@ import { HttpException } from '@nestjs/common';
 import { Workbook } from 'exceljs';
 import type { PermissionsService } from 'src/common/rbac/permissions.service';
 import { PrismaService } from 'src/common/services/prisma.service';
-import type { StorageService } from 'src/storage/storage.service';
 import { NotificationsService } from 'src/notifications/notifications.service';
 import { AccesPharmacieService } from 'src/pharmacie/acces-pharmacie.service';
 import { SessionsCaisseService } from 'src/pharmacie/caisse/sessions-caisse.service';
@@ -18,8 +17,8 @@ import { InventairesService } from 'src/pharmacie/inventaires/inventaires.servic
 import { verifierStock } from 'src/pharmacie/stock/commandes-stock';
 import { MouvementsStockService } from 'src/pharmacie/stock/mouvements-stock.service';
 import type { FichierImport } from 'src/pharmacie/dto/pharmacie.dto';
-import type { CreerVenteDto } from 'src/pharmacie/dto/vente.dto';
-import { VenteService } from 'src/pharmacie/vente.service';
+import { PointsDeVenteService } from 'src/pharmacie/points-de-vente.service';
+import { SynchroService } from 'src/pharmacie/synchro/synchro.service';
 import {
   appliquerMigrations,
   BaseDeTest,
@@ -30,6 +29,7 @@ import {
   supprimerBaseDeTest,
 } from './harnais';
 import { chargerFormatActuel } from './fixtures/format-actuel';
+import { rejeuParDefaut } from './rejeu-provisoire';
 
 async function refus<T>(
   promesse: Promise<T>,
@@ -66,10 +66,6 @@ interface ImportRep {
     lignes: LigneRep[];
   };
 }
-interface VenteRep {
-  data: { id: string };
-}
-
 const PHARMACIE = 'str-pharma-1';
 const VENDEUR = 'usr-pharm-p1';
 const RESPONSABLE = 'usr-admin-p1';
@@ -87,7 +83,7 @@ const ENTETES = [
 describe('Import livraison vers réception, sur base de test (PB14c)', () => {
   let base: BaseDeTest | undefined;
   let prisma: PrismaService;
-  let service: VenteService;
+  let venteParRejeu: ReturnType<typeof rejeuParDefaut>;
   let receptions: ReceptionsService;
   let pharmacie: PharmacieService;
   let pv1: string;
@@ -110,9 +106,6 @@ describe('Import livraison vers réception, sur base de test (PB14c)', () => {
     const notifications = {
       createManyNotifications: alertes,
     } as unknown as NotificationsService;
-    const stockage = {
-      getPublicUrl: (cle: string) => `logo/${cle}`,
-    } as unknown as StorageService;
     const acces = new AccesPharmacieService(prisma);
     const permissions = {
       getUserPermissions: (id: string) =>
@@ -131,15 +124,14 @@ describe('Import livraison vers réception, sur base de test (PB14c)', () => {
     } as unknown as PermissionsService;
     const mouvements = new MouvementsStockService();
     const sessions = new SessionsCaisseService(prisma, acces, permissions);
-    service = new VenteService(
-      prisma,
-      notifications,
-      stockage,
-      acces,
-      permissions,
-      mouvements,
-      sessions,
-    );
+    venteParRejeu = rejeuParDefaut({
+      synchro: new SynchroService(prisma, acces, mouvements, sessions),
+      postes: new PointsDeVenteService(prisma, acces),
+      structureId: PHARMACIE,
+      vendeurId: VENDEUR,
+      responsableId: RESPONSABLE,
+      appareilId: 'desktop-pb20-import-livraison',
+    });
     receptions = new ReceptionsService(prisma, acces, mouvements, permissions);
     pharmacie = new PharmacieService(
       prisma,
@@ -238,17 +230,6 @@ describe('Import livraison vers réception, sur base de test (PB14c)', () => {
       fichier,
       mode,
     )) as unknown as ImportRep;
-  }
-
-  async function vendre(stockId: string, quantite: number) {
-    const dto: CreerVenteDto = { lignes: [{ stockId, quantite }] };
-    return (await service.creerVente(
-      PHARMACIE,
-      VENDEUR,
-      dto,
-      undefined,
-      '127.0.0.1',
-    )) as unknown as VenteRep;
   }
 
   async function allocations(venteId: string) {
@@ -360,7 +341,8 @@ describe('Import livraison vers réception, sur base de test (PB14c)', () => {
 
   it('résout une vente faite sans stock', async () => {
     const c = await nouvelleFiche({ coef: 1, qualifie: true });
-    const v = await vendre(c.stockId, 2);
+    // Vente sans stock : seul le rejeu d'un poste l'accepte
+    const v = await venteParRejeu({ stockId: c.stockId, nombre: 2 });
     expect(await soldeProduit(c.stockId)).toBe(-2);
 
     const r = await importer(
@@ -373,8 +355,10 @@ describe('Import livraison vers réception, sur base de test (PB14c)', () => {
       ['DEFINITIVE', 2],
     ]);
     expect(await soldeProduit(c.stockId)).toBe(3);
+    // La réponse n'expose jamais un stock négatif (D717) ; la part à régulariser est à part
     expect(r.data.lignes[0]).toMatchObject({
-      quantiteAvant: -2,
+      quantiteAvant: 0,
+      quantiteARegulariserAvant: 2,
       quantiteApres: 3,
     });
   });

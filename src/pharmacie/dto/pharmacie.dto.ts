@@ -239,12 +239,16 @@ export interface LigneImportStock {
   quantiteAvant?: number;
   /** Livraison : stock calculé après l'import ; inventaire : quantité comptée. Lignes acceptées seulement. */
   quantiteApres?: number;
+  /** Livraison : part du stock à régulariser avant l'import (ventes faites sans stock), seulement si positive (D717). */
+  quantiteARegulariserAvant?: number;
   /** Inventaire : unités d'une boîte entamée (colonne « Unités en plus »). */
   unitesEnPlus?: number;
   /** Inventaire : unités comptées (boîtes x unités par boîte du lot + unités en plus). */
   quantiteComptee?: number;
-  /** Inventaire : stock attendu du lot (stock moins les ventes faites sans stock rattachées). */
+  /** Inventaire : stock attendu du lot (stock moins les ventes faites sans stock rattachées), jamais négatif (D717). */
   quantiteTheorique?: number;
+  /** Inventaire : part des ventes faites sans stock que le lot ne couvre pas, `max(0, -théorique)` (D717). */
+  quantiteARegulariser?: number;
   /** Inventaire : quantité comptée moins quantité théorique. */
   ecart?: number;
   /** Inventaire : écart de la fiche dans la tolérance du médicament. */

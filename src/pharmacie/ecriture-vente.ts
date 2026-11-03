@@ -31,6 +31,8 @@ export interface PieceVenteAEcrire {
   posteCode: string;
   sessionId: string;
   typePiece: 'VENTE' | 'REGULARISATION';
+  /** Rejeu d'un poste : un reste provisoire est permis (D713.2) ; vente web : jamais (D716). */
+  provisoireAutorise: boolean;
   numero: string;
   numeroTicket: number | null;
   jourMetier: Date;
@@ -58,6 +60,16 @@ export async function ecrirePieceVente(
   apresParFiche: Map<string, number>;
   anomalies: { type: 'STOCK_NEGATIF'; id: string }[];
 }> {
+  // Filet (D716) : le contrôle de VenteService refuse avant d'arriver ici
+  if (
+    !p.provisoireAutorise &&
+    p.lignes.some((c) => c.allocation.resteProvisoire > 0)
+  ) {
+    throw new RangeError(
+      'Une vente en ligne ne peut pas porter de reste provisoire.',
+    );
+  }
+
   // 13. Pièce, lignes et allocations
   const vente = await tx.vente.create({
     data: {
@@ -201,7 +213,7 @@ export async function ecrirePieceVente(
     const quantiteLocale = Number(c.detailsAnomalie?.quantiteProvisoireLocale);
     const message =
       a.resteProvisoire > 0
-        ? `${c.fiche.nom} : ${a.resteProvisoire} unité(s) vendue(s) sans stock disponible (vente ${p.numero}, poste ${p.posteCode}, ${p.vendeur.nom}). Le stock de ce médicament est à ${soldeProduit} unité(s) : enregistrez la réception ou l'inventaire qui rattachera ces unités à un lot.`
+        ? `${c.fiche.nom} : ${a.resteProvisoire} unité(s) vendue(s) sans stock disponible (vente ${p.numero}, poste ${p.posteCode}, ${p.vendeur.nom}). Le stock de ce médicament affiche ${Math.max(0, soldeProduit)} unité(s) et cette vente reste à régulariser : enregistrez la réception ou l'inventaire qui rattachera ces unités à un lot.`
         : `${c.fiche.nom} : le poste ${p.posteCode} a vendu ${Number.isFinite(quantiteLocale) ? quantiteLocale : 0} unité(s) sans stock (vente ${p.numero}, ${p.vendeur.nom}) ; le serveur a trouvé du stock pour cette vente. Vérifiez le stock de ce médicament sur le poste.`;
     const creee = await tx.anomalie.create({
       data: {

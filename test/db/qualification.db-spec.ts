@@ -23,6 +23,8 @@ import { ReceptionsService } from 'src/pharmacie/receptions/receptions.service';
 import { verifierStock } from 'src/pharmacie/stock/commandes-stock';
 import { jourVersDate } from 'src/pharmacie/stock/lecture-stock';
 import { MouvementsStockService } from 'src/pharmacie/stock/mouvements-stock.service';
+import { PointsDeVenteService } from 'src/pharmacie/points-de-vente.service';
+import { SynchroService } from 'src/pharmacie/synchro/synchro.service';
 import type { CreerVenteDto } from 'src/pharmacie/dto/vente.dto';
 import {
   MESSAGE_FICHE_MODIFIEE,
@@ -39,6 +41,7 @@ import {
   supprimerBaseDeTest,
 } from './harnais';
 import { chargerFormatActuel } from './fixtures/format-actuel';
+import { rejeuParDefaut } from './rejeu-provisoire';
 
 async function refus<T>(
   promesse: Promise<T>,
@@ -88,6 +91,7 @@ describe('Qualification d une fiche, sur base de test (PB13)', () => {
   let base: BaseDeTest | undefined;
   let prisma: PrismaService;
   let service: VenteService;
+  let venteParRejeu: ReturnType<typeof rejeuParDefaut>;
   let fiches: FicheProduitService;
   let pharmacie: PharmacieService;
   let mouvements: MouvementsStockService;
@@ -139,6 +143,14 @@ describe('Qualification d une fiche, sur base de test (PB13)', () => {
       mouvements,
       sessions,
     );
+    venteParRejeu = rejeuParDefaut({
+      synchro: new SynchroService(prisma, acces, mouvements, sessions),
+      postes: new PointsDeVenteService(prisma, acces),
+      structureId: PHARMACIE,
+      vendeurId: VENDEUR,
+      responsableId: RESPONSABLE,
+      appareilId: 'desktop-pb20-qualification',
+    });
     fiches = new FicheProduitService(prisma, acces, mouvements);
     pharmacie = new PharmacieService(
       prisma,
@@ -578,7 +590,8 @@ describe('Qualification d une fiche, sur base de test (PB13)', () => {
 
     const b = await nouvelleFiche({ prixBoite: 1000 });
     await lotTechnique(b.stockId, 2);
-    await vendre({ lignes: [{ stockId: b.stockId, quantite: 3 }] });
+    // Vente sans stock : seul le rejeu d'un poste l'accepte
+    await venteParRejeu({ stockId: b.stockId, nombre: 3 });
     expect(await soldeProduit(b.stockId)).toBe(-1);
 
     const requise = await refus(modifier(b.stockId, { coefficientBoite: 20 }));
@@ -592,6 +605,18 @@ describe('Qualification d une fiche, sur base de test (PB13)', () => {
     );
     expect(impossible.statut).toBe(409);
     expect(impossible.corps.code).toBe('CONVERSION_IMPOSSIBLE');
+
+    // Conserver le stock : la réponse n'expose jamais le -1 du journal (D717)
+    const conserve = await modifier(b.stockId, {
+      coefficientBoite: 20,
+      conversionStock: 'CONSERVER',
+    });
+    expect(conserve.data.conversion).toMatchObject({
+      mode: 'CONSERVER',
+      quantiteAvant: 0,
+      quantiteApres: 0,
+    });
+    expect(await soldeProduit(b.stockId)).toBe(-1);
   });
 
   it('quantité trop grande', async () => {

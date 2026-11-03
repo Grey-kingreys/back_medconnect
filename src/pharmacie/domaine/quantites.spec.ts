@@ -4,6 +4,7 @@ import {
   coutUnitaireDepuisBoite,
   etatStock,
   exigerEntier,
+  formaterQuantiteLisible,
   reliquatLot,
   umVersBoites,
 } from './quantites';
@@ -95,5 +96,54 @@ describe('quantites (domaine pharmacie)', () => {
     expect(() => exigerEntier(1.5, 'solde', 0)).toThrow(
       'solde doit être un entier supérieur ou égal à 0 (reçu : 1.5).',
     );
+  });
+
+  describe('formaterQuantiteLisible', () => {
+    it('boîtes seules, singulier et pluriel', () => {
+      expect(formaterQuantiteLisible(12, 1, 'UNITE')).toBe('12 boîtes');
+      expect(formaterQuantiteLisible(1, 1, 'UNITE')).toBe('1 boîte');
+      expect(formaterQuantiteLisible(0, 1, 'UNITE')).toBe('0 boîte');
+      expect(formaterQuantiteLisible(40, 20, 'COMPRIME')).toBe('2 boîtes');
+    });
+
+    it('boîtes et unités, unités seules', () => {
+      expect(formaterQuantiteLisible(35, 20, 'COMPRIME')).toBe(
+        '1 boîte et 15 comprimés',
+      );
+      expect(formaterQuantiteLisible(46, 20, 'GELULE')).toBe(
+        '2 boîtes et 6 gélules',
+      );
+      expect(formaterQuantiteLisible(6, 20, 'COMPRIME')).toBe('6 comprimés');
+      expect(formaterQuantiteLisible(1, 20, 'COMPRIME')).toBe('1 comprimé');
+      expect(formaterQuantiteLisible(0, 20, 'COMPRIME')).toBe('0 boîte');
+    });
+
+    it('les sept libellés d unité', () => {
+      expect(formaterQuantiteLisible(2, 10, 'ML')).toBe('2 ml');
+      expect(formaterQuantiteLisible(2, 10, 'SACHET')).toBe('2 sachets');
+      expect(formaterQuantiteLisible(1, 10, 'SACHET')).toBe('1 sachet');
+      expect(formaterQuantiteLisible(2, 10, 'GRAMME')).toBe('2 grammes');
+      expect(formaterQuantiteLisible(2, 10, 'AMPOULE')).toBe('2 ampoules');
+      expect(formaterQuantiteLisible(2, 10, 'UNITE')).toBe('2 unités');
+      expect(formaterQuantiteLisible(1, 10, 'UNITE')).toBe('1 unité');
+    });
+
+    it('grand nombre au format français', () => {
+      expect(formaterQuantiteLisible(2000, 1, 'UNITE')).toBe(
+        `${(2000).toLocaleString('fr-FR')} boîtes`,
+      );
+    });
+
+    it('RangeError pour une quantité négative ou non entière', () => {
+      expect(() => formaterQuantiteLisible(-1, 20, 'COMPRIME')).toThrow(
+        RangeError,
+      );
+      expect(() => formaterQuantiteLisible(1.5, 20, 'COMPRIME')).toThrow(
+        RangeError,
+      );
+      expect(() => formaterQuantiteLisible(3, 0, 'COMPRIME')).toThrow(
+        RangeError,
+      );
+    });
   });
 });

@@ -38,6 +38,12 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | PF04 | Annulation et ventes du jour : tasks/PF04-annulation-ventes-du-jour.md | spécifié | spécifié par le chef, fiches prêtes | 0 |
 | PF05 | Clôture journalière : tasks/PF05-cloture-journaliere.md | spécifié | spécifié par le chef, fiches prêtes | 0 |
 | PF06 | Anomalies, alertes de péremption et marge : tasks/PF06a-file-anomalies.md, tasks/PF06b-alertes-peremption-marge.md | spécifié | spécifié par le chef, fiches prêtes | 0 |
+| PB20 | Vente en ligne refusée au-delà du stock, quantité jamais négative en sortie d'API, démo par le rejeu : tasks/PB20-vente-refusee-stock-jamais-negatif.md (D713 à D722, D727, D728) | dur | validé (rapports/PB20-chef.md) | 1 |
+| PF08 | Écran de vente sans attente de livraison, « 0 » et « N à régulariser » : tasks/PF08-vente-refusee-a-regulariser.md (dépend de PB20) | spécifié | fiche à valider par le porteur | 0 |
+| PB21 | Unité PLAQUETTE, coefficient de réception dans les lots : tasks/PB21-unite-plaquette.md (D723, D724, dépend de PB20) | spécifié | fiche à valider par le porteur | 0 |
+| PF09 | Unité plaquette à l'écran, libellés accordés : tasks/PF09-unite-plaquette.md (D723 à D725, dépend de PB21 et PF08) | spécifié | fiche à valider par le porteur | 0 |
+
+Ordre proposé : PB20, PF08, PB21, PF09, puis reprise de PF07d et des fiches PF03 à PF06, qui appliquent D713 (aucune quantité négative affichée).
 
 Back de la tranche (PB01 à PB19) validé ; bilan, décisions à faire valider par le porteur et consignes pour le front : rapports/PB19b-chef.md. Front : 14 sous-fiches dans l'ordre PF01a, PF01b, PF02a, PF02b, PF07a, PF07b, PF07c, PF07d, PF03a, PF03b, PF04, PF05, PF06a, PF06b (D685), une à la fois sur l'arbre principal du dépôt front_medconnect, en attente de validation des fiches par l'orchestrateur principal.
 
@@ -56,8 +62,8 @@ Back de la tranche (PB01 à PB19) validé ; bilan, décisions à faire valider p
 
 ## Dernières décisions (5 max, historique complet dans decisions.md)
 
-- D712 Fiche produit : avertissement à la saisie si la vente au détail rapporte moins que la boîte, non bloquant, en plus de ECART_PRIX (porteur, révisable)
-- D711 Colonne Péremption au stock (date du prochain lot) ; lots en lecture seule dans la fenêtre, complète D701 (porteur, révisable)
-- D709 Une quantité de lot se lit avec le coefficient du lot, repli sur la fiche s'il est absent (révisable)
-- D708 Garde de navigation étendue aux sous-pages d'une entrée (`couvreSousPages`, réceptions) (orchestrateur principal, révisable)
-- D688 Un identifiant client par saisie, rejoué après échec réseau, saisie verrouillée tant que l'issue est inconnue (révisable)
+- D724 Changer l'unité d'une fiche qui a du stock est refusé (`UNITE_CHANGEMENT_AVEC_STOCK`) (à valider par le porteur)
+- D723 Unité PLAQUETTE par migration additive, sur le modèle existant (porteur)
+- D718 Sortie, correction et inventaire restent permis sur une fiche à régulariser, agrégat éventuellement négatif (à valider par le porteur)
+- D714 Stock disponible en ligne : min(lots non périmés, agrégat positif), sur la somme de la fiche (révisable)
+- D713 Vente en ligne refusée au-delà du stock, hors ligne acceptée, jamais de négatif à l'écran (porteur, révise DEMANDE lignes 99 et 251)

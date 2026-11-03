@@ -216,7 +216,7 @@ export const POSTE_SCENARIO = {
   libelle: 'Comptoir principal',
 };
 
-export type CleSessionScenario = 'S1' | 'S2';
+export type CleSessionScenario = 'S1' | 'S2' | 'S3';
 
 export interface LigneTicketScenario {
   medicament: string;
@@ -543,6 +543,54 @@ export const EVENEMENTS_POSTE_LOT_B: EvenementPosteScenario[] = [
   },
 ];
 
+/**
+ * Lot C du poste, après l'inventaire : la caisse S3 du jour, ouverte, comptée et restée
+ * ouverte, porte la vente de Ventoline sans stock (D721). Cette vente est rejouée par
+ * le poste, le seul chemin qui l'accepte sans stock : le stock de Ventoline finit à -1
+ * en base, affiché 0 avec 1 boîte à régulariser. L'heure est proche de minuit : un
+ * horodatage local plus tardif serait dans le futur pour une remise à zéro faite tôt
+ * le matin.
+ */
+export const EVENEMENTS_POSTE_LOT_C: EvenementPosteScenario[] = [
+  {
+    sequence: 17,
+    type: 'SESSION_OUVERTE',
+    jour: 0,
+    heure: '00:10',
+    session: 'S3',
+  },
+  {
+    sequence: 18,
+    type: 'COMPTAGE_SAISI',
+    jour: 0,
+    heure: '00:12',
+    session: 'S3',
+    coupures: FOND_OUVERTURE,
+  },
+  {
+    // Aucun stock de Ventoline : allocation provisoire et anomalie de stock négatif.
+    sequence: 19,
+    type: 'VENTE',
+    jour: 0,
+    heure: '00:15',
+    session: 'S3',
+    ticket: 10,
+    lignes: [
+      {
+        medicament: 'Ventoline 100 µg',
+        unite: 'BOITE',
+        nombre: 1,
+        prixUnitaire: 60000,
+      },
+    ],
+    paiements: [
+      { mode: 'ORANGE_MONEY', montant: 60000, reference: 'OM-7815530' },
+    ],
+    total: 60000,
+    ordonnanceVerifiee: true,
+  },
+];
+
 export const CLOTURE_FORCEE_MOTIF =
   "Le poste du comptoir n'a plus de réseau depuis midi : ses ventes de l'après-midi remonteront à son retour.";
 
@@ -575,7 +623,7 @@ export const INVENTAIRE_SCENARIO = {
 };
 
 export interface VenteWebScenario {
-  cle: 'W1' | 'W2' | 'W3';
+  cle: 'W1' | 'W3';
   lignes: LigneTicketScenario[];
   /** Absent : espèces pour le total. */
   paiements?: PaiementScenario[];
@@ -595,23 +643,6 @@ export const VENTES_WEB_SCENARIO: VenteWebScenario[] = [
       },
     ],
     total: 8000,
-  },
-  {
-    // Aucun stock de Ventoline : allocation provisoire et anomalie de stock négatif.
-    cle: 'W2',
-    lignes: [
-      {
-        medicament: 'Ventoline 100 µg',
-        unite: 'BOITE',
-        nombre: 1,
-        prixUnitaire: 60000,
-      },
-    ],
-    paiements: [
-      { mode: 'ORANGE_MONEY', montant: 60000, reference: 'OM-7815530' },
-    ],
-    total: 60000,
-    ordonnanceVerifiee: true,
   },
   {
     cle: 'W3',

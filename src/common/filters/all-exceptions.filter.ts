@@ -319,6 +319,9 @@ function assainirDetails(
     if (typeof source.disponible === 'number')
       ligne.disponible = source.disponible;
     if (typeof source.demande === 'number') ligne.demande = source.demande;
+    if (typeof source.unite === 'string') ligne.unite = source.unite;
+    if (typeof source.disponibleUm === 'number')
+      ligne.disponibleUm = source.disponibleUm;
     for (const cle of CLES_POSTE_CLOTURE) {
       const valeur = source[cle];
       if (typeof valeur === 'string') ligne[cle] = valeur;

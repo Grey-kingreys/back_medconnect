@@ -14,6 +14,7 @@ import {
   lireEtatsStock,
 } from 'src/pharmacie/stock/lecture-stock';
 import { MouvementsStockService } from 'src/pharmacie/stock/mouvements-stock.service';
+import { SynchroService } from 'src/pharmacie/synchro/synchro.service';
 import type { CreerVenteDto } from 'src/pharmacie/dto/vente.dto';
 import { VenteService } from 'src/pharmacie/vente.service';
 import {
@@ -26,6 +27,7 @@ import {
   supprimerBaseDeTest,
 } from './harnais';
 import { chargerFormatActuel } from './fixtures/format-actuel';
+import { rejeuParDefaut } from './rejeu-provisoire';
 
 async function refus<T>(
   promesse: Promise<T>,
@@ -112,6 +114,7 @@ describe('Vente recâblée sur lots, prix et caisse, sur base de test (PB11)', (
   let service: VenteService;
   let sessions: SessionsCaisseService;
   let postes: PointsDeVenteService;
+  let venteParRejeu: ReturnType<typeof rejeuParDefaut>;
   let mouvements: MouvementsStockService;
   let pv1: string;
   let compteurFiche = 0;
@@ -162,6 +165,14 @@ describe('Vente recâblée sur lots, prix et caisse, sur base de test (PB11)', (
       sessions,
     );
     postes = new PointsDeVenteService(prisma, acces);
+    venteParRejeu = rejeuParDefaut({
+      synchro: new SynchroService(prisma, acces, mouvements, sessions),
+      postes,
+      structureId: PHARMACIE,
+      vendeurId: VENDEUR,
+      responsableId: RESPONSABLE,
+      appareilId: 'desktop-pb20-vente',
+    });
     const pvs = await sql(
       'SELECT "id" FROM "PointDeVente" WHERE "structureId" = $1 AND "ordre" = 1',
       [PHARMACIE],
@@ -735,18 +746,211 @@ describe('Vente recâblée sur lots, prix et caisse, sur base de test (PB11)', (
     expect(f.corps.code).toBe('STOCK_LOT_NEGATIF');
   });
 
-  it('10. vente en négatif : allocation provisoire et anomalie, sans refus', async () => {
+  it('10. vente sans stock : refusée en ligne, rien n’est écrit (D713)', async () => {
+    const { stockId, nom } = await nouvelleFiche();
+    const lotId = await nouveauLot(stockId, { quantite: 3 });
+    const vide = await nouvelleFiche();
+    const ventesAvant = await nombreVentes();
+    const numeroAvant = await prochainNumero();
+    const compte = (table: string) =>
+      compter(`SELECT count(*) AS n FROM "${table}"`);
+    const mvtsAvant = await compte('MouvementStock');
+    const anomaliesAvant = await compte('Anomalie');
+    const sessionsAvant = await compte('SessionCaisse');
+    const postesAvant = await compte('Poste');
+    const cle = 'cle-stock-insuffisant-10';
+
+    // Stock partiel : 5 demandées, 3 en stock
+    const partiel = await refus(
+      vendre({ lignes: [{ stockId, quantite: 5 }] }, RESPONSABLE, cle),
+    );
+    expect(partiel.statut).toBe(409);
+    expect(partiel.corps.code).toBe('STOCK_INSUFFISANT');
+    expect(partiel.corps.details).toEqual([
+      {
+        stockId,
+        nom,
+        unite: 'BOITE',
+        demande: 5,
+        disponible: 3,
+        disponibleUm: 3,
+      },
+    ]);
+    expect(partiel.corps.message).toBe(
+      `Stock insuffisant pour « ${nom} » : il reste 3 boîtes. Réduisez la quantité, ou faites enregistrer la livraison si ces boîtes viennent d'arriver.`,
+    );
+
+    // Aucun stock : rien ne reste
+    const sansStock = await refus(
+      vendre({ lignes: [{ stockId: vide.stockId, quantite: 1 }] }, RESPONSABLE),
+    );
+    expect(sansStock.statut).toBe(409);
+    expect(sansStock.corps.code).toBe('STOCK_INSUFFISANT');
+    expect(sansStock.corps.details).toEqual([
+      {
+        stockId: vide.stockId,
+        nom: vide.nom,
+        unite: 'BOITE',
+        demande: 1,
+        disponible: 0,
+        disponibleUm: 0,
+      },
+    ]);
+    expect(sansStock.corps.message).toBe(
+      `Stock insuffisant pour « ${vide.nom} » : il ne reste rien. Réduisez la quantité, ou faites enregistrer la livraison si ces boîtes viennent d'arriver.`,
+    );
+
+    // Transaction annulée : aucune vente, aucun mouvement, aucune anomalie, aucun
+    // numéro de ticket consommé, aucune caisse ni poste ouverts, stock intact
+    expect(await nombreVentes()).toBe(ventesAvant);
+    expect(await prochainNumero()).toBe(numeroAvant);
+    expect(await compte('MouvementStock')).toBe(mvtsAvant);
+    expect(await compte('Anomalie')).toBe(anomaliesAvant);
+    expect(await compte('SessionCaisse')).toBe(sessionsAvant);
+    expect(await compte('Poste')).toBe(postesAvant);
+    expect(await soldeProduit(stockId)).toBe(3);
+    expect(await soldeLot(lotId)).toBe(3);
+    expect(await soldeProduit(vide.stockId)).toBe(0);
+
+    // La clé d'idempotence du refus reste utilisable pour la vente corrigée
+    const reussie = await vendre(
+      { lignes: [{ stockId, quantite: 3 }] },
+      RESPONSABLE,
+      cle,
+    );
+    expect(reussie.data.provisoire).toBe(false);
+    expect(reussie.data.rejeu).toBeUndefined();
+    expect(await soldeProduit(stockId)).toBe(0);
+  });
+
+  it('10 ter. stock partiel et mélange boîtes et unités : la somme est contrôlée (D714)', async () => {
+    // Coefficient 20 : 35 unités en stock, soit 1 boîte et 15 unités
+    const { stockId, nom } = await nouvelleFiche({
+      coef: 20,
+      prixBoite: 2000,
+      prixUnite: 150,
+      decond: true,
+    });
+    await nouveauLot(stockId, { quantite: 35, coef: 20 });
+
+    // Une boîte et 20 unités : 40 unités demandées, 35 restent
+    const mixte = await refus(
+      vendre({
+        lignes: [
+          { stockId, quantite: 1 },
+          { stockId, quantite: 20, unite: 'UNITE' },
+        ],
+      }),
+    );
+    expect(mixte.statut).toBe(409);
+    expect(mixte.corps.code).toBe('STOCK_INSUFFISANT');
+    expect(mixte.corps.details).toEqual([
+      {
+        stockId,
+        nom,
+        unite: 'BOITE',
+        demande: 1,
+        disponible: 0,
+        disponibleUm: 35,
+      },
+      {
+        stockId,
+        nom,
+        unite: 'UNITE',
+        demande: 20,
+        disponible: 15,
+        disponibleUm: 35,
+      },
+    ]);
+    expect(mixte.corps.message).toBe(
+      `Stock insuffisant pour « ${nom} » : il reste 1 boîte et 15 unités. Réduisez la quantité, ou faites enregistrer la livraison si ces boîtes viennent d'arriver.`,
+    );
+    expect(await soldeProduit(stockId)).toBe(35);
+
+    // Une boîte et 15 unités passent exactement : le stock tombe à 0
+    const juste = await vendre({
+      lignes: [
+        { stockId, quantite: 1 },
+        { stockId, quantite: 15, unite: 'UNITE' },
+      ],
+    });
+    expect(juste.data.provisoire).toBe(false);
+    expect(await soldeProduit(stockId)).toBe(0);
+  });
+
+  it('10 quater. lots 3 et part à régulariser 1 : 2 unités vendables, la troisième refusée (D714)', async () => {
+    const { stockId, nom } = await nouvelleFiche();
+    // Une unité vendue sans stock par le rejeu (agrégat -1), puis un lot de 3 reçu
+    // sans rattachement : lots 3, agrégat 2
+    await venteParRejeu({ stockId, nombre: 1 });
+    await nouveauLot(stockId, { quantite: 3 });
+    expect(await soldeProduit(stockId)).toBe(2);
+
+    const trois = await refus(vendre({ lignes: [{ stockId, quantite: 3 }] }));
+    expect(trois.statut).toBe(409);
+    expect(trois.corps.code).toBe('STOCK_INSUFFISANT');
+    expect(trois.corps.details).toEqual([
+      {
+        stockId,
+        nom,
+        unite: 'BOITE',
+        demande: 3,
+        disponible: 2,
+        disponibleUm: 2,
+      },
+    ]);
+    expect(await soldeProduit(stockId)).toBe(2);
+
+    const deux = await vendre({ lignes: [{ stockId, quantite: 2 }] });
+    expect(deux.data.provisoire).toBe(false);
+    expect(await soldeProduit(stockId)).toBe(0);
+  });
+
+  it('10 quinquies. ordre des refus : stock insuffisant avant sortie manuelle requise (D715)', async () => {
+    const perime = await nouvelleFiche();
+    await nouveauLot(perime.stockId, {
+      quantite: 10,
+      exp: jour(-3),
+      numero: 'P',
+    });
+    const vide = await nouvelleFiche();
+
+    // Panier avec une fiche aux seuls lots périmés et une fiche sans stock
+    const a = await refus(
+      vendre({
+        lignes: [
+          { stockId: perime.stockId, quantite: 2 },
+          { stockId: vide.stockId, quantite: 1 },
+        ],
+      }),
+    );
+    expect(a.statut).toBe(409);
+    expect(a.corps.code).toBe('STOCK_INSUFFISANT');
+    expect(a.corps.details).toMatchObject([{ stockId: vide.stockId }]);
+
+    // Quantité réduite pour la seconde fiche : reste la sortie manuelle
+    const b = await refus(
+      vendre({ lignes: [{ stockId: perime.stockId, quantite: 2 }] }),
+    );
+    expect(b.statut).toBe(409);
+    expect(b.corps.code).toBe('SORTIE_MANUELLE_REQUISE');
+  });
+
+  it('10 sexies. vente sans stock rejouée par un poste : provisoire, anomalie et agrégat négatif (D713.2)', async () => {
     const { stockId, nom } = await nouvelleFiche();
     const lotId = await nouveauLot(stockId, { quantite: 3 });
 
-    const { data } = await vendre(
-      {
-        lignes: [{ stockId, quantite: 5 }],
-        clientNom: 'Client essai',
-        clientTelephone: '+224620000000',
-      },
+    const { data: venteRejouee } = await venteParRejeu({
+      stockId,
+      nombre: 5,
+      clientNom: 'Client essai',
+      clientTelephone: '+224620000000',
+    });
+    const { data } = (await service.detailVente(
+      PHARMACIE,
+      venteRejouee.id,
       RESPONSABLE,
-    );
+    )) as unknown as Reponse;
 
     expect(data.provisoire).toBe(true);
     expect(data.lignes[0].allocations).toMatchObject([
@@ -782,45 +986,69 @@ describe('Vente recâblée sur lots, prix et caisse, sur base de test (PB11)', (
     expect(details.quantiteProvisoire).toBe(2);
     expect(details.soldeProduit).toBe(-2);
     expect(details.message).toBe(
-      `${nom} : 2 unité(s) vendue(s) sans stock disponible (vente ${data.numero}, poste ${details.posteCode as string}, ${details.utilisateurNom as string}). Le stock de ce médicament est à -2 unité(s) : enregistrez la réception ou l'inventaire qui rattachera ces unités à un lot.`,
+      `${nom} : 2 unité(s) vendue(s) sans stock disponible (vente ${data.numero}, poste ${details.posteCode as string}, ${details.utilisateurNom as string}). Le stock de ce médicament affiche 0 unité(s) et cette vente reste à régulariser : enregistrez la réception ou l'inventaire qui rattachera ces unités à un lot.`,
     );
     expect(details).not.toHaveProperty('clientNom');
     expect(details).not.toHaveProperty('clientTelephone');
 
     const vide = await nouvelleFiche();
-    const sansLot = await vendre({
-      lignes: [{ stockId: vide.stockId, quantite: 1 }],
-    });
-    expect(sansLot.data.lignes[0].allocations).toMatchObject([
+    const sansLot = await venteParRejeu({ stockId: vide.stockId, nombre: 1 });
+    const detailSansLot = (await service.detailVente(
+      PHARMACIE,
+      sansLot.data.id,
+      RESPONSABLE,
+    )) as unknown as Reponse;
+    expect(detailSansLot.data.lignes[0].allocations).toMatchObject([
       { lotId: null, quantite: 1, statut: 'PROVISOIRE' },
     ]);
     expect(await soldeProduit(vide.stockId)).toBe(-1);
+
+    // Lecture : jamais de quantité négative, la part à régulariser à part (D717)
+    const lue = await lireEtatsStock(prisma, [vide.stockId], jour(0));
+    expect(lue.get(vide.stockId)).toMatchObject({
+      quantite: -1,
+      quantiteARegulariser: 1,
+      quantiteVendable: 0,
+    });
   });
 
-  it('11. deux ventes simultanées de la dernière unité', async () => {
+  it('11. deux ventes simultanées de la dernière unité : une réussite, un refus, agrégat à 0 (D713)', async () => {
     const { stockId } = await nouvelleFiche();
     const lotId = await nouveauLot(stockId, { quantite: 1 });
+    const ventesAvant = await nombreVentes();
 
     const resultats = await Promise.allSettled([
       vendre({ lignes: [{ stockId, quantite: 1 }] }, VENDEUR),
       vendre({ lignes: [{ stockId, quantite: 1 }] }, RESPONSABLE),
     ]);
-    expect(resultats.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled']);
-    const ventes = resultats.map(
-      (r) => (r as PromiseFulfilledResult<Reponse>).value.data,
-    );
+    expect(resultats.map((r) => r.status).sort()).toEqual([
+      'fulfilled',
+      'rejected',
+    ]);
+    const refusee = resultats.find(
+      (r) => r.status === 'rejected',
+    ) as PromiseRejectedResult;
+    expect(refusee.reason).toBeInstanceOf(HttpException);
+    expect((refusee.reason as HttpException).getStatus()).toBe(409);
+    expect(
+      ((refusee.reason as HttpException).getResponse() as { code: string })
+        .code,
+    ).toBe('STOCK_INSUFFISANT');
 
+    expect(await nombreVentes()).toBe(ventesAvant + 1);
     const statuts = await sql(
       `SELECT a."statut", count(*)::int AS n FROM "AllocationLot" a JOIN "LigneVente" l ON l."id" = a."ligneVenteId" WHERE l."stockMedicamentId" = $1 GROUP BY a."statut" ORDER BY a."statut"`,
       [stockId],
     );
-    expect(statuts.rows).toEqual([
-      { statut: 'DEFINITIVE', n: 1 },
-      { statut: 'PROVISOIRE', n: 1 },
-    ]);
+    expect(statuts.rows).toEqual([{ statut: 'DEFINITIVE', n: 1 }]);
     expect(await soldeLot(lotId)).toBe(0);
-    expect(await soldeProduit(stockId)).toBe(-1);
-    expect(ventes[0].numeroTicket).not.toBe(ventes[1].numeroTicket);
+    expect(await soldeProduit(stockId)).toBe(0);
+    expect(
+      await compter(
+        `SELECT count(*) AS n FROM "Anomalie" a JOIN "LigneVente" l ON l."venteId" = a."pieceId" WHERE l."stockMedicamentId" = $1`,
+        [stockId],
+      ),
+    ).toBe(0);
   });
 
   it('12. caisse ouverte automatiquement, paiements multiples, bilan et fermeture', async () => {

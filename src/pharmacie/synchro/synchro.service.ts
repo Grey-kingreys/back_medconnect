@@ -1025,6 +1025,7 @@ export class SynchroService {
       posteCode,
       sessionId: s.id,
       typePiece: regularisation ? 'REGULARISATION' : 'VENTE',
+      provisoireAutorise: true,
       numero,
       numeroTicket,
       jourMetier,

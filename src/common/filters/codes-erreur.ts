@@ -36,7 +36,7 @@ export const CODES_ERREUR = [
   'JETON_INVALIDE',
   // Mot de passe actuel incorrect lors d'un changement de mot de passe (400), la session reste valide.
   'MOT_DE_PASSE_ACTUEL_INCORRECT',
-  // Ancien refus de vente faute de stock (409) : plus jamais renvoyé depuis PB11, conservé (code stable).
+  // Vente en ligne au-delà du stock vendable (409, D713) : lignes dans `details` (`unite`, `demande`, `disponible`, `disponibleUm`). Le rejeu d'un poste hors ligne n'est jamais refusé.
   'STOCK_INSUFFISANT',
   // Ancien refus de vente d'un médicament périmé (400) : plus jamais renvoyé depuis PB11 (remplacé par SORTIE_MANUELLE_REQUISE), conservé (code stable).
   'MEDICAMENT_EXPIRE',

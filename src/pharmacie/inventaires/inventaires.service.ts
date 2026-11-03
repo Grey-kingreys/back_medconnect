@@ -1014,7 +1014,9 @@ export class InventairesService {
         ? dateVersJour(l.lot.dateExpiration)
         : null,
       lotTechnique: l.lot?.lotTechnique ?? false,
-      quantiteTheorique: l.quantiteTheorique,
+      // Jamais négatif en sortie ; l'écart reste signé, c'est une différence (D717)
+      quantiteTheorique: Math.max(0, l.quantiteTheorique),
+      quantiteARegulariser: Math.max(0, -l.quantiteTheorique),
       quantiteComptee: l.quantiteComptee,
       ecart: l.ecart,
       sousTolerance: l.sousTolerance,

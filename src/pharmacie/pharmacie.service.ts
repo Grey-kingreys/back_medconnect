@@ -233,6 +233,21 @@ const COLONNES_IMPORT_STOCK: ColonnesImport<ColonneImport> = {
   },
 };
 
+/** Ligne d'import de livraison à la présentation : jamais de quantité négative, part à régulariser avant à part (D717). */
+function ecreterLigneLivraison(l: LigneImportStock): LigneImportStock {
+  if (l.statut !== 'acceptee' || l.quantiteAvant === undefined) return l;
+  return {
+    ...l,
+    quantiteAvant: Math.max(0, l.quantiteAvant),
+    ...(l.quantiteApres === undefined
+      ? {}
+      : { quantiteApres: Math.max(0, l.quantiteApres) }),
+    ...(l.quantiteAvant < 0
+      ? { quantiteARegulariserAvant: -l.quantiteAvant }
+      : {}),
+  };
+}
+
 @Injectable()
 export class PharmacieService {
   constructor(
@@ -842,14 +857,14 @@ export class PharmacieService {
     ) {
       await this.alerterStock(
         structureId,
-        `Le stock de "${fiche.medicament.nom}" est descendu à ${apres} unités.`,
+        `Le stock de "${fiche.medicament.nom}" est descendu à ${Math.max(0, apres)} unités.`,
       );
     }
 
     const peutVoirMarge = await this.peutVoirMarge(user.id);
     return {
       data: masquerCouts(fiche, peutVoirMarge),
-      message: `Stock ${dto.variation > 0 ? 'augmenté' : 'réduit'} (nouvelle quantité : ${apres})`,
+      message: `Stock ${dto.variation > 0 ? 'augmenté' : 'réduit'} (nouvelle quantité : ${Math.max(0, apres)})`,
       success: true,
     };
   }
@@ -886,7 +901,11 @@ export class PharmacieService {
               nom: s.medicament.nom,
               quantite: s.quantite,
             })),
-            rupture: rupture.map((s) => ({ id: s.id, nom: s.medicament.nom })),
+            rupture: rupture.map((s) => ({
+              id: s.id,
+              nom: s.medicament.nom,
+              quantiteARegulariser: s.quantiteARegulariser,
+            })),
           },
         },
         peutVoirMarge,
@@ -1082,7 +1101,14 @@ export class PharmacieService {
     const peutVoirMarge = await this.peutVoirMarge(adminUserId);
 
     return {
-      data: masquerCouts({ ...rapport, mode }, peutVoirMarge),
+      data: masquerCouts(
+        {
+          ...rapport,
+          lignes: rapport.lignes.map(ecreterLigneLivraison),
+          mode,
+        },
+        peutVoirMarge,
+      ),
       message: this.messageImportStock(rapport, false),
       success: true,
     };
@@ -1198,6 +1224,7 @@ export class PharmacieService {
       quantiteApres: comptee,
       quantiteComptee: comptee,
       quantiteTheorique: 0,
+      quantiteARegulariser: 0,
       ecart: comptee,
       sousTolerance: false,
     };
@@ -1252,7 +1279,8 @@ export class PharmacieService {
         quantiteAvant: e.soldeAvant,
         quantiteApres: e.quantiteComptee,
         quantiteComptee: e.quantiteComptee,
-        quantiteTheorique: e.quantiteTheorique,
+        quantiteTheorique: Math.max(0, e.quantiteTheorique),
+        quantiteARegulariser: Math.max(0, -e.quantiteTheorique),
         ecart: e.ecart,
         sousTolerance: e.sousTolerance,
       };
@@ -1479,6 +1507,8 @@ export class PharmacieService {
       data: masquerCouts(
         {
           ...rapport,
+          // Réponse seulement : l'alerte ci-dessus a lu la vérité (D717)
+          lignes: rapport.lignes.map(ecreterLigneLivraison),
           mode,
           importees: aEcrire.length,
           receptionId,

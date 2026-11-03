@@ -35,7 +35,10 @@ export interface ReliquatExpose {
 
 /** Stock calculé d'une fiche (plan 1.7, D508). */
 export interface EtatStockFiche {
+  /** Vérité : agrégat produit, peut être négatif. Jamais à exposer telle quelle (D713, D717). */
   quantite: number;
+  /** Part des lots en stock que l'agrégat ne couvre pas, jamais négative (D717). */
+  quantiteARegulariser: number;
   quantiteVendable: number;
   dateExpiration: Date | null;
   reliquat: ReliquatExpose[];
@@ -69,8 +72,9 @@ function versCandidat(l: LotStockLu): LotCandidat {
 }
 
 /**
- * Calcul pur : quantité = agrégat produit ; lots exposés = lots à solde positif
- * en ordre FEFO ; quantité vendable et reliquats sur les lots non périmés ; date =
+ * Calcul pur : quantité = agrégat produit (vérité, peut être négative) ; lots exposés
+ * = lots à solde positif en ordre FEFO ; quantité vendable = min(lots non périmés,
+ * max(0, agrégat)) (D714) ; reliquats sur les lots non périmés ; date =
  * celle du lot que la vente prendrait en premier, sinon la plus ancienne des lots
  * restants (tous périmés), sinon null.
  */
@@ -98,9 +102,14 @@ export function calculerEtatStock(
     }
   }
 
+  const sommeLots = enStock.reduce((somme, l) => somme + l.solde, 0);
   return {
     quantite: soldeProduit,
-    quantiteVendable: ordre.reduce((somme, c) => somme + c.solde, 0),
+    quantiteARegulariser: Math.max(0, sommeLots - soldeProduit),
+    quantiteVendable: Math.min(
+      ordre.reduce((somme, c) => somme + c.solde, 0),
+      Math.max(0, soldeProduit),
+    ),
     dateExpiration,
     reliquat: ordre
       .map((c) => ({
@@ -306,7 +315,8 @@ export function avecStock<F extends { archiveLe: Date | null }>(
 ) {
   return {
     ...fiche,
-    quantite: etat.quantite,
+    quantite: Math.max(0, etat.quantite),
+    quantiteARegulariser: etat.quantiteARegulariser,
     disponible: etat.quantite > 0 && fiche.archiveLe === null,
     dateExpiration: etat.dateExpiration,
     quantiteVendable: etat.quantiteVendable,

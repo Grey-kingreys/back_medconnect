@@ -9,7 +9,9 @@ import { SessionsCaisseService } from 'src/pharmacie/caisse/sessions-caisse.serv
 import { PointsDeVenteService } from 'src/pharmacie/points-de-vente.service';
 import { ReceptionsService } from 'src/pharmacie/receptions/receptions.service';
 import { verifierStock } from 'src/pharmacie/stock/commandes-stock';
+import { avecStock, lireEtatsStock } from 'src/pharmacie/stock/lecture-stock';
 import { MouvementsStockService } from 'src/pharmacie/stock/mouvements-stock.service';
+import { CatalogueSynchroService } from 'src/pharmacie/synchro/catalogue-synchro.service';
 import {
   SynchroService,
   type ReponseSynchro,
@@ -84,6 +86,7 @@ describe('Synchro desktop : rejeu des ventes, sur base de test (PB18c)', () => {
   let base: BaseDeTest | undefined;
   let prisma: PrismaService;
   let synchro: SynchroService;
+  let catalogue: CatalogueSynchroService;
   let service: VenteService;
   let receptions: ReceptionsService;
   let anomaliesService: AnomaliesService;
@@ -131,6 +134,7 @@ describe('Synchro desktop : rejeu des ventes, sur base de test (PB18c)', () => {
     const mouvements = new MouvementsStockService();
     const sessions = new SessionsCaisseService(prisma, acces, permissions);
     postes = new PointsDeVenteService(prisma, acces);
+    catalogue = new CatalogueSynchroService(prisma, acces, stockage);
     synchro = new SynchroService(prisma, acces, mouvements, sessions);
     service = new VenteService(
       prisma,
@@ -713,6 +717,61 @@ describe('Synchro desktop : rejeu des ventes, sur base de test (PB18c)', () => {
     expect(allocations.filter((a) => a.statut === 'PROVISOIRE')).toEqual([]);
     expect(await soldeProduit(H)).toBe(3);
     expect(await rattachementDe(anomalie.id)).toBe('RATTACHEE');
+  });
+
+  it('5 bis. fiche à zéro en rejeu : toujours acceptée, provisoire, anomalie, agrégat négatif, lecture écrêtée (D713.2)', async () => {
+    // Le rejeu garde son comportement : la vente faite hors ligne est acceptée
+    // même sans aucun stock (provisoireAutorise: true), contrairement à la route web
+    const stockId = await nouvelleFiche({ prixBoite: 1500 });
+    expect(await soldeProduit(stockId)).toBe(0);
+
+    const { venteId, resultat } = await vendre(D1, S1, [ligne(stockId, 2)]);
+
+    expect(resultat.statut).toBe('APPLIQUE');
+    expect(await allocationsDe(venteId)).toEqual([
+      expect.objectContaining({
+        statut: 'PROVISOIRE',
+        quantite: 2,
+        lotId: null,
+      }),
+    ]);
+    const [anomalie] = await anomalies('STOCK_NEGATIF', venteId);
+    expect(anomalie.attribueeAId).toBe(RESPONSABLE);
+    expect(anomalie.details).toMatchObject({
+      stockId,
+      quantiteProvisoire: 2,
+      soldeProduit: -2,
+      origine: 'SYNCHRO',
+    });
+    expect(await soldeProduit(stockId)).toBe(-2);
+
+    // Lecture : jamais négative, deux unités à régulariser (D717)
+    const etats = await lireEtatsStock(prisma, [stockId], jour(0));
+    const lue = avecStock({ archiveLe: null }, etats.get(stockId) as never);
+    expect(lue.quantite).toBe(0);
+    expect(lue.quantiteARegulariser).toBe(2);
+    expect(lue.quantiteVendable).toBe(0);
+    expect(lue.disponible).toBe(false);
+
+    // Photographie du poste : même contrat, jamais le négatif (D719)
+    const photo = await catalogue.photographier(PHARMACIE, RESPONSABLE, D1.id);
+    expect(photo.fiches.find((f) => f.stockId === stockId)).toMatchObject({
+      quantite: 0,
+      quantiteARegulariser: 2,
+    });
+    expect(photo.fiches.every((f) => f.quantite >= 0)).toBe(true);
+
+    // Une vente web de cette fiche est en revanche refusée
+    await expect(
+      service.creerVente(
+        PHARMACIE,
+        VENDEUR,
+        { lignes: [{ stockId, quantite: 1 }] },
+        undefined,
+        ip,
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(await soldeProduit(stockId)).toBe(-2);
   });
 
   it('6. résolution d allocation provisoire à la synchro', async () => {

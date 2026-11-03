@@ -50,6 +50,54 @@ export function umVersBoites(
   };
 }
 
+export type UniteMinimaleLisible =
+  | 'COMPRIME'
+  | 'GELULE'
+  | 'ML'
+  | 'SACHET'
+  | 'GRAMME'
+  | 'AMPOULE'
+  | 'UNITE';
+
+const LIBELLES_UNITE_MINIMALE: Record<
+  UniteMinimaleLisible,
+  { singulier: string; pluriel: string }
+> = {
+  COMPRIME: { singulier: 'comprimé', pluriel: 'comprimés' },
+  GELULE: { singulier: 'gélule', pluriel: 'gélules' },
+  ML: { singulier: 'ml', pluriel: 'ml' },
+  SACHET: { singulier: 'sachet', pluriel: 'sachets' },
+  GRAMME: { singulier: 'gramme', pluriel: 'grammes' },
+  AMPOULE: { singulier: 'ampoule', pluriel: 'ampoules' },
+  UNITE: { singulier: 'unité', pluriel: 'unités' },
+};
+
+/**
+ * Quantité lisible, mêmes sorties que `formaterQuantite` du front pour une quantité
+ * positive ou nulle : « 12 boîtes », « 2 boîtes et 6 comprimés », « 6 comprimés »,
+ * « 1 boîte », « 0 boîte ». RangeError si la quantité est négative (D713 : jamais
+ * affichée).
+ */
+export function formaterQuantiteLisible(
+  um: number,
+  coefficient: number,
+  uniteMinimale: UniteMinimaleLisible,
+): string {
+  exigerEntier(um, 'quantiteUm', 0);
+  exigerEntier(coefficient, 'coefficientBoite', 1);
+  const libelle = LIBELLES_UNITE_MINIMALE[uniteMinimale];
+  const nombre = (n: number) => n.toLocaleString('fr-FR');
+  const boite = (n: number) => `${nombre(n)} ${n > 1 ? 'boîtes' : 'boîte'}`;
+  const unites = (n: number) =>
+    `${nombre(n)} ${n > 1 ? libelle.pluriel : libelle.singulier}`;
+
+  if (coefficient <= 1) return boite(um);
+  const { boites, unites: reste } = umVersBoites(um, coefficient);
+  if (boites === 0) return reste === 0 ? boite(0) : unites(reste);
+  if (reste === 0) return boite(boites);
+  return `${boite(boites)} et ${unites(reste)}`;
+}
+
 /** Coût d'achat par unité minimale depuis le coût d'une boîte, arrondi GNF (D413). */
 export function coutUnitaireDepuisBoite(
   coutAchatBoite: number,
