@@ -87,7 +87,13 @@ Chemin de l'artefact + preuve (commande lancée, résultat en une ligne). Ou un 
 ## Historique
 
 <!-- une ligne par tentative : AAAA-MM-JJ | tier | résultat | raison si échec -->
+2026-11-01 | spécifié (Sonnet codeur, Sonnet vérificateur) | PASS avec réserve (rapports/PF07c-verification.md) | sur `LOT_REQUIS`, chiffre compté perdu et coefficient de la fiche pour les lots cités ; un seul message d'erreur par ligne
+2026-11-01 | chef (Opus) | validé | rappel du comptage sans répartition (D710), lots relus avec leur coefficient (D709), deux messages par ligne, 3 tests ajoutés (rapports/PF07c-chef.md)
 
 ## Validation
 
 <!-- commande relancée par l'orchestrateur | résultat en une ligne | hash du commit -->
+docker compose exec -T frontend npx tsc --noEmit | exit 0 | 896206d
+docker compose exec -T frontend npx eslint (5 fichiers de la fiche) | exit 0, avant le commit, puis hook pre-commit passé | 896206d
+docker compose exec -T frontend npx vitest run | 68 fichiers, 589 verts | 896206d
+npm run build (local) | réussi, avant le commit, code inchangé depuis | 896206d
