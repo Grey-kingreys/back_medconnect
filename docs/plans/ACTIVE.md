@@ -34,7 +34,8 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | PF02 | Fiche produit et page du stock : tasks/PF02a-page-stock-correction-apercu.md, tasks/PF02b-fiche-produit-deux-prix-qualification.md | spécifié | PF02a validé (front 63bb9ad, rapports/PF02a-chef.md) ; PF02b validé (front 9faa963, D707, rapports/PF02b-chef.md), avec correction du back sur cette branche : upsert du stock à quantité facultative, sans elle aucune écriture de stock | 2 |
 | PF07 | Réception, inventaire et sorties de stock (ajout D683, après PF02) : tasks/PF07a-reception-livraison-fournisseurs.md, tasks/PF07b-detail-reception-sorties-stock.md, tasks/PF07c-inventaire-par-lot.md, tasks/PF07d-import-excel-livraison-inventaire.md | spécifié | PF07a validé (front 1d2197f, D708, rapports/PF07a-chef.md) ; PF07b validé (front 23a558c, D709, rapports/PF07b-chef.md) ; PF07c validé (front 896206d, D710, rapports/PF07c-chef.md) ; PF07d validé (front d16c1f2, D729, rapports/PF07d-chef.md ; import réel à jouer par le porteur) | 1 |
 | Correctifs porteur 1 | Réception (champ Quantité), stock (colonne Péremption, lots en lecture seule), fiche produit (alerte de prix au détail), hors fiche | spécifié | validé (front 4f54bb3, D711, D712, rapports/correctifs-porteur-1-chef.md) ; réserve : `coefficientReception` à exposer par la tâche « plaquette » | 1 |
-| PF03 | Ma caisse : tasks/PF03a-ma-caisse-ouverture-comptage.md, tasks/PF03b-ma-caisse-mouvements-fermeture.md | spécifié | PF03a contrôlé par le chef (front add367c, D730, rapports/PF03a-chef.md), test navigateur à faire ; PF03b fiche prête | 1 |
+| PF03 | Ma caisse : tasks/PF03a-ma-caisse-ouverture-comptage.md, tasks/PF03b-ma-caisse-mouvements-fermeture.md | spécifié | PF03a contrôlé par le chef (front add367c, D730, rapports/PF03a-chef.md), test navigateur à faire ; PF03b contrôlé par le chef (front dc60497, rapports/PF03b-chef.md), test navigateur à faire | 1 |
+| Correctif D731 | Fenêtre d'ajout au stock : recherche seule avant un choix, « Déjà en stock », encadré livraison ou modification, hors fiche | spécifié | contrôlé par le chef (front 2e9fdd2, D731, rapports/PF03b-chef.md), test navigateur à faire | 1 |
 | PF04 | Annulation et ventes du jour : tasks/PF04-annulation-ventes-du-jour.md | spécifié | spécifié par le chef, fiches prêtes | 0 |
 | PF05 | Clôture journalière : tasks/PF05-cloture-journaliere.md | spécifié | spécifié par le chef, fiches prêtes | 0 |
 | PF06 | Anomalies, alertes de péremption et marge : tasks/PF06a-file-anomalies.md, tasks/PF06b-alertes-peremption-marge.md | spécifié | spécifié par le chef, fiches prêtes | 0 |
@@ -58,12 +59,13 @@ Back de la tranche (PB01 à PB19) validé ; bilan, décisions à faire valider p
 - Porteur, après PB19 (D679) : outil de rejeu d'un événement mis de côté, rapprochement de l'argent des régularisations hors clôture, paiement arrivé après la fermeture d'une caisse du jour non compté par le bilan figé.
 - Porteur, après PB19b : `GET .../caisse/sessions/courante` montre à tout vendeur (`caisse:utiliser`) la caisse ouverte du poste, fond et comptage d'ouverture compris (voulu, D528). Durcir en masquant `fondCaisse`, `fondCompte` et `comptageOuverture` à un appelant qui n'est ni le titulaire de la caisse ni `caisse:superviser` (nom du titulaire gardé, utile à PF03) ?
 - Porteur, après PB19b : décisions D601 à D682 de cette reprise à valider (liste et révisions de décisions antérieures dans rapports/PB19b-chef.md).
+- Porteur, après PF03b : attendu et écart sont visibles en direct pendant le comptage de fermeture, donc ajustables avant la confirmation (DEMANDE.md ligne 77 : « sa propre activité [...] et ensuite l'écart »). Recommandation de l'orchestrateur principal : les masquer jusqu'à la confirmation. Comportement inchangé en attendant.
 - Reprises du run parqué 2026-10-22-lot8 : voir son decisions.md et l'historique git de ce fichier (questions TB3, B2, B4, U1, B8, B10, B11, B12, B14 toujours ouvertes).
 
 ## Dernières décisions (5 max, historique complet dans decisions.md)
 
+- D731 Fenêtre d'ajout au stock : recherche seule avant un choix, encadré pour un médicament déjà en stock (porteur)
+- D730 Ma caisse : bandeau si le jour métier de sa caisse est passé, date de la ligne d'ouverture selon le jour d'ouverture (révisable)
+- D729 Import d'un inventaire : ni attendu ni écart à l'aperçu (révisable)
 - D724 Changer l'unité d'une fiche qui a du stock est refusé (`UNITE_CHANGEMENT_AVEC_STOCK`) (à valider par le porteur)
 - D723 Unité PLAQUETTE par migration additive, sur le modèle existant (porteur)
-- D718 Sortie, correction et inventaire restent permis sur une fiche à régulariser, agrégat éventuellement négatif (à valider par le porteur)
-- D714 Stock disponible en ligne : min(lots non périmés, agrégat positif), sur la somme de la fiche (révisable)
-- D713 Vente en ligne refusée au-delà du stock, hors ligne acceptée, jamais de négatif à l'écran (porteur, révise DEMANDE lignes 99 et 251)
