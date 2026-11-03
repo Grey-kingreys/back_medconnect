@@ -51,9 +51,24 @@ describe('calculerEtatStock', () => {
         numeroLot: null,
         dateExpiration: jourVersDate(JOUR),
         quantite: 12,
+        coefficientReception: 1,
         lotTechnique: false,
         coutUnitaire: 0,
       },
+    ]);
+  });
+
+  it('2 bis. chaque lot expose le coefficient de réception figé, pas celui de la fiche (D709)', () => {
+    const etat = calculerEtatStock(
+      30,
+      [lot('A', '2027-01-01', 20, 10), lot('B', '2027-06-01', 10, 20)],
+      JOUR,
+    );
+    expect(
+      etat.lots.map((l) => [l.id, l.quantite, l.coefficientReception]),
+    ).toEqual([
+      ['A', 20, 10],
+      ['B', 10, 20],
     ]);
   });
 

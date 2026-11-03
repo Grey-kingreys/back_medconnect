@@ -635,6 +635,7 @@ export type UniteMinimaleDemo =
   | 'SACHET'
   | 'GRAMME'
   | 'AMPOULE'
+  | 'PLAQUETTE'
   | 'UNITE';
 
 /**

@@ -11,7 +11,8 @@ tranche pharmacie. Il défait la migration du même nom.
 
 ## Ordre
 
-Défaire de la plus récente à la plus ancienne : M6 (`20261026140000_pharmacie_t1_ventes_pieces`),
+Défaire de la plus récente à la plus ancienne : M7 (`20261103100000_pharmacie_t1_unite_plaquette`,
+refusé tant qu'une fiche utilise `PLAQUETTE`), puis M6 (`20261026140000_pharmacie_t1_ventes_pieces`),
 puis M5 (`20261026130000_pharmacie_t1_caisse`, refusé tant que M6 est en place), puis M4, M3, M2,
 M1. Chaque fichier liste en tête ce qu'il perd.
 

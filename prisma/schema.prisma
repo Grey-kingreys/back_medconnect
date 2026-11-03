@@ -482,6 +482,7 @@ enum UniteMinimale {
   SACHET
   GRAMME
   AMPOULE
+  PLAQUETTE
   UNITE
 }
 

@@ -57,6 +57,7 @@ export type UniteMinimaleLisible =
   | 'SACHET'
   | 'GRAMME'
   | 'AMPOULE'
+  | 'PLAQUETTE'
   | 'UNITE';
 
 const LIBELLES_UNITE_MINIMALE: Record<
@@ -69,6 +70,7 @@ const LIBELLES_UNITE_MINIMALE: Record<
   SACHET: { singulier: 'sachet', pluriel: 'sachets' },
   GRAMME: { singulier: 'gramme', pluriel: 'grammes' },
   AMPOULE: { singulier: 'ampoule', pluriel: 'ampoules' },
+  PLAQUETTE: { singulier: 'plaquette', pluriel: 'plaquettes' },
   UNITE: { singulier: 'unité', pluriel: 'unités' },
 };
 

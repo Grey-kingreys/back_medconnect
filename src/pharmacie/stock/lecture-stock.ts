@@ -24,6 +24,8 @@ export interface LotExpose {
   numeroLot: string | null;
   dateExpiration: Date | null;
   quantite: number;
+  /** Unités minimales par boîte figées à la réception du lot (D709). */
+  coefficientReception: number;
   lotTechnique: boolean;
   coutUnitaire: number;
 }
@@ -124,6 +126,7 @@ export function calculerEtatStock(
         numeroLot: l.numeroLot,
         dateExpiration: l.dateExpiration,
         quantite: l.solde,
+        coefficientReception: l.coefficientReception,
         lotTechnique: l.lotTechnique,
         coutUnitaire: l.coutUnitaire,
       };

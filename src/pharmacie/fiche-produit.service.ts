@@ -34,6 +34,14 @@ export const MESSAGE_CONVERSION_IMPOSSIBLE =
   'Le stock de ce médicament ne vient pas seulement de la reprise initiale : il ne peut pas être multiplié automatiquement. Choisissez « Conserver », puis corrigez la quantité en unités par un inventaire.';
 export const MESSAGE_CONVERSION_TROP_GRANDE =
   "La conversion donnerait une quantité trop grande pour être enregistrée. Vérifiez le nombre d'unités par boîte.";
+export const MESSAGE_UNITE_CHANGEMENT_AVEC_STOCK =
+  "Ce médicament a du stock compté dans une autre unité : changer l'unité fausserait les quantités. Comptez-le à 0 par un inventaire, changez l'unité, puis enregistrez la prochaine livraison.";
+function refusUniteAvecStock(): ConflictException {
+  return new ConflictException({
+    message: MESSAGE_UNITE_CHANGEMENT_AVEC_STOCK,
+    code: 'UNITE_CHANGEMENT_AVEC_STOCK',
+  });
+}
 export const MESSAGE_FICHE_ENREGISTREE = 'Fiche produit enregistrée.';
 export const MESSAGE_AUCUNE_MODIFICATION =
   'Aucune modification de la fiche produit.';
@@ -92,6 +100,43 @@ export class FicheProduitService {
     private readonly accesPharmacie: AccesPharmacieService,
     private readonly mouvementsStock: MouvementsStockService,
   ) {}
+
+  /** Lots à solde positif et agrégats produit d'une fiche, à lire sous ses verrous. */
+  private async lireStockFiche(
+    tx: Prisma.TransactionClient,
+    stockId: string,
+  ): Promise<{
+    lots: LotAConvertir[];
+    produits: { pointDeVenteId: string; quantite: number }[];
+  }> {
+    const lotsLus = await tx.lotStock.findMany({
+      where: {
+        stockMedicamentId: stockId,
+        agregat: { is: { quantite: { gt: 0 } } },
+      },
+      select: {
+        id: true,
+        pointDeVenteId: true,
+        lotTechnique: true,
+        coefficientReception: true,
+        coutUnitaire: true,
+        agregat: { select: { quantite: true } },
+      },
+    });
+    const lots: LotAConvertir[] = lotsLus.map((l) => ({
+      lotId: l.id,
+      pointDeVenteId: l.pointDeVenteId,
+      lotTechnique: l.lotTechnique,
+      coefficientReception: l.coefficientReception,
+      coutUnitaire: l.coutUnitaire,
+      solde: l.agregat?.quantite ?? 0,
+    }));
+    const produits = await tx.agregatStockProduit.findMany({
+      where: { stockMedicamentId: stockId },
+      select: { pointDeVenteId: true, quantite: true },
+    });
+    return { lots, produits };
+  }
 
   async modifierFiche(
     structureId: string,
@@ -156,47 +201,49 @@ export class FicheProduitService {
           });
         }
 
+        const uniteChange = voulus.uniteMinimale !== existante.uniteMinimale;
         let conversion: ConversionAppliquee | null = null;
         let plan: Extract<PlanMultiplication, { ok: true }> | null = null;
         let maintenant = new Date();
+        if (uniteChange && !(coefficientChange && !existante.qualifie)) {
+          // Unité seule : le stock compté dans l'ancienne unité ne peut pas changer de sens (D724)
+          await this.mouvementsStock.verrouillerFiches(tx, [stockId]);
+          const { lots, produits } = await this.lireStockFiche(tx, stockId);
+          // Reprise non qualifiée en UNITE à 1 par boîte : valeur par défaut, aucun chiffre ne change de sens
+          const priseEnCharge =
+            !existante.qualifie &&
+            existante.uniteMinimale === 'UNITE' &&
+            existante.coefficientBoite === 1 &&
+            !coefficientChange;
+          if (!priseEnCharge && aDuStock(produits, lots)) {
+            throw refusUniteAvecStock();
+          }
+        }
         if (coefficientChange && !existante.qualifie) {
           await this.mouvementsStock.verrouillerFiches(tx, [stockId]);
           const [{ maintenant: horloge }] = await tx.$queryRaw<
             { maintenant: Date }[]
           >`SELECT clock_timestamp() AS "maintenant"`;
           maintenant = horloge;
-          const lotsLus = await tx.lotStock.findMany({
-            where: {
-              stockMedicamentId: stockId,
-              agregat: { is: { quantite: { gt: 0 } } },
-            },
-            select: {
-              id: true,
-              pointDeVenteId: true,
-              lotTechnique: true,
-              coefficientReception: true,
-              coutUnitaire: true,
-              agregat: { select: { quantite: true } },
-            },
-          });
-          const lots: LotAConvertir[] = lotsLus.map((l) => ({
-            lotId: l.id,
-            pointDeVenteId: l.pointDeVenteId,
-            lotTechnique: l.lotTechnique,
-            coefficientReception: l.coefficientReception,
-            coutUnitaire: l.coutUnitaire,
-            solde: l.agregat?.quantite ?? 0,
-          }));
-          const produits = await tx.agregatStockProduit.findMany({
-            where: { stockMedicamentId: stockId },
-            select: { pointDeVenteId: true, quantite: true },
-          });
+          const { lots, produits } = await this.lireStockFiche(tx, stockId);
           const stock = aDuStock(produits, lots);
           if (stock && dto.conversionStock === undefined) {
             throw new BadRequestException({
               message: MESSAGE_CONVERSION_REQUISE,
               code: 'CONVERSION_REQUISE',
             });
+          }
+          // Changement d'unité avec du stock : seule la conversion d'une fiche de la reprise (UNITE, 1 par boîte) le permet (D724)
+          if (
+            uniteChange &&
+            stock &&
+            !(
+              dto.conversionStock !== undefined &&
+              existante.uniteMinimale === 'UNITE' &&
+              existante.coefficientBoite === 1
+            )
+          ) {
+            throw refusUniteAvecStock();
           }
           if (dto.conversionStock !== undefined) {
             voulus.qualifie = true;

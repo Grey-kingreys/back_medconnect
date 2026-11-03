@@ -56,6 +56,8 @@ export const CODES_ERREUR = [
   'PRIX_UNITE_SANS_DECONDITIONNEMENT',
   // Coefficient d'une fiche non qualifiée qui a du stock changé sans conversionStock (400).
   'CONVERSION_REQUISE',
+  // Unité minimale changée sur une fiche qui a du stock compté dans l'ancienne unité (409, D724).
+  'UNITE_CHANGEMENT_AVEC_STOCK',
   // Plusieurs lots (ou aucun) : préciser le lot ou faire un inventaire (409).
   'LOT_REQUIS',
   // Correction ou sortie qui rendrait un lot négatif (409).

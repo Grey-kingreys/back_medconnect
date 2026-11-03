@@ -39,8 +39,8 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | PF05 | Clôture journalière : tasks/PF05-cloture-journaliere.md | spécifié | spécifié par le chef, fiches prêtes | 0 |
 | PF06 | Anomalies, alertes de péremption et marge : tasks/PF06a-file-anomalies.md, tasks/PF06b-alertes-peremption-marge.md | spécifié | spécifié par le chef, fiches prêtes | 0 |
 | PB20 | Vente en ligne refusée au-delà du stock, quantité jamais négative en sortie d'API, démo par le rejeu : tasks/PB20-vente-refusee-stock-jamais-negatif.md (D713 à D722, D727, D728) | dur | validé (rapports/PB20-chef.md) | 1 |
-| PF08 | Écran de vente sans attente de livraison, « 0 » et « N à régulariser » : tasks/PF08-vente-refusee-a-regulariser.md (dépend de PB20) | spécifié | contrôlé par le chef (rapports/PF08-chef.md), test navigateur à faire | 1 |
-| PB21 | Unité PLAQUETTE, coefficient de réception dans les lots : tasks/PB21-unite-plaquette.md (D723, D724, dépend de PB20) | spécifié | fiche à valider par le porteur | 0 |
+| PF08 | Écran de vente sans attente de livraison, « 0 » et « N à régulariser » : tasks/PF08-vente-refusee-a-regulariser.md (dépend de PB20) | spécifié | validé (test navigateur OK, front 1cb3fee, rapports/PF08-chef.md) | 1 |
+| PB21 | Unité PLAQUETTE, coefficient de réception dans les lots : tasks/PB21-unite-plaquette.md (D723, D724, dépend de PB20) | spécifié | validé (rapports/PB21-chef.md) | 2 |
 | PF09 | Unité plaquette à l'écran, libellés accordés : tasks/PF09-unite-plaquette.md (D723 à D725, dépend de PB21 et PF08) | spécifié | fiche à valider par le porteur | 0 |
 
 Ordre proposé : PB20, PF08, PB21, PF09, puis reprise de PF07d et des fiches PF03 à PF06, qui appliquent D713 (aucune quantité négative affichée).

@@ -18,6 +18,7 @@ export const UNITES_MINIMALES = [
   'SACHET',
   'GRAMME',
   'AMPOULE',
+  'PLAQUETTE',
   'UNITE',
 ] as const satisfies readonly UniteMinimale[];
 
@@ -77,7 +78,12 @@ export class ModifierFicheDto {
   @Max(10000)
   coefficientBoite?: number;
 
-  @ApiPropertyOptional({ enum: UNITES_MINIMALES, example: 'COMPRIME' })
+  @ApiPropertyOptional({
+    enum: UNITES_MINIMALES,
+    example: 'COMPRIME',
+    description:
+      "Unité minimale de vente. PLAQUETTE : le coefficient est le nombre de plaquettes par boîte, le prix à l'unité celui d'une plaquette. Refusé (409 UNITE_CHANGEMENT_AVEC_STOCK) si la fiche a du stock, sauf pour une fiche non qualifiée en UNITE à coefficient 1 (qualification de la reprise, coefficient conservé, ou conversion avec conversionStock).",
+  })
   @ValidateIf(siPresent)
   @IsIn(UNITES_MINIMALES)
   uniteMinimale?: UniteMinimale;
