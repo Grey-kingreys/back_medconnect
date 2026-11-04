@@ -7,6 +7,7 @@ import {
   type LotPerimeDisponible,
 } from './domaine/selection-lots';
 import { CODE_ESPECES } from './domaine/caisse';
+import { jourConakry } from './jour-metier';
 
 /** Numéro lisible d'un ticket : T<ordre du PV>-<numéro sur 7 chiffres au moins> (D423, D539). */
 export function formaterNumeroTicket(ordre: number, numero: number): string {
@@ -450,6 +451,9 @@ export interface PieceLieeLue {
   createdAt: Date;
   vendeurId: string;
   vendeurNom: string;
+  posteId: string;
+  sessionCaisseId: string;
+  jourMetier: Date;
 }
 export interface PieceAnnulable {
   typePiece: TypePieceVente;
@@ -464,6 +468,11 @@ export interface AnnulationExposee {
   motif: string;
   le: Date;
   par: { id: string; nom: string };
+  /** Poste et caisse de la pièce d'annulation (là où le remboursement est enregistré), pas ceux de la vente d'origine. */
+  posteId: string;
+  sessionCaisseId: string;
+  /** Jour métier de la caisse de l'auteur (AAAA-MM-JJ), qui peut différer du jour de `le` (caisse d'un jour passé, ou rattachée au lendemain d'une clôture, D753). */
+  jourMetier: string;
 }
 export interface EtatAnnulation {
   statut: StatutVente;
@@ -502,6 +511,9 @@ export function deriverAnnulation(
         motif: liee.motifAnnulation ?? '',
         le: liee.createdAt,
         par: { id: liee.vendeurId, nom: liee.vendeurNom },
+        posteId: liee.posteId,
+        sessionCaisseId: liee.sessionCaisseId,
+        jourMetier: jourConakry(liee.jourMetier),
       },
     };
   }

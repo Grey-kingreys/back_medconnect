@@ -46,7 +46,7 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 
 | PD01 | Squelette Electron et embarquement standalone, dépôt front, branche orch/pharmacie-t1-desktop : tasks/PD01-squelette-electron-standalone.md (D733 à D736, D749 à D751) | dur | validé (rapports/PD01-chef.md) | 2 |
 | PD02a | Règles portées, stockage local, catalogue et stock dérivé : tasks/PD02a-regles-stockage-catalogue.md | dur | validé (rapports/PD02a-chef.md) | 2 |
-| PD02b | Cœur hors ligne : vente, caisse, journal, plages : tasks/PD02b-coeur-vente-caisse.md | dur | à faire | 0 |
+| PD02b | Cœur hors ligne : vente, caisse, journal, plages : tasks/PD02b-coeur-vente-caisse.md (D752, D753 ; `annulation` du back enrichie, à déployer avant ou avec le desktop) | dur | validé (rapports/PD02b-chef.md) | 2 |
 | PD03 | Client de synchronisation : tasks/PD03-client-synchro.md | spécifié | à faire | 0 |
 | PD04a | Pont IPC, source desktop, synchro branchée : tasks/PD04a-pont-ipc-source-desktop.md | dur | à faire | 0 |
 | PD04b | Rester connecté hors ligne : tasks/PD04b-connexion-hors-ligne.md | dur | à faire | 0 |

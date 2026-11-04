@@ -499,6 +499,13 @@ describe('Journée clôturée : verrou des écrivains, rattachement, CA20 et cou
     expect(piece.rows[0].typePiece).toBe('ANNULATION');
     expect(piece.rows[0].venteOrigineId).toBe(V1.data.id);
     expect(piece.rows[0].jour).toBe(demain);
+    // D753 : la réponse donne le jour réel de la caisse de l'auteur, pas le jour de `le`.
+    const annulation = A.data.annulation as unknown as {
+      le: Date | string;
+      jourMetier: string;
+    };
+    expect(annulation.jourMetier).toBe(demain);
+    expect(new Date(annulation.le).toISOString().slice(0, 10)).toBe(jour(0));
     const session = await sql(
       `SELECT to_char("jourMetier", 'YYYY-MM-DD') AS "jour" FROM "SessionCaisse" WHERE "id" = $1`,
       [piece.rows[0].sessionCaisseId],

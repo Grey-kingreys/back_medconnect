@@ -76,7 +76,9 @@ Tests dans `vente/page.test.tsx`, pont simulé : hors ligne : ajout d'un médica
 `annulerVente` en desktop, dans `source_desktop` :
 1. file non vide : 409 sans appel, « Envoi des ventes en cours : réessayez dans un instant. » (annuler une vente que le serveur n'a pas encore serait un 404, et une caisse inconnue de lui en créerait une autre) ;
 2. `POST .../annuler` avec `{ motif, posteId }` du poste desktop. `api_ventes.annulerVente` gagne `posteId?` facultatif, le web ne le passe jamais. Sans cela l'annulation irait sur la caisse web par défaut du vendeur, et le remboursement sortirait du mauvais tiroir ;
-3. `enregistrerAnnulationServeur(réponse)`, puis cycle de synchro forcé (photographie, retour du stock).
+3. `enregistrerAnnulationServeur(réponse)`, puis cycle de synchro forcé (photographie, retour du stock). Refus du cœur (`ANNULATION_AUTRE_POSTE`, `ANNULATION_AUTRE_CAISSE`, `ANNULATION_CAISSE_FERMEE`) : l'annulation est **déjà faite au serveur** : afficher le message du cœur, ne pas proposer de réessayer.
+
+Contrat (D745, D753) : `AnnulationPiece` de `src/lib/api_ventes.ts` gagne `posteId?: string`, `sessionCaisseId?: string`, `jourMetier?: string`, facultatifs parce qu'un document local ou une pièce plus ancienne peut ne pas les porter. Retirer alors de `desktop/coeur/vente_locale.ts` l'intersection de `ReponseAnnulation`, qui les exige encore à la réception par une définition propre (`Required<...>` sur ces trois champs), et recopier les trois champs dans `annulation` de la vente locale marquée annulée. **Le back de ce commit doit partir avant ou avec le desktop** : sans `jourMetier`, l'adoption refuse la réponse.
 
 ### 6. Scénario de preuve (réseau réellement coupé)
 
