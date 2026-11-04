@@ -21,6 +21,16 @@ import {
   typeStructureEffectif,
 } from './permissions-type-structure';
 
+const PERMISSIONS_T1 = [
+  'caisse:utiliser',
+  'caisse:superviser',
+  'cloture:gerer',
+  'inventaire:write',
+  'reception:write',
+  'marge:read',
+  'anomalie:gerer',
+];
+
 describe('Permissions selon le type de structure (B10)', () => {
   describe('fonctions pures', () => {
     it('1. pharmacie : ne garde que la liste blanche, dans l ordre du catalogue', () => {
@@ -36,6 +46,13 @@ describe('Permissions selon le type de structure (B10)', () => {
         'vente:read',
         'vente:write',
         'vente:annuler',
+        'caisse:utiliser',
+        'caisse:superviser',
+        'cloture:gerer',
+        'inventaire:write',
+        'reception:write',
+        'marge:read',
+        'anomalie:gerer',
         'structure:read',
         'structure:write',
         'membre:read',
@@ -90,6 +107,23 @@ describe('Permissions selon le type de structure (B10)', () => {
           null,
         ),
       ).toEqual(['carnet:read']);
+    });
+
+    it('2e. hôpital, clinique et sans structure : les 7 permissions T1 sont retirées', () => {
+      for (const type of ['HOPITAL', 'CLINIQUE', null] as const) {
+        expect(
+          filtrerPermissionsSelonTypeStructure(
+            [...PERMISSIONS_T1, 'carnet:read'],
+            type,
+          ),
+        ).toEqual(['carnet:read']);
+      }
+    });
+
+    it('2f. pharmacie : les 7 permissions T1 sont conservées', () => {
+      expect(
+        filtrerPermissionsSelonTypeStructure([...PERMISSIONS_T1], 'PHARMACIE'),
+      ).toEqual(PERMISSIONS_T1);
     });
 
     it('3. les rôles par défaut d une pharmacie ne perdent rien', () => {

@@ -1,0 +1,1029 @@
+{
+  "str-pharma-1": {
+    "data": {
+      "alertes": {
+        "rupture": [
+          {
+            "id": "stk-13",
+            "nom": "Diclofénac 50 mg",
+            "quantiteARegulariser": 0
+          },
+          {
+            "id": "stk-01",
+            "nom": "Paracétamol 500 mg",
+            "quantiteARegulariser": 0
+          },
+          {
+            "id": "stk-19",
+            "nom": "Paracétamol sirop 120 mg/5 ml",
+            "quantiteARegulariser": 0
+          },
+          {
+            "id": "stk-07",
+            "nom": "Sel de réhydratation orale",
+            "quantiteARegulariser": 0
+          }
+        ],
+        "stockBas": [
+          {
+            "id": "stk-14",
+            "nom": "Amlodipine 5 mg",
+            "quantite": 1
+          },
+          {
+            "id": "stk-03",
+            "nom": "Amoxicilline 500 mg",
+            "quantite": 9
+          },
+          {
+            "id": "stk-08",
+            "nom": "Cotrimoxazole 480 mg",
+            "quantite": 1
+          },
+          {
+            "id": "stk-02",
+            "nom": "Ibuprofène 400 mg",
+            "quantite": 1
+          },
+          {
+            "id": "stk-15",
+            "nom": "Metformine 500 mg",
+            "quantite": 9
+          },
+          {
+            "id": "stk-09",
+            "nom": "Vitamine C 500 mg",
+            "quantite": 9
+          },
+          {
+            "id": "stk-20",
+            "nom": "Zinc 20 mg",
+            "quantite": 1
+          }
+        ]
+      },
+      "stocks": [
+        {
+          "dateExpiration": "J+180j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-11",
+          "medicament": {
+            "categorie": "Antiparasitaire",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-11",
+            "nom": "Albendazole 400 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-11",
+          "notes": null,
+          "prixUnitaire": 1500,
+          "quantite": 11,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+0j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-14",
+          "medicament": {
+            "categorie": "Antihypertenseur",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-14",
+            "nom": "Amlodipine 5 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": true
+          },
+          "medicamentId": "med-14",
+          "notes": null,
+          "prixUnitaire": 0,
+          "quantite": 1,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+180j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-03",
+          "medicament": {
+            "categorie": "Antibiotique",
+            "formes": [
+              "gélule"
+            ],
+            "id": "med-03",
+            "nom": "Amoxicilline 500 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": true
+          },
+          "medicamentId": "med-03",
+          "notes": null,
+          "prixUnitaire": 2500,
+          "quantite": 9,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J-30j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-05",
+          "medicament": {
+            "categorie": "Antipaludéen",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-05",
+            "nom": "Artéméther Luméfantrine",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-05",
+          "notes": null,
+          "prixUnitaire": 12000,
+          "quantite": 11,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J-30j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-17",
+          "medicament": {
+            "categorie": "Antihistaminique",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-17",
+            "nom": "Chlorphénamine 4 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-17",
+          "notes": null,
+          "prixUnitaire": null,
+          "quantite": 11,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": null,
+          "disponible": true,
+          "id": "stk-08",
+          "medicament": {
+            "categorie": "Antibiotique",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-08",
+            "nom": "Cotrimoxazole 480 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": true
+          },
+          "medicamentId": "med-08",
+          "notes": "Note du harnais",
+          "prixUnitaire": 2500,
+          "quantite": 1,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J-30j 00:00:00.000",
+          "disponible": false,
+          "id": "stk-13",
+          "medicament": {
+            "categorie": "Anti-inflammatoire",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-13",
+            "nom": "Diclofénac 50 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-13",
+          "notes": null,
+          "prixUnitaire": 2500,
+          "quantite": 0,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+0j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-10",
+          "medicament": {
+            "categorie": "Supplément",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-10",
+            "nom": "Fer acide folique",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-10",
+          "notes": null,
+          "prixUnitaire": 12000,
+          "quantite": 10,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+0j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-02",
+          "medicament": {
+            "categorie": "Anti-inflammatoire",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-02",
+            "nom": "Ibuprofène 400 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-02",
+          "notes": null,
+          "prixUnitaire": null,
+          "quantite": 1,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+0j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-18",
+          "medicament": {
+            "categorie": "Antihistaminique",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-18",
+            "nom": "Loratadine 10 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-18",
+          "notes": null,
+          "prixUnitaire": 2500,
+          "quantite": 240,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+180j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-15",
+          "medicament": {
+            "categorie": "Antidiabétique",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-15",
+            "nom": "Metformine 500 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-15",
+          "notes": "Note du harnais",
+          "prixUnitaire": 12000,
+          "quantite": 9,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": null,
+          "disponible": true,
+          "id": "stk-04",
+          "medicament": {
+            "categorie": "Antibiotique",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-04",
+            "nom": "Métronidazole 250 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-04",
+          "notes": null,
+          "prixUnitaire": 0,
+          "quantite": 10,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+0j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-06",
+          "medicament": {
+            "categorie": "Antiulcéreux",
+            "formes": [
+              "gélule"
+            ],
+            "id": "med-06",
+            "nom": "Oméprazole 20 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-06",
+          "notes": null,
+          "prixUnitaire": 1500,
+          "quantite": 240,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J-30j 00:00:00.000",
+          "disponible": false,
+          "id": "stk-01",
+          "medicament": {
+            "categorie": "Antalgique",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-01",
+            "nom": "Paracétamol 500 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-01",
+          "notes": "Note du harnais",
+          "prixUnitaire": 1500,
+          "quantite": 0,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+180j 00:00:00.000",
+          "disponible": false,
+          "id": "stk-19",
+          "medicament": {
+            "categorie": "Antalgique",
+            "formes": [
+              "sirop"
+            ],
+            "id": "med-19",
+            "nom": "Paracétamol sirop 120 mg/5 ml",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-19",
+          "notes": null,
+          "prixUnitaire": 0,
+          "quantite": 0,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": null,
+          "disponible": true,
+          "id": "stk-12",
+          "medicament": {
+            "categorie": "Antipaludéen",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-12",
+            "nom": "Quinine 300 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-12",
+          "notes": null,
+          "prixUnitaire": null,
+          "quantite": 240,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": null,
+          "disponible": true,
+          "id": "stk-16",
+          "medicament": {
+            "categorie": "Bronchodilatateur",
+            "formes": [
+              "sirop"
+            ],
+            "id": "med-16",
+            "nom": "Salbutamol sirop",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-16",
+          "notes": null,
+          "prixUnitaire": 1500,
+          "quantite": 10,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+180j 00:00:00.000",
+          "disponible": false,
+          "id": "stk-07",
+          "medicament": {
+            "categorie": "Réhydratation",
+            "formes": [
+              "sachet"
+            ],
+            "id": "med-07",
+            "nom": "Sel de réhydratation orale",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-07",
+          "notes": null,
+          "prixUnitaire": null,
+          "quantite": 0,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J-30j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-09",
+          "medicament": {
+            "categorie": "Vitamine",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-09",
+            "nom": "Vitamine C 500 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-09",
+          "notes": null,
+          "prixUnitaire": 0,
+          "quantite": 9,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": null,
+          "disponible": true,
+          "id": "stk-20",
+          "medicament": {
+            "categorie": "Supplément",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-20",
+            "nom": "Zinc 20 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-20",
+          "notes": null,
+          "prixUnitaire": 12000,
+          "quantite": 1,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        }
+      ]
+    },
+    "message": "20 médicament(s) en stock",
+    "success": true
+  },
+  "str-pharma-2": {
+    "data": {
+      "alertes": {
+        "rupture": [
+          {
+            "id": "stk-31",
+            "nom": "Albendazole 400 mg",
+            "quantiteARegulariser": 0
+          },
+          {
+            "id": "stk-25",
+            "nom": "Artéméther Luméfantrine",
+            "quantiteARegulariser": 0
+          }
+        ],
+        "stockBas": [
+          {
+            "id": "stk-33",
+            "nom": "Diclofénac 50 mg",
+            "quantite": 9
+          },
+          {
+            "id": "stk-26",
+            "nom": "Oméprazole 20 mg",
+            "quantite": 1
+          },
+          {
+            "id": "stk-21",
+            "nom": "Paracétamol 500 mg",
+            "quantite": 9
+          },
+          {
+            "id": "stk-32",
+            "nom": "Quinine 300 mg",
+            "quantite": 1
+          },
+          {
+            "id": "stk-27",
+            "nom": "Sel de réhydratation orale",
+            "quantite": 9
+          }
+        ]
+      },
+      "stocks": [
+        {
+          "dateExpiration": "J+180j 00:00:00.000",
+          "disponible": false,
+          "id": "stk-31",
+          "medicament": {
+            "categorie": "Antiparasitaire",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-11",
+            "nom": "Albendazole 400 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-11",
+          "notes": null,
+          "prixUnitaire": 1500,
+          "quantite": 0,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+0j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-34",
+          "medicament": {
+            "categorie": "Antihypertenseur",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-14",
+            "nom": "Amlodipine 5 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": true
+          },
+          "medicamentId": "med-14",
+          "notes": null,
+          "prixUnitaire": 0,
+          "quantite": 10,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+180j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-23",
+          "medicament": {
+            "categorie": "Antibiotique",
+            "formes": [
+              "gélule"
+            ],
+            "id": "med-03",
+            "nom": "Amoxicilline 500 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": true
+          },
+          "medicamentId": "med-03",
+          "notes": null,
+          "prixUnitaire": 2500,
+          "quantite": 11,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J-30j 00:00:00.000",
+          "disponible": false,
+          "id": "stk-25",
+          "medicament": {
+            "categorie": "Antipaludéen",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-05",
+            "nom": "Artéméther Luméfantrine",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-05",
+          "notes": null,
+          "prixUnitaire": 12000,
+          "quantite": 0,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": null,
+          "disponible": true,
+          "id": "stk-28",
+          "medicament": {
+            "categorie": "Antibiotique",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-08",
+            "nom": "Cotrimoxazole 480 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": true
+          },
+          "medicamentId": "med-08",
+          "notes": null,
+          "prixUnitaire": 2500,
+          "quantite": 10,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J-30j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-33",
+          "medicament": {
+            "categorie": "Anti-inflammatoire",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-13",
+            "nom": "Diclofénac 50 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-13",
+          "notes": null,
+          "prixUnitaire": 2500,
+          "quantite": 9,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+0j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-30",
+          "medicament": {
+            "categorie": "Supplément",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-10",
+            "nom": "Fer acide folique",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-10",
+          "notes": null,
+          "prixUnitaire": 12000,
+          "quantite": 240,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+0j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-22",
+          "medicament": {
+            "categorie": "Anti-inflammatoire",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-02",
+            "nom": "Ibuprofène 400 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-02",
+          "notes": "Note du harnais",
+          "prixUnitaire": null,
+          "quantite": 10,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+180j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-35",
+          "medicament": {
+            "categorie": "Antidiabétique",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-15",
+            "nom": "Metformine 500 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-15",
+          "notes": null,
+          "prixUnitaire": 12000,
+          "quantite": 11,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": null,
+          "disponible": true,
+          "id": "stk-24",
+          "medicament": {
+            "categorie": "Antibiotique",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-04",
+            "nom": "Métronidazole 250 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-04",
+          "notes": null,
+          "prixUnitaire": 0,
+          "quantite": 240,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+0j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-26",
+          "medicament": {
+            "categorie": "Antiulcéreux",
+            "formes": [
+              "gélule"
+            ],
+            "id": "med-06",
+            "nom": "Oméprazole 20 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-06",
+          "notes": null,
+          "prixUnitaire": 1500,
+          "quantite": 1,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J-30j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-21",
+          "medicament": {
+            "categorie": "Antalgique",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-01",
+            "nom": "Paracétamol 500 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-01",
+          "notes": null,
+          "prixUnitaire": 1500,
+          "quantite": 9,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": null,
+          "disponible": true,
+          "id": "stk-32",
+          "medicament": {
+            "categorie": "Antipaludéen",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-12",
+            "nom": "Quinine 300 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-12",
+          "notes": null,
+          "prixUnitaire": null,
+          "quantite": 1,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+180j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-27",
+          "medicament": {
+            "categorie": "Réhydratation",
+            "formes": [
+              "sachet"
+            ],
+            "id": "med-07",
+            "nom": "Sel de réhydratation orale",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-07",
+          "notes": null,
+          "prixUnitaire": null,
+          "quantite": 9,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J-30j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-29",
+          "medicament": {
+            "categorie": "Vitamine",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-09",
+            "nom": "Vitamine C 500 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-09",
+          "notes": "Note du harnais",
+          "prixUnitaire": 0,
+          "quantite": 11,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        }
+      ]
+    },
+    "message": "15 médicament(s) en stock",
+    "success": true
+  },
+  "str-pharma-3": {
+    "data": {
+      "alertes": {
+        "rupture": [
+          {
+            "id": "stk-37",
+            "nom": "Ibuprofène 400 mg",
+            "quantiteARegulariser": 0
+          }
+        ],
+        "stockBas": [
+          {
+            "id": "stk-38",
+            "nom": "Amoxicilline 500 mg",
+            "quantite": 1
+          },
+          {
+            "id": "stk-39",
+            "nom": "Métronidazole 250 mg",
+            "quantite": 9
+          }
+        ]
+      },
+      "stocks": [
+        {
+          "dateExpiration": "J+0j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-38",
+          "medicament": {
+            "categorie": "Antibiotique",
+            "formes": [
+              "gélule"
+            ],
+            "id": "med-03",
+            "nom": "Amoxicilline 500 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": true
+          },
+          "medicamentId": "med-03",
+          "notes": null,
+          "prixUnitaire": 2500,
+          "quantite": 1,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-3",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": null,
+          "disponible": true,
+          "id": "stk-40",
+          "medicament": {
+            "categorie": "Antipaludéen",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-05",
+            "nom": "Artéméther Luméfantrine",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-05",
+          "notes": null,
+          "prixUnitaire": 12000,
+          "quantite": 10,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-3",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J-30j 00:00:00.000",
+          "disponible": false,
+          "id": "stk-37",
+          "medicament": {
+            "categorie": "Anti-inflammatoire",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-02",
+            "nom": "Ibuprofène 400 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-02",
+          "notes": null,
+          "prixUnitaire": null,
+          "quantite": 0,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-3",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+180j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-39",
+          "medicament": {
+            "categorie": "Antibiotique",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-04",
+            "nom": "Métronidazole 250 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-04",
+          "notes": null,
+          "prixUnitaire": 0,
+          "quantite": 9,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-3",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": null,
+          "disponible": true,
+          "id": "stk-36",
+          "medicament": {
+            "categorie": "Antalgique",
+            "formes": [
+              "comprimé"
+            ],
+            "id": "med-01",
+            "nom": "Paracétamol 500 mg",
+            "nomGenerique": null,
+            "ordonnanceRequise": false
+          },
+          "medicamentId": "med-01",
+          "notes": "Note du harnais",
+          "prixUnitaire": 1500,
+          "quantite": 240,
+          "quantiteARegulariser": 0,
+          "structureId": "str-pharma-3",
+          "updatedAt": "<volatil>"
+        }
+      ]
+    },
+    "message": "5 médicament(s) en stock",
+    "success": true
+  }
+}

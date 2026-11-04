@@ -3,7 +3,6 @@ import {
   IsOptional,
   IsString,
   IsBoolean,
-  IsNumber,
   IsInt,
   IsArray,
   IsDateString,
@@ -11,6 +10,8 @@ import {
   Min,
   Max,
   Length,
+  NotEquals,
+  MaxLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -94,10 +95,15 @@ export class UpsertStockDto {
   @IsString()
   medicamentId: string;
 
-  @ApiProperty({ example: 50 })
-  @IsNumber()
+  @ApiPropertyOptional({
+    example: 50,
+    description:
+      'Quantité en stock, en unités minimales. Absente : aucune écriture de stock (prix et notes seulement).',
+  })
+  @IsOptional()
+  @IsInt({ message: 'La quantité doit être un nombre entier.' })
   @Min(0)
-  quantite: number;
+  quantite?: number;
 
   @ApiPropertyOptional({ example: 35000, description: 'Prix en GNF' })
   @IsOptional()
@@ -118,12 +124,44 @@ export class UpsertStockDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @ApiPropertyOptional({
+    description:
+      "Vrai pour un médicament sans date de péremption : autorise l'absence de date quand la saisie crée un lot.",
+  })
+  @IsOptional()
+  @IsBoolean()
+  sansPeremption?: boolean;
 }
 
 export class UpdateStockQuantiteDto {
-  @ApiProperty({ example: 10, description: 'Ajouter ou retirer (négatif)' })
+  @ApiProperty({
+    example: -2,
+    description: 'Ajouter ou retirer (négatif), en unités minimales',
+  })
   @IsInt({ message: 'La variation doit être un nombre entier.' })
+  @NotEquals(0, { message: 'La variation ne peut pas être nulle.' })
   variation: number;
+
+  @ApiPropertyOptional({
+    description:
+      "Lot à corriger ; facultatif si le médicament n'a qu'un lot en stock",
+  })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  lotId?: string;
+
+  @ApiPropertyOptional({
+    example: 'Boîte abîmée au rangement',
+    description: 'Motif de la correction, obligatoire (3 à 300 caractères)',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(300, {
+    message: 'Le motif ne doit pas dépasser 300 caractères.',
+  })
+  motif?: string;
 
   @ApiPropertyOptional({ example: 'Livraison du 26/04/2026' })
   @IsOptional()
@@ -151,7 +189,19 @@ export class OptionsImportStockDto {
     enum: MODES_IMPORT_STOCK,
     default: 'inventaire',
     description:
-      "inventaire : la quantité du fichier remplace la quantité en stock. livraison : elle s'y ajoute.",
+      "inventaire (défaut, inventaire:write) : la quantité comptée remplace le stock du lot, écart enregistré, anomalie au-delà de la tolérance. livraison (reception:write) : la quantité du fichier (en boîtes) s'ajoute au stock par une réception, un lot par ligne.",
+  })
+  @IsOptional()
+  @IsIn(MODES_IMPORT_STOCK)
+  mode?: ModeImportStock;
+}
+
+/** Paramètre de la route du modèle Excel. */
+export class ModeleImportStockDto {
+  @ApiPropertyOptional({
+    enum: MODES_IMPORT_STOCK,
+    default: 'livraison',
+    description: "Modèle de livraison (défaut) ou d'inventaire",
   })
   @IsOptional()
   @IsIn(MODES_IMPORT_STOCK)
@@ -175,10 +225,36 @@ export interface LigneImportStock {
   /** Date ISO 8601. */
   dateExpiration?: string;
   notes?: string;
-  /** Quantité en stock avant l'import (0 si le médicament n'y est pas), lignes acceptées seulement. */
+  /** Numéro de lot inscrit sur la boîte (colonne « Lot »). */
+  numeroLot?: string;
+  /** Coût d'achat d'une boîte en GNF (colonne « Coût d'achat »), retiré sans marge:read. */
+  coutAchatBoite?: number;
+  /** Vrai si la date de péremption est « sans péremption ». */
+  sansPeremption?: boolean;
+  /** Unités minimales reçues (boîtes x unités par boîte de la fiche), lignes acceptées seulement. */
+  unitesRecues?: number;
+  /** Lot créé par l'import, lignes acceptées seulement. */
+  lotId?: string;
+  /** Livraison : stock calculé en unités avant l'import ; inventaire : stock du lot avant le comptage (0 pour un nouveau lot). Lignes acceptées seulement. */
   quantiteAvant?: number;
-  /** Quantité en stock après l'import, selon le mode choisi, lignes acceptées seulement. */
+  /** Livraison : stock calculé après l'import ; inventaire : quantité comptée. Lignes acceptées seulement. */
   quantiteApres?: number;
+  /** Livraison : part du stock à régulariser avant l'import (ventes faites sans stock), seulement si positive (D717). */
+  quantiteARegulariserAvant?: number;
+  /** Inventaire : unités d'une boîte entamée (colonne « Unités en plus »). */
+  unitesEnPlus?: number;
+  /** Inventaire : unités comptées (boîtes x unités par boîte du lot + unités en plus). */
+  quantiteComptee?: number;
+  /** Inventaire : stock attendu du lot (stock moins les ventes faites sans stock rattachées), jamais négatif (D717). */
+  quantiteTheorique?: number;
+  /** Inventaire : part des ventes faites sans stock que le lot ne couvre pas, `max(0, -théorique)` (D717). */
+  quantiteARegulariser?: number;
+  /** Inventaire : quantité comptée moins quantité théorique. */
+  ecart?: number;
+  /** Inventaire : écart de la fiche dans la tolérance du médicament. */
+  sousTolerance?: boolean;
+  /** Inventaire : boîtes d'un lot qui n'était pas enregistré (lot créé). */
+  nouveauLot?: boolean;
 }
 
 /** Colonnes du fichier telles que l'import les a comprises, montrées dans l'aperçu. */
@@ -207,6 +283,8 @@ export type RapportImportStock = RapportImport<LigneImportStock>;
 /** Rapport de l'import, avec le nombre de lignes réellement écrites. */
 export interface ResultatImportStock extends RapportImportStock {
   importees: number;
+  receptionId: string | null;
+  inventaireId: string | null;
 }
 
 // Import Excel du catalogue des médicaments

@@ -18,6 +18,7 @@ import {
   VERSION_PAR_DEFAUT,
 } from '../configuration-publique/configuration-publique.constants';
 import { NUMERO_URGENCE_MEDICALE_PAR_DEFAUT } from './numeros-urgence';
+import { validerOriginesDesktop } from './origines-cors';
 
 const WEAK_SECRETS = new Set([
   'secret',
@@ -158,6 +159,8 @@ const RULES: Rule[] = [
     validate: (v) =>
       v === 'true' || v === 'false' ? null : "doit valoir 'true' ou 'false'",
   },
+  // Optionnelle : origines du serveur local du desktop pour le CORS (D635).
+  { key: 'DESKTOP_ORIGINS', required: false, validate: validerOriginesDesktop },
   // Mode démo (cf. src/demo/) : comptes et données fictives, connexion sans mot de
   // passe. Inactif par défaut ; seule la valeur `true` (casse indifférente) l'active.
   {

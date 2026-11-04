@@ -1,0 +1,162 @@
+{
+  "date invalide": {
+    "reponse": {
+      "champs": [
+        {
+          "champ": "date",
+          "contraintes": [
+            "dateValide"
+          ]
+        }
+      ],
+      "code": "VALIDATION",
+      "message": "La date doit être une date valide au format AAAA-MM-JJ."
+    },
+    "statut": 400
+  },
+  "str-pharma-1 J": {
+    "data": {
+      "date": "J+0",
+      "nombre": 4,
+      "page": 1,
+      "parPage": 50,
+      "totalJour": 24000,
+      "totalPages": 1,
+      "ventes": [
+        {
+          "clientNom": null,
+          "createdAt": "J+0j 11:00:00.000",
+          "id": "vte-p1-4",
+          "nombreArticles": 1,
+          "numero": "V-AAAA-000004",
+          "statut": "VALIDEE",
+          "total": 1500,
+          "vendeur": {
+            "id": "usr-pharm-p1",
+            "nom": "Mamadou Diallo"
+          }
+        },
+        {
+          "clientNom": null,
+          "createdAt": "J+0j 10:00:00.000",
+          "id": "vte-p1-3",
+          "nombreArticles": 1,
+          "numero": "V-AAAA-000003",
+          "statut": "ANNULEE",
+          "total": 1500,
+          "vendeur": {
+            "id": "usr-pharm-p1",
+            "nom": "Mamadou Diallo"
+          }
+        },
+        {
+          "clientNom": "Mariama Bah",
+          "createdAt": "J+0j 09:00:00.000",
+          "id": "vte-p1-2",
+          "nombreArticles": 3,
+          "numero": "V-AAAA-000002",
+          "statut": "VALIDEE",
+          "total": 7500,
+          "vendeur": {
+            "id": "usr-admin-p1",
+            "nom": "Fatoumata Camara"
+          }
+        },
+        {
+          "clientNom": null,
+          "createdAt": "J+0j 08:00:00.000",
+          "id": "vte-p1-1",
+          "nombreArticles": 3,
+          "numero": "V-AAAA-000001",
+          "statut": "VALIDEE",
+          "total": 15000,
+          "vendeur": {
+            "id": "usr-pharm-p1",
+            "nom": "Mamadou Diallo"
+          }
+        }
+      ]
+    },
+    "message": "4 vente(s) le J+0.",
+    "success": true
+  },
+  "str-pharma-1 J page 2": {
+    "data": {
+      "date": "J+0",
+      "nombre": 4,
+      "page": 2,
+      "parPage": 50,
+      "totalJour": 24000,
+      "totalPages": 1,
+      "ventes": []
+    },
+    "message": "4 vente(s) le J+0.",
+    "success": true
+  },
+  "str-pharma-1 veille": {
+    "data": {
+      "date": "J-1",
+      "nombre": 0,
+      "page": 1,
+      "parPage": 50,
+      "totalJour": 0,
+      "totalPages": 1,
+      "ventes": []
+    },
+    "message": "0 vente(s) le J-1.",
+    "success": true
+  },
+  "str-pharma-2 J": {
+    "data": {
+      "date": "J+0",
+      "nombre": 0,
+      "page": 1,
+      "parPage": 50,
+      "totalJour": 0,
+      "totalPages": 1,
+      "ventes": []
+    },
+    "message": "0 vente(s) le J+0.",
+    "success": true
+  },
+  "str-pharma-2 veille": {
+    "data": {
+      "date": "J-1",
+      "nombre": 2,
+      "page": 1,
+      "parPage": 50,
+      "totalJour": 6000,
+      "totalPages": 1,
+      "ventes": [
+        {
+          "clientNom": null,
+          "createdAt": "J-1j 16:00:00.000",
+          "id": "vte-p2-2",
+          "nombreArticles": 2,
+          "numero": "V-AAAA-000002",
+          "statut": "ANNULEE",
+          "total": 24000,
+          "vendeur": {
+            "id": "usr-pharm-p2",
+            "nom": "Aïssatou Barry"
+          }
+        },
+        {
+          "clientNom": null,
+          "createdAt": "J-1j 15:00:00.000",
+          "id": "vte-p2-1",
+          "nombreArticles": 4,
+          "numero": "V-AAAA-000001",
+          "statut": "VALIDEE",
+          "total": 6000,
+          "vendeur": {
+            "id": "usr-pharm-p2",
+            "nom": "Aïssatou Barry"
+          }
+        }
+      ]
+    },
+    "message": "2 vente(s) le J-1.",
+    "success": true
+  }
+}

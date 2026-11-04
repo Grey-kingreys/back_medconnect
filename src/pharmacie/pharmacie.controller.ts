@@ -43,6 +43,7 @@ import {
   UpdateStockQuantiteDto,
   FichierImport,
   OptionsImportStockDto,
+  ModeleImportStockDto,
 } from './dto/pharmacie.dto';
 
 // Schéma Swagger du formulaire d'envoi du classeur (stock et catalogue)
@@ -85,7 +86,7 @@ export class PharmacieController {
   @ApiOperation({
     summary: 'Rechercher un médicament (public)',
     description:
-      "Cherche la disponibilité d'un médicament dans les pharmacies partenaires.",
+      "Route publique, sans authentification. Succès : 200. Cherche la disponibilité d'un médicament dans les pharmacies partenaires : seuls les lots non périmés comptent, fiches archivées exclues, ni lots ni coûts dans la réponse.",
   })
   @ApiQuery({ name: 'q', required: false, description: 'Nom du médicament' })
   @ApiQuery({ name: 'ville', required: false })
@@ -109,7 +110,11 @@ export class PharmacieController {
   }
 
   @Get('catalogue')
-  @ApiOperation({ summary: 'Catalogue des médicaments (public)' })
+  @ApiOperation({
+    summary: 'Catalogue des médicaments (public)',
+    description:
+      'Route publique, sans authentification. Succès : 200. Catalogue partagé, filtrable par nom (search) et par catégorie.',
+  })
   @ApiQuery({ name: 'search', required: false })
   @ApiQuery({ name: 'categorie', required: false })
   getMedicaments(
@@ -120,7 +125,11 @@ export class PharmacieController {
   }
 
   @Get('catalogue/categories')
-  @ApiOperation({ summary: 'Liste des catégories de médicaments (public)' })
+  @ApiOperation({
+    summary: 'Liste des catégories de médicaments (public)',
+    description:
+      'Route publique, sans authentification. Succès : 200. Catégories présentes dans le catalogue partagé.',
+  })
   getCategories() {
     return this.pharmacieService.getCategories();
   }
@@ -129,7 +138,8 @@ export class PharmacieController {
   @ApiParam({ name: 'medicamentId' })
   @ApiOperation({
     summary: "Détails d'un médicament",
-    description: 'Retourne les détails + les pharmacies où il est disponible.',
+    description:
+      'Route publique, sans authentification. Succès : 200. Retourne les détails et les pharmacies où il est disponible (lots non périmés seulement, ni lots ni coûts). 404 si le médicament est introuvable.',
   })
   getMedicament(@Param('medicamentId') medicamentId: string) {
     return this.pharmacieService.getMedicament(medicamentId);
@@ -142,7 +152,11 @@ export class PharmacieController {
   @Post('catalogue')
   @HttpCode(HttpStatus.CREATED)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Ajouter un médicament au catalogue (Admin)' })
+  @ApiOperation({
+    summary: 'Ajouter un médicament au catalogue (Admin)',
+    description:
+      'Permission : catalogue:write. Succès : 201. 409 si un médicament du même nom (sans tenir compte de la casse) existe déjà, sans code.',
+  })
   createMedicament(@Body() dto: CreateMedicamentDto, @Req() req: any) {
     return this.pharmacieService.createMedicament(dto, req.user.userId);
   }
@@ -157,7 +171,7 @@ export class PharmacieController {
   @ApiOperation({
     summary: "Télécharger le modèle Excel d'import du catalogue",
     description:
-      "Classeur .xlsx : feuille « Catalogue » (Nom, Nom générique, Catégorie, Description, Ordonnance requise, Formes) avec une ligne d'exemple, et feuille « Mode d'emploi ».",
+      "Permission : catalogue:write. Succès : 200. Classeur .xlsx : feuille « Catalogue » (Nom, Nom générique, Catégorie, Description, Ordonnance requise, Formes) avec une ligne d'exemple, et feuille « Mode d'emploi ».",
   })
   async getModeleImportCatalogue(): Promise<StreamableFile> {
     const contenu =
@@ -179,7 +193,7 @@ export class PharmacieController {
   @ApiOperation({
     summary: "Aperçu de l'import Excel du catalogue",
     description:
-      'Analyse le classeur (champ multipart `fichier`, .xlsx, 2 Mo et 1000 lignes max) sans rien écrire. Un médicament déjà au catalogue (nom comparé sans casse, accents ni espaces superflus) est rejeté. Renvoie { totalLignes, acceptees, rejetees, lignes[] }.',
+      'Permission : catalogue:write. Succès : 200. Analyse le classeur (champ multipart `fichier`, .xlsx, 2 Mo et 1000 lignes max, 400 sinon) sans rien écrire. Un médicament déjà au catalogue (nom comparé sans casse, accents ni espaces superflus) est rejeté. Renvoie { totalLignes, acceptees, rejetees, lignes[] }.',
   })
   apercuImportCatalogue(@UploadedFile() fichier?: FichierImport) {
     return this.catalogueImportService.apercuImportCatalogue(fichier);
@@ -196,7 +210,7 @@ export class PharmacieController {
   @ApiOperation({
     summary: 'Importer des médicaments au catalogue depuis un fichier Excel',
     description:
-      "Refait l'analyse de l'aperçu puis crée les médicaments acceptés en une transaction. Un médicament existant n'est jamais modifié. Renvoie le rapport + importees.",
+      "Permission : catalogue:write. Succès : 200. Refait l'analyse de l'aperçu (mêmes limites, 400 sinon) puis crée les médicaments acceptés en une transaction. Un médicament existant n'est jamais modifié. Renvoie le rapport + importees.",
   })
   importerCatalogue(
     @Req() req: RequestWithUser,
@@ -213,7 +227,11 @@ export class PharmacieController {
   @Patch('catalogue/:medicamentId')
   @ApiBearerAuth()
   @ApiParam({ name: 'medicamentId' })
-  @ApiOperation({ summary: 'Modifier un médicament (Admin)' })
+  @ApiOperation({
+    summary: 'Modifier un médicament (Admin)',
+    description:
+      'Permission : catalogue:manage. Succès : 200. 404 si le médicament est introuvable.',
+  })
   updateMedicament(
     @Param('medicamentId') medicamentId: string,
     @Body() dto: UpdateMedicamentDto,
@@ -231,7 +249,11 @@ export class PharmacieController {
   @Delete('catalogue/:medicamentId')
   @ApiBearerAuth()
   @ApiParam({ name: 'medicamentId' })
-  @ApiOperation({ summary: 'Supprimer un médicament du catalogue (Admin)' })
+  @ApiOperation({
+    summary: 'Supprimer un médicament du catalogue (Admin)',
+    description:
+      'Permission : catalogue:manage. Succès : 200. 404 si le médicament est introuvable. Refusé (409 MEDICAMENT_UTILISE) si une pharmacie a un lot, un mouvement ou une vente de ce médicament.',
+  })
   deleteMedicament(
     @Param('medicamentId') medicamentId: string,
     @Req() req: any,
@@ -252,7 +274,7 @@ export class PharmacieController {
   @ApiOperation({
     summary: 'Mon stock',
     description:
-      'Liste le stock de la pharmacie avec alertes stock bas / rupture.',
+      'Permissions : stock:read et stock:write. Succès : 200. Liste le stock de la pharmacie avec alertes stock bas / rupture ; quantités en unités minimales, lots avec coûts seulement si marge:read ; fiches archivées exclues.',
   })
   getStock(@Param('structureId') structureId: string, @Req() req: any) {
     return this.pharmacieService.getStockPharmacie(
@@ -269,7 +291,8 @@ export class PharmacieController {
   @ApiParam({ name: 'structureId' })
   @ApiOperation({
     summary: 'Ajouter/mettre à jour un médicament en stock',
-    description: 'Upsert : crée ou met à jour le stock pour ce médicament.',
+    description:
+      'Permissions : stock:read et stock:write. Succès : 200. Crée ou met à jour la fiche (prix de la boîte, notes) et la désarchive. quantite est en unités minimales : sans lot en stock, une quantité positive crée un lot (date de péremption obligatoire sauf sansPeremption, 400 DATE_PEREMPTION_REQUISE) ; avec un seul lot, un mouvement INVENTAIRE amène le stock à la quantité saisie et dateExpiration corrige la date du lot ; avec plusieurs lots, une autre quantité ou une autre date est refusée (409 LOT_REQUIS). Réponse : fiche lue et avertissements.',
   })
   upsertStock(
     @Param('structureId') structureId: string,
@@ -286,9 +309,9 @@ export class PharmacieController {
   @ApiParam({ name: 'structureId' })
   @ApiParam({ name: 'stockId' })
   @ApiOperation({
-    summary: 'Ajuster la quantité en stock',
+    summary: "Corriger la quantité d'un lot",
     description:
-      'Passer une variation positive (réception) ou négative (dispensation).',
+      "Permissions : stock:read et stock:write. Succès : 200. Variation signée non nulle en unités minimales sur un lot (lotId facultatif si le médicament n'a qu'un lot en stock), motif obligatoire de 3 à 300 caractères (400 MOTIF_REQUIS). Écrit un mouvement CORRECTION. 409 LOT_REQUIS, 409 STOCK_LOT_NEGATIF, 404 si la fiche ou le lot est introuvable.",
   })
   updateQuantite(
     @Param('structureId') structureId: string,
@@ -310,7 +333,11 @@ export class PharmacieController {
   @ApiBearerAuth()
   @ApiParam({ name: 'structureId' })
   @ApiParam({ name: 'stockId' })
-  @ApiOperation({ summary: 'Retirer un médicament du stock' })
+  @ApiOperation({
+    summary: 'Archiver un médicament du stock',
+    description:
+      'Permissions : stock:read et stock:write. Succès : 200 (répété sur une fiche déjà archivée : sans effet). 404 si la fiche est introuvable. Archivage, jamais de suppression : la fiche sort des listes, de la vente et de la recherche publique, son journal est conservé. Une nouvelle saisie de la fiche (POST) la désarchive.',
+  })
   removeStock(
     @Param('structureId') structureId: string,
     @Param('stockId') stockId: string,
@@ -334,19 +361,26 @@ export class PharmacieController {
   @ApiOperation({
     summary: "Télécharger le modèle Excel d'import du stock",
     description:
-      "Classeur .xlsx : feuille « Stock » (Médicament, Quantité, Prix unitaire (GNF), Date d'expiration (AAAA-MM-JJ), Notes) avec une ligne d'exemple, et feuille « Mode d'emploi ».",
+      "Permissions : stock:read et stock:write. Succès : 200. Classeur .xlsx. mode=livraison (défaut) : feuille « Stock » (Médicament, Quantité (boîtes), Prix de la boîte (GNF), Date d'expiration (AAAA-MM-JJ), Lot, Coût d'achat de la boîte (GNF), Notes). mode=inventaire : feuille « Stock » (Médicament, Quantité comptée (boîtes), Unités en plus (boîte entamée), Lot, Date d'expiration (AAAA-MM-JJ)). Une ligne d'exemple et une feuille « Mode d'emploi ».",
   })
   async getModeleImportStock(
     @Param('structureId') structureId: string,
     @Req() req: RequestWithUser,
+    @Query() options: ModeleImportStockDto,
   ): Promise<StreamableFile> {
+    const mode = options.mode ?? 'livraison';
     const contenu = await this.pharmacieService.getModeleImportStock(
       structureId,
       req.user.userId,
+      mode,
     );
     return new StreamableFile(contenu, {
       type: MIME_XLSX,
-      disposition: 'attachment; filename="modele-import-stock.xlsx"',
+      disposition: `attachment; filename="${
+        mode === 'inventaire'
+          ? 'modele-inventaire-stock.xlsx'
+          : 'modele-import-stock.xlsx'
+      }"`,
     });
   }
 
@@ -362,7 +396,7 @@ export class PharmacieController {
   @ApiOperation({
     summary: "Aperçu de l'import Excel du stock",
     description:
-      "Analyse le classeur (champ multipart `fichier`, .xlsx, 2 Mo et 1000 lignes max) sans rien écrire. Champ multipart facultatif `mode` : `inventaire` (défaut, la quantité du fichier remplace le stock) ou `livraison` (elle s'y ajoute) ; toute autre valeur : 400 VALIDATION sur le champ `mode`. Renvoie { totalLignes, acceptees, rejetees, mode, lignes[] }, chaque ligne acceptée portant quantiteAvant et quantiteApres.",
+      'Permissions : stock:read et stock:write, plus inventaire:write (mode inventaire) ou reception:write (mode livraison), 403 sinon. Succès : 200. Analyse le classeur (champ multipart `fichier`, .xlsx, 2 Mo et 1000 lignes max, 400 sinon) sans rien écrire. Champ multipart `mode` : inventaire (défaut, inventaire:write) ou livraison (reception:write) ; autre valeur : 400 VALIDATION. Livraison : date obligatoire sauf « sans péremption », jamais passée, quantiteAvant, quantiteApres et unitesRecues en unités, coûts retirés sans marge:read. Inventaire : une ligne par lot (numéro ou date de péremption), quantiteComptee, quantiteTheorique, ecart, sousTolerance, nouveauLot ; plusieurs lots sans précision : ligne rejetée avec la liste des lots.',
   })
   apercuImportStock(
     @Param('structureId') structureId: string,
@@ -390,7 +424,7 @@ export class PharmacieController {
   @ApiOperation({
     summary: 'Importer le stock depuis un fichier Excel',
     description:
-      "Refait l'analyse de l'aperçu puis, dans une transaction, relit le stock et écrit les lignes acceptées : en mode inventaire la quantité remplace celle en stock, en mode livraison elle s'y ajoute (incrément atomique). Une case vide (prix, date d'expiration, notes) conserve la valeur enregistrée. Renvoie le rapport + mode + importees.",
+      "Permissions : stock:read et stock:write, plus inventaire:write (mode inventaire, défaut) ou reception:write (mode livraison), 403 sinon. Succès : 200. Refait l'analyse (mêmes limites, 400 sinon) puis écrit dans une transaction. Livraison : une réception (un lot par ligne acceptée), ventes faites sans stock rattachées, receptionId. Inventaire : un inventaire (commentaire « Import Excel »), un mouvement INVENTAIRE par lot compté, anomalie ECART_INVENTAIRE au-delà de la tolérance, ventes faites sans stock rattachées aux lots comptés, inventaireId. Les lignes refusées sont rejetées une par une, les autres écrites.",
   })
   importerStock(
     @Param('structureId') structureId: string,

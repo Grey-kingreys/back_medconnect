@@ -40,39 +40,39 @@ export class VenteController {
   constructor(private readonly venteService: VenteService) {}
 
   @Post(':structureId/ventes')
-  @RequirePermissions(PERMISSIONS.VENTE_WRITE)
+  @RequirePermissions(PERMISSIONS.VENTE_WRITE, PERMISSIONS.CAISSE_UTILISER)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Enregistrer une vente au comptoir',
     description:
-      'Le serveur vérifie chaque ligne, retire les quantités du stock et enregistre la vente en une seule opération. Le prix vient du stock.',
+      'Permissions : vente:write et caisse:utiliser. Succès : 201. Le serveur vérifie chaque ligne, prend les quantités dans les lots (reliquat puis péremption la plus proche), ouvre la caisse du vendeur si besoin, enregistre les paiements et la vente en une seule opération. Les deux prix (boîte, unité) viennent de la fiche du médicament, jamais du client. Sans paiements, la vente est réglée en espèces. 409 JOURNEE_CLOTUREE si la caisse ouverte du vendeur compte pour une journée clôturée.',
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiHeader({
     name: 'Idempotency-Key',
     required: false,
     description:
-      'Clé unique par panier (8 à 128 caractères parmi lettres, chiffres, . _ : -), par exemple un UUID. Un renvoi avec la même clé dans les 24 h renvoie la même vente sans second retrait du stock. Clé mal formée : ignorée.',
+      'Clé unique par panier (8 à 128 caractères parmi lettres, chiffres, . _ : -), par exemple un UUID. Un renvoi avec la même clé renvoie la même vente, sans limite de durée. Clé mal formée : ignorée.',
   })
   @ApiResponse({
     status: 201,
     description:
-      'Vente enregistrée (ou rejouée avec rejeu: true). data : id, numero, statut, createdAt, total, ordonnanceVerifiee, clientNom, clientTelephone, vendeur { id, nom }, annuleeLe, annuleeParId, motifAnnulation, lignes [ { id, stockId, medicamentId, nomMedicament, prixUnitaire, quantite, sousTotal } ], pharmacie { id, nom, adresse, ville, telephone, logoUrl } (champs absents à null, logoUrl = URL publique du logo ou null).',
+      "Vente enregistrée (ou rejouée avec rejeu: true), jamais au-delà du stock vendable (sinon 409 STOCK_INSUFFISANT). data : id, numero, statut, createdAt, total, ordonnanceVerifiee, clientNom, clientTelephone, vendeur { id, nom }, annuleeLe, annuleeParId, motifAnnulation, typePiece, numeroTicket, jourMetier, provisoire, poste { id, code }, session { id, ouverteAutomatiquement }, paiements [ { id, mode, libelle, montant, reference, montantRecu, rendu } ], annulation, venteOrigine, motif, lignes [ { id, stockId, medicamentId, nomMedicament, prixUnitaire, quantite, sousTotal, uniteAffichee, nombreAffiche, coefficientApplique, allocations [ ... ] } ], pharmacie { id, nom, adresse, ville, telephone, logoUrl }. Les coûts ne sont renvoyés qu'avec la permission marge:read.",
   })
   @ApiResponse({
     status: 400,
     description:
-      'Corps invalide (VALIDATION), médicament périmé (MEDICAMENT_EXPIRE), sans prix (PRIX_MANQUANT) ou sur ordonnance non confirmée (ORDONNANCE_NON_CONFIRMEE). Lignes concernées dans details.',
+      'Corps invalide (VALIDATION), vente à l’unité interdite (VENTE_UNITE_INTERDITE), sans prix à l’unité (PRIX_UNITE_MANQUANT), sans prix (PRIX_MANQUANT), ordonnance non confirmée (ORDONNANCE_NON_CONFIRMEE), motif absent (MOTIF_REQUIS), paiements incohérents (PAIEMENTS_INCOHERENTS) ou mode inconnu (MODE_PAIEMENT_INCONNU). Lignes concernées dans details.',
   })
   @ApiResponse({
     status: 404,
     description:
-      'Ligne de stock absente de la pharmacie (STOCK_INTROUVABLE, lignes dans details).',
+      'Ligne de stock absente de la pharmacie (STOCK_INTROUVABLE, lignes dans details) ou lot introuvable.',
   })
   @ApiResponse({
     status: 409,
     description:
-      'Stock insuffisant (STOCK_INSUFFISANT, details : stockId, nom, disponible, demande).',
+      'Stock insuffisant (STOCK_INSUFFISANT : details [ { stockId, nom, unite, demande, disponible, disponibleUm } ], le stock restant est dans le message), il ne reste que des lots périmés (SORTIE_MANUELLE_REQUISE, lots dans details), lot épuisé (STOCK_LOT_NEGATIF), poste inconnu (POSTE_INCONNU), caisse d’un autre utilisateur (SESSION_AUTRE_UTILISATEUR) ou appareil d’un autre type (POSTE_TYPE_DIFFERENT).',
   })
   creerVente(
     @Req() req: RequestWithUser,
@@ -95,7 +95,7 @@ export class VenteController {
   @ApiOperation({
     summary: 'Lister les ventes d’un jour',
     description:
-      'Ventes du jour (défaut : aujourd’hui), avec le total des ventes validées et le nombre de ventes.',
+      'Permission : vente:read. Succès : 200. Pièces du jour métier (défaut : aujourd’hui), ventes et annulations, avec le total signé des pièces validées et leur nombre.',
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiResponse({ status: 400, description: 'Date invalide (VALIDATION).' })
@@ -111,7 +111,8 @@ export class VenteController {
   @RequirePermissions(PERMISSIONS.VENTE_READ)
   @ApiOperation({
     summary: 'Détail d’une vente (reçu)',
-    description: 'Même forme que la réponse de création.',
+    description:
+      'Permission : vente:read. Succès : 200, même forme que la réponse de création. 404 si la vente est introuvable.',
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiParam({ name: 'venteId', description: 'Identifiant de la vente' })
@@ -130,20 +131,25 @@ export class VenteController {
   }
 
   @Post(':structureId/ventes/:venteId/annuler')
-  @RequirePermissions(PERMISSIONS.VENTE_ANNULER)
+  @RequirePermissions(PERMISSIONS.VENTE_ANNULER, PERMISSIONS.CAISSE_UTILISER)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Annuler une vente du jour',
+    summary: 'Annuler une vente',
     description:
-      'Remet les quantités en stock. Réservé à la permission vente:annuler, le jour même de la vente.',
+      "Permissions : vente:annuler et caisse:utiliser. Succès : 200. Crée une pièce d'annulation qui pointe la vente : lignes, lots et paiements opposés, quantités remises dans les lots d'origine, remboursement enregistré dans la caisse de l'auteur (ouverte automatiquement si besoin) et rattaché au jour de cette caisse. Aucune limite de date. Motif de 3 à 300 caractères (400 VALIDATION). 409 JOURNEE_CLOTUREE si la caisse de l'auteur compte pour une journée clôturée.",
   })
   @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
   @ApiParam({ name: 'venteId', description: 'Identifiant de la vente' })
+  @ApiResponse({
+    status: 200,
+    description:
+      "Vente d'origine, avec statut ANNULEE et annulation { id, numero, motif, le, par { id, nom } }. Les coûts ne sont renvoyés qu'avec la permission marge:read.",
+  })
   @ApiResponse({ status: 404, description: 'Vente introuvable.' })
   @ApiResponse({
     status: 409,
     description:
-      'Vente déjà annulée (VENTE_DEJA_ANNULEE) ou d’un autre jour (ANNULATION_HORS_DELAI).',
+      'Vente déjà annulée (VENTE_DEJA_ANNULEE), pièce non annulable : annulation, régularisation ou vente d’avant la caisse (PIECE_NON_ANNULABLE), poste inconnu ou d’un autre point de vente (POSTE_INCONNU), caisse d’un autre utilisateur (SESSION_AUTRE_UTILISATEUR).',
   })
   annulerVente(
     @Req() req: RequestWithUser,

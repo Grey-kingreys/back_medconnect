@@ -14,7 +14,7 @@ import { PermissionsService } from 'src/common/rbac/permissions.service';
 import { REDIS_CLIENT } from 'src/common/redis/redis.module';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { VenteController } from './vente.controller';
-import { VenteService } from './vente.service';
+import { messageStockInsuffisant, VenteService } from './vente.service';
 
 /**
  * Routes de vente : vrai PermissionsGuard et vrai PermissionsService (Redis et Prisma
@@ -33,10 +33,18 @@ describe('Ventes en pharmacie (HTTP)', () => {
       type: 'HOPITAL',
       codes: ['vente:read', 'vente:write', 'vente:annuler', 'carnet:read'],
     },
-    pharmacien: { type: 'PHARMACIE', codes: ['vente:read', 'vente:write'] },
+    pharmacien: {
+      type: 'PHARMACIE',
+      codes: ['vente:read', 'vente:write', 'caisse:utiliser'],
+    },
     admin: {
       type: 'PHARMACIE',
-      codes: ['vente:read', 'vente:write', 'vente:annuler'],
+      codes: ['vente:read', 'vente:write', 'vente:annuler', 'caisse:utiliser'],
+    },
+    sanscaisse: { type: 'PHARMACIE', codes: ['vente:read', 'vente:write'] },
+    annuleursanscaisse: {
+      type: 'PHARMACIE',
+      codes: ['vente:read', 'vente:annuler'],
     },
   };
   const prisma = {
@@ -160,6 +168,23 @@ describe('Ventes en pharmacie (HTTP)', () => {
     );
   });
 
+  it('2c. sans caisse:utiliser : création refusée (403 PERMISSION_REFUSEE), liste acceptée', async () => {
+    const creation = await request(serveur())
+      .post('/pharmacie/s1/ventes')
+      .set('x-essai-user', 'sanscaisse')
+      .send(corpsValide);
+    expect(creation.status).toBe(403);
+    expect((creation.body as { code?: string }).code).toBe(
+      'PERMISSION_REFUSEE',
+    );
+    expect(creerVente).not.toHaveBeenCalled();
+
+    const liste = await request(serveur())
+      .get('/pharmacie/s1/ventes')
+      .set('x-essai-user', 'sanscaisse');
+    expect(liste.status).toBe(200);
+  });
+
   it('2b. administrateur : annulation acceptée (200), motif nettoyé', async () => {
     const res = await request(serveur())
       .post('/pharmacie/s1/ventes/v1/annuler')
@@ -171,6 +196,31 @@ describe('Ventes en pharmacie (HTTP)', () => {
       'v1',
       'admin',
       { motif: 'Erreur de quantité' },
+      expect.anything(),
+    );
+  });
+
+  it('2d. vente:annuler sans caisse:utiliser : annulation refusée (403 PERMISSION_REFUSEE)', async () => {
+    const res = await request(serveur())
+      .post('/pharmacie/s1/ventes/v1/annuler')
+      .set('x-essai-user', 'annuleursanscaisse')
+      .send({ motif: 'Erreur de quantité' });
+    expect(res.status).toBe(403);
+    expect((res.body as { code?: string }).code).toBe('PERMISSION_REFUSEE');
+    expect(annulerVente).not.toHaveBeenCalled();
+  });
+
+  it('2e. annulation avec posteId : transmis au service', async () => {
+    const res = await request(serveur())
+      .post('/pharmacie/s1/ventes/v1/annuler')
+      .set('x-essai-user', 'admin')
+      .send({ motif: 'Erreur de quantité', posteId: 'p1' });
+    expect(res.status).toBe(200);
+    expect(annulerVente).toHaveBeenCalledWith(
+      's1',
+      'v1',
+      'admin',
+      { motif: 'Erreur de quantité', posteId: 'p1' },
       expect.anything(),
     );
   });
@@ -196,7 +246,43 @@ describe('Ventes en pharmacie (HTTP)', () => {
         { ...corpsValide, prixUnitaire: 1 },
         'prixUnitaire',
       ],
+      [
+        'unite PLAQUETTE',
+        'post',
+        { lignes: [{ stockId: 'st1', quantite: 1, unite: 'PLAQUETTE' }] },
+        'lignes',
+      ],
+      [
+        'sortieManuelle sans lotId',
+        'post',
+        {
+          lignes: [
+            { stockId: 'st1', quantite: 1, sortieManuelle: { motif: 'abc' } },
+          ],
+        },
+        'lignes',
+      ],
+      ['paiements []', 'post', { ...corpsValide, paiements: [] }, 'paiements'],
+      [
+        'paiement montant 0',
+        'post',
+        { ...corpsValide, paiements: [{ mode: 'ESPECES', montant: 0 }] },
+        'paiements',
+      ],
+      [
+        'paiement mode absent',
+        'post',
+        { ...corpsValide, paiements: [{ montant: 1000 }] },
+        'paiements',
+      ],
+      ['posteId vide', 'post', { ...corpsValide, posteId: '' }, 'posteId'],
       ['motif de 2 caractères', 'annuler', { motif: 'ab' }, 'motif'],
+      [
+        'annulation posteId vide',
+        'annuler',
+        { motif: 'Erreur de quantité', posteId: '' },
+        'posteId',
+      ],
       ['date 22-10-2026', 'get', {}, 'date'],
     ];
 
@@ -228,17 +314,125 @@ describe('Ventes en pharmacie (HTTP)', () => {
     });
   });
 
-  it('4. 409 STOCK_INSUFFISANT : la réponse porte details filtré', async () => {
+  it('3b. corps complet valide : motif et référence nettoyés', async () => {
+    const res = await request(serveur())
+      .post('/pharmacie/s1/ventes')
+      .set('x-essai-user', 'pharmacien')
+      .send({
+        lignes: [
+          {
+            stockId: 'st1',
+            quantite: 6,
+            unite: 'UNITE',
+            sortieManuelle: { lotId: 'l1', motif: '  Client informé  ' },
+          },
+        ],
+        paiements: [
+          { mode: 'ESPECES', montant: 3000, montantRecu: 5000 },
+          { mode: 'ORANGE_MONEY', montant: 600, reference: ' OM-1 ' },
+        ],
+        posteId: 'p1',
+      });
+    expect(res.status).toBe(201);
+    expect(creerVente).toHaveBeenCalledWith(
+      's1',
+      'pharmacien',
+      {
+        lignes: [
+          {
+            stockId: 'st1',
+            quantite: 6,
+            unite: 'UNITE',
+            sortieManuelle: { lotId: 'l1', motif: 'Client informé' },
+          },
+        ],
+        paiements: [
+          { mode: 'ESPECES', montant: 3000, montantRecu: 5000 },
+          { mode: 'ORANGE_MONEY', montant: 600, reference: 'OM-1' },
+        ],
+        posteId: 'p1',
+      },
+      undefined,
+      expect.anything(),
+    );
+  });
+
+  it('4. 409 SORTIE_MANUELLE_REQUISE : details et lots filtrés', async () => {
     creerVente.mockRejectedValue(
       new ConflictException({
-        message: 'Le stock ne suffit plus pour « Doliprane » : il en reste 0.',
-        code: 'STOCK_INSUFFISANT',
+        message: 'Il ne reste que des lots périmés pour « Doliprane ».',
+        code: 'SORTIE_MANUELLE_REQUISE',
         details: [
           {
             stockId: 'st1',
             nom: 'Doliprane',
             disponible: 0,
             demande: 2,
+            interne: 'à ne pas exposer',
+            lots: [
+              {
+                lotId: 'l1',
+                numeroLot: 'A12',
+                dateExpiration: '2026-01-01',
+                quantite: 10,
+                coutUnitaire: 300,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const res = await request(serveur())
+      .post('/pharmacie/s1/ventes')
+      .set('x-essai-user', 'pharmacien')
+      .send(corpsValide);
+
+    expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({
+      code: 'SORTIE_MANUELLE_REQUISE',
+      details: [
+        {
+          stockId: 'st1',
+          nom: 'Doliprane',
+          disponible: 0,
+          demande: 2,
+          lots: [
+            {
+              lotId: 'l1',
+              numeroLot: 'A12',
+              dateExpiration: '2026-01-01',
+              quantite: 10,
+            },
+          ],
+        },
+      ],
+    });
+    const texte = JSON.stringify(res.body);
+    expect(texte).not.toContain('interne');
+    expect(texte).not.toContain('coutUnitaire');
+  });
+
+  it('4 bis. 409 STOCK_INSUFFISANT : details avec unite et disponibleUm, aucune clé interne', async () => {
+    creerVente.mockRejectedValue(
+      new ConflictException({
+        message: messageStockInsuffisant([
+          {
+            nom: 'Doliprane',
+            disponibleUm: 35,
+            coefficientBoite: 20,
+            uniteMinimale: 'COMPRIME',
+          },
+        ]),
+        code: 'STOCK_INSUFFISANT',
+        details: [
+          {
+            stockId: 'st1',
+            nom: 'Doliprane',
+            unite: 'BOITE',
+            demande: 2,
+            disponible: 1,
+            disponibleUm: 35,
             interne: 'à ne pas exposer',
           },
         ],
@@ -253,8 +447,17 @@ describe('Ventes en pharmacie (HTTP)', () => {
     expect(res.status).toBe(409);
     expect(res.body).toMatchObject({
       code: 'STOCK_INSUFFISANT',
+      message:
+        "Stock insuffisant pour « Doliprane » : il reste 1 boîte et 15 comprimés. Réduisez la quantité, ou faites enregistrer la livraison si ces boîtes viennent d'arriver.",
       details: [
-        { stockId: 'st1', nom: 'Doliprane', disponible: 0, demande: 2 },
+        {
+          stockId: 'st1',
+          nom: 'Doliprane',
+          unite: 'BOITE',
+          demande: 2,
+          disponible: 1,
+          disponibleUm: 35,
+        },
       ],
     });
     expect(JSON.stringify(res.body)).not.toContain('interne');
@@ -275,5 +478,58 @@ describe('Ventes en pharmacie (HTTP)', () => {
       .set('x-essai-user', 'pharmacien');
     expect(detail.status).toBe(200);
     expect(detailVente).toHaveBeenCalledWith('s1', 'v1', 'pharmacien');
+  });
+});
+
+describe('messageStockInsuffisant (D715, D727)', () => {
+  it('un médicament : stock restant en boîtes et unités', () => {
+    expect(
+      messageStockInsuffisant([
+        {
+          nom: 'Doliprane',
+          disponibleUm: 35,
+          coefficientBoite: 20,
+          uniteMinimale: 'COMPRIME',
+        },
+      ]),
+    ).toBe(
+      "Stock insuffisant pour « Doliprane » : il reste 1 boîte et 15 comprimés. Réduisez la quantité, ou faites enregistrer la livraison si ces boîtes viennent d'arriver.",
+    );
+  });
+
+  it('un médicament sans reste : il ne reste rien', () => {
+    expect(
+      messageStockInsuffisant([
+        {
+          nom: 'Ventoline',
+          disponibleUm: 0,
+          coefficientBoite: 1,
+          uniteMinimale: 'UNITE',
+        },
+      ]),
+    ).toBe(
+      "Stock insuffisant pour « Ventoline » : il ne reste rien. Réduisez la quantité, ou faites enregistrer la livraison si ces boîtes viennent d'arriver.",
+    );
+  });
+
+  it('plusieurs médicaments, pluriel', () => {
+    expect(
+      messageStockInsuffisant([
+        {
+          nom: 'Doliprane',
+          disponibleUm: 1,
+          coefficientBoite: 1,
+          uniteMinimale: 'UNITE',
+        },
+        {
+          nom: 'Flagyl',
+          disponibleUm: 0,
+          coefficientBoite: 1,
+          uniteMinimale: 'UNITE',
+        },
+      ]),
+    ).toBe(
+      "Stock insuffisant : Doliprane (il reste 1 boîte), Flagyl (il ne reste rien). Réduisez les quantités, ou faites enregistrer la livraison si ces boîtes viennent d'arriver.",
+    );
   });
 });

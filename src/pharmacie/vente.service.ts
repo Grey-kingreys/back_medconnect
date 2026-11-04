@@ -1,43 +1,152 @@
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import type { Prisma } from 'generated/prisma/client';
 import { PrismaService } from 'src/common/services/prisma.service';
+import { PERMISSIONS } from 'src/common/rbac/permissions.constants';
+import { PermissionsService } from 'src/common/rbac/permissions.service';
 import { NotificationsService } from 'src/notifications/notifications.service';
 import { StorageService } from 'src/storage/storage.service';
+import { AccesPharmacieService } from './acces-pharmacie.service';
+import { verrouillerJourneesPartage } from './caisse/journee';
 import {
   estConflitCleIdempotence,
   lireCleIdempotence,
-  SOS_IDEMPOTENCE_HEURES,
 } from 'src/carnet-sante/sos-idempotence';
 import {
   AnnulerVenteDto,
   CreerVenteDto,
   ListerVentesQueryDto,
 } from './dto/vente.dto';
+import {
+  messageModeInconnu,
+  SessionsCaisseService,
+} from './caisse/sessions-caisse.service';
+import { calculerLigne, type UniteVente } from './domaine/prix';
+import {
+  formaterQuantiteLisible,
+  type UniteMinimaleLisible,
+} from './domaine/quantites';
+import { ecrirePieceVente } from './ecriture-vente';
+import { jourConakry } from './jour-metier';
+import { masquerCouts } from './masquer-couts';
+import { assurerPointDeVente } from './point-de-vente';
+import { MESSAGE_LOT_INTROUVABLE } from './pharmacie.service';
+import { assurerPoste } from './points-de-vente.service';
+import {
+  MESSAGE_STOCK_LOT_INSUFFISANT,
+  MouvementsStockService,
+} from './stock/mouvements-stock.service';
+import {
+  dateVersJour,
+  jourVersDate,
+  lireLotsCandidats,
+} from './stock/lecture-stock';
+import { estDoublonSur } from './stock/erreurs-base';
+import {
+  allouerLignes,
+  cleLigneVente,
+  controlerStockVente,
+  deriverAnnulation,
+  formaterNumeroTicket,
+  lignesInverses,
+  numeroAnnulation,
+  passagesStockBas,
+  paiementsInverses,
+  preparerPaiements,
+  type LigneAAllouer,
+} from './vente-regles';
+
+export { bornesDuJour, jourConakry } from './jour-metier';
 
 /** Plus grand montant enregistrable (colonne Int de PostgreSQL). */
 const PRIX_MAX = 2147483647;
 const VENTES_PAR_PAGE = 50;
-const SEUIL_STOCK_BAS = 10;
-/** Transaction interactive d'une vente : compteur, stocks, vente, audit. */
+/** Seuil de stock bas en boîtes, si la pharmacie n'a pas de paramètres. */
+const SEUIL_STOCK_BAS_DEFAUT = 10;
+/** Transaction interactive d'une vente : session, ticket, lots, vente, audit. */
 const OPTIONS_TRANSACTION_VENTE = { maxWait: 5_000, timeout: 15_000 };
 
-/** Jour calendaire (AAAA-MM-JJ) d'une date. Conakry est à UTC+0, donc le jour UTC. */
-export function jourConakry(d: Date): string {
-  return d.toISOString().slice(0, 10);
+export const PREFIXE_APPAREIL_WEB_DEFAUT = 'web-defaut:';
+export const MESSAGE_MOTIF_SORTIE_REQUIS =
+  'Indiquez le motif de la sortie de ce lot (3 caractères au moins).';
+export const MESSAGE_VENTE_DEJA_ANNULEE = 'Cette vente a déjà été annulée.';
+export const MESSAGE_PIECE_NON_ANNULABLE =
+  'Cette pièce est une annulation ou une régularisation : elle ne peut pas être annulée.';
+export const MESSAGE_VENTE_REGULARISEE =
+  'Cette vente a déjà une pièce de régularisation : elle ne peut plus être annulée.';
+export const MESSAGE_VENTE_HISTORIQUE_NON_ANNULABLE =
+  "Cette vente date d'avant la mise en place de la caisse : elle ne peut pas être annulée. Corrigez le stock du médicament si besoin.";
+export const MESSAGE_POSTE_AUTRE_POINT_DE_VENTE =
+  "Ce poste de caisse n'appartient pas au point de vente de cette vente.";
+export const MESSAGE_FICHE_MODIFIEE =
+  "La fiche d'un médicament du panier vient d'être modifiée (nombre d'unités par boîte). Vérifiez le panier puis validez de nouveau.";
+export const MESSAGE_VENTE_AVANT_QUALIFICATION =
+  "Cette vente date d'avant la conversion du stock de ce médicament en unités : elle ne peut pas être annulée. Corrigez le stock du médicament si besoin.";
+
+export function messageVenteAnnulee(
+  numero: string,
+  numeroPiece: string,
+): string {
+  return `Vente ${numero} annulée (${numeroPiece}). Les quantités ont été remises en stock et le remboursement est enregistré dans votre caisse.`;
 }
 
-/** Bornes [début, fin[ d'un jour AAAA-MM-JJ. */
-export function bornesDuJour(jour: string): { debut: Date; fin: Date } {
-  const debut = new Date(`${jour}T00:00:00.000Z`);
-  const fin = new Date(debut.getTime() + 24 * 60 * 60 * 1000);
-  return { debut, fin };
+export function messageVenteUniteInterdite(noms: string[]): string {
+  return noms.length === 1
+    ? `Ce médicament se vend uniquement à la boîte : « ${noms[0]} ». Passez-le en vente à la boîte.`
+    : `${noms.length} médicaments du panier se vendent uniquement à la boîte. Passez-les en vente à la boîte.`;
+}
+
+export function messagePrixUniteManquant(noms: string[]): string {
+  return noms.length === 1
+    ? `Vente impossible : « ${noms[0]} » n'a pas de prix à l'unité. Ajoutez son prix à l'unité dans la fiche du médicament, ou vendez-le à la boîte.`
+    : `Vente impossible : ${noms.length} médicaments du panier n'ont pas de prix à l'unité. Ajoutez leur prix à l'unité dans leur fiche, ou vendez-les à la boîte.`;
+}
+
+export function messageSortieManuelleRequise(noms: string[]): string {
+  return noms.length === 1
+    ? `Le stock non périmé de « ${noms[0]} » ne suffit pas : il ne reste que des lots périmés. Réduisez la quantité, ou choisissez un lot et indiquez le motif de la sortie.`
+    : `Le stock non périmé de ${noms.length} médicaments du panier ne suffit pas : il ne reste que des lots périmés. Réduisez les quantités, ou choisissez un lot et indiquez le motif de chaque sortie.`;
+}
+
+export interface FicheStockInsuffisant {
+  nom: string;
+  /** Reste vendable de la fiche, en unités minimales. */
+  disponibleUm: number;
+  coefficientBoite: number;
+  uniteMinimale: UniteMinimaleLisible;
+}
+
+/** Message du 409 STOCK_INSUFFISANT (D715, D727) : stock restant en boîtes et unités. */
+export function messageStockInsuffisant(
+  fiches: readonly FicheStockInsuffisant[],
+): string {
+  const reste = (f: FicheStockInsuffisant) =>
+    f.disponibleUm === 0
+      ? 'il ne reste rien'
+      : `il reste ${formaterQuantiteLisible(f.disponibleUm, f.coefficientBoite, f.uniteMinimale)}`;
+  if (fiches.length === 1) {
+    return `Stock insuffisant pour « ${fiches[0].nom} » : ${reste(fiches[0])}. Réduisez la quantité, ou faites enregistrer la livraison si ces boîtes viennent d'arriver.`;
+  }
+  const liste = fiches
+    .map((f) =>
+      f.disponibleUm === 0
+        ? `${f.nom} (il ne reste rien)`
+        : `${f.nom} (${reste(f)})`,
+    )
+    .join(', ');
+  return `Stock insuffisant : ${liste}. Réduisez les quantités, ou faites enregistrer la livraison si ces boîtes viennent d'arriver.`;
+}
+
+export function messagePaiementsIncoherents(
+  somme: number,
+  total: number,
+): string {
+  return `Le total des paiements (${somme} GNF) ne correspond pas au montant de la vente (${total} GNF). Corrigez les montants puis validez de nouveau.`;
 }
 
 /** Numéro lisible d'une vente : V-AAAA-NNNNNN. */
@@ -45,7 +154,26 @@ export function formaterNumero(annee: number, n: number): string {
   return `V-${annee}-${String(n).padStart(6, '0')}`;
 }
 
-type VenteAvecLignes = Prisma.VenteGetPayload<{ include: { lignes: true } }>;
+/** Pièce liée (annulation ou régularisation) lue pour dériver le statut (D550). */
+const SELECT_PIECE_LIEE = {
+  id: true,
+  numero: true,
+  typePiece: true,
+  motifAnnulation: true,
+  createdAt: true,
+  vendeurId: true,
+  vendeurNom: true,
+} satisfies Prisma.VenteSelect;
+
+/** Lecture complète d'une vente : lignes, allocations, paiements et poste. */
+const INCLUDE_VENTE = {
+  lignes: { include: { allocations: true } },
+  paiements: { include: { modePaiement: true } },
+  poste: { select: { id: true, code: true } },
+  venteOrigine: { select: { id: true, numero: true } },
+  pieceLiee: { select: SELECT_PIECE_LIEE },
+} satisfies Prisma.VenteInclude;
+type VenteComplete = Prisma.VenteGetPayload<{ include: typeof INCLUDE_VENTE }>;
 
 export interface PharmacieRecu {
   id: string;
@@ -56,9 +184,39 @@ export interface PharmacieRecu {
   logoUrl: string | null;
 }
 
+interface LigneSession {
+  statut: string;
+  pointDeVenteId: string;
+  jourMetier: Date | string;
+  ordre: number;
+}
+
 interface LignePassage {
   nom: string;
   apres: number;
+}
+
+const RANG_STATUT: Record<string, number> = {
+  DEFINITIVE: 0,
+  PROVISOIRE: 1,
+  REMPLACEE: 2,
+};
+
+type AllocationLue = VenteComplete['lignes'][number]['allocations'][number];
+
+function comparerAllocations(a: AllocationLue, b: AllocationLue): number {
+  const rang = (RANG_STATUT[a.statut] ?? 3) - (RANG_STATUT[b.statut] ?? 3);
+  if (rang !== 0) return rang;
+  if (a.dateExpiration === null && b.dateExpiration !== null) return -1;
+  if (a.dateExpiration !== null && b.dateExpiration === null) return 1;
+  if (a.dateExpiration !== null && b.dateExpiration !== null) {
+    const diff = a.dateExpiration.getTime() - b.dateExpiration.getTime();
+    if (diff !== 0) return diff < 0 ? -1 : 1;
+  }
+  if (a.lotId === b.lotId) return 0;
+  if (a.lotId === null) return 1;
+  if (b.lotId === null) return -1;
+  return a.lotId < b.lotId ? -1 : 1;
 }
 
 @Injectable()
@@ -69,43 +227,11 @@ export class VenteService {
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
     private readonly storage: StorageService,
+    private readonly accesPharmacie: AccesPharmacieService,
+    private readonly permissions: PermissionsService,
+    private readonly mouvementsStock: MouvementsStockService,
+    private readonly sessionsCaisse: SessionsCaisseService,
   ) {}
-
-  /** Membre de la pharmacie (ou son administrateur) ; la structure doit être une pharmacie. */
-  private async verifierPharmacie(structureId: string, userId: string) {
-    const [user, structure] = await Promise.all([
-      this.prisma.user.findUnique({
-        where: { id: userId },
-        select: { id: true, nom: true, prenom: true, structureId: true },
-      }),
-      this.prisma.structure.findUnique({
-        where: { id: structureId },
-        select: {
-          id: true,
-          type: true,
-          adminId: true,
-          nom: true,
-          adresse: true,
-          ville: true,
-          telephone: true,
-          logoFile: { select: { key: true } },
-        },
-      }),
-    ]);
-    if (!structure) {
-      throw new NotFoundException('Cette pharmacie est introuvable.');
-    }
-    if (
-      !user ||
-      (user.structureId !== structureId && structure.adminId !== userId) ||
-      structure.type !== 'PHARMACIE'
-    ) {
-      throw new ForbiddenException(
-        "Vous n'avez pas accès aux ventes de cette pharmacie.",
-      );
-    }
-    return { user, structure };
-  }
 
   private pharmacieRecu(structure: {
     id: string;
@@ -127,21 +253,60 @@ export class VenteService {
     };
   }
 
+  private async peutVoirMarge(userId: string): Promise<boolean> {
+    return (await this.permissions.getUserPermissions(userId)).includes(
+      PERMISSIONS.MARGE_READ,
+    );
+  }
+
   /** Forme renvoyée à la création, au rejeu, au détail et à l'annulation (sans clé d'idempotence). */
-  private presenterVente(vente: VenteAvecLignes, pharmacie: PharmacieRecu) {
+  private presenterVente(
+    vente: VenteComplete,
+    pharmacie: PharmacieRecu,
+    ouverteAutomatiquement = false,
+  ) {
+    const paiements = [...vente.paiements].sort((a, b) => {
+      if (a.modePaiement.ordre !== b.modePaiement.ordre) {
+        return a.modePaiement.ordre - b.modePaiement.ordre;
+      }
+      return a.modePaiement.code < b.modePaiement.code ? -1 : 1;
+    });
+    const etat = deriverAnnulation(vente, vente.pieceLiee);
     return {
       id: vente.id,
       numero: vente.numero,
-      statut: vente.statut,
+      statut: etat.statut,
       createdAt: vente.createdAt,
       total: vente.total,
       ordonnanceVerifiee: vente.ordonnanceVerifiee,
       clientNom: vente.clientNom,
       clientTelephone: vente.clientTelephone,
       vendeur: { id: vente.vendeurId, nom: vente.vendeurNom },
-      annuleeLe: vente.annuleeLe,
-      annuleeParId: vente.annuleeParId,
-      motifAnnulation: vente.motifAnnulation,
+      annuleeLe: etat.annuleeLe,
+      annuleeParId: etat.annuleeParId,
+      motifAnnulation: etat.motifAnnulation,
+      typePiece: vente.typePiece,
+      numeroTicket: vente.numeroTicket,
+      jourMetier: dateVersJour(vente.jourMetier),
+      provisoire: vente.lignes.some((l) =>
+        l.allocations.some((a) => a.statut === 'PROVISOIRE'),
+      ),
+      poste: { id: vente.poste.id, code: vente.poste.code },
+      session: { id: vente.sessionCaisseId, ouverteAutomatiquement },
+      paiements: paiements.map((p) => ({
+        id: p.id,
+        mode: p.modePaiement.code,
+        libelle: p.modePaiement.libelle,
+        montant: p.montant,
+        reference: p.referenceExterne,
+        montantRecu: p.montantRecu,
+        rendu: p.montantRecu === null ? null : p.montantRecu - p.montant,
+      })),
+      annulation: etat.annulation,
+      venteOrigine: vente.venteOrigine
+        ? { id: vente.venteOrigine.id, numero: vente.venteOrigine.numero }
+        : null,
+      motif: etat.motif,
       lignes: vente.lignes.map((l) => ({
         id: l.id,
         stockId: l.stockMedicamentId,
@@ -150,15 +315,38 @@ export class VenteService {
         prixUnitaire: l.prixUnitaire,
         quantite: l.quantite,
         sousTotal: l.sousTotal,
+        uniteAffichee: l.uniteAffichee,
+        nombreAffiche: l.nombreAffiche,
+        coefficientApplique: l.coefficientApplique,
+        allocations: [...l.allocations].sort(comparerAllocations).map((a) => ({
+          lotId: a.lotId,
+          numeroLot: a.numeroLot,
+          dateExpiration: a.dateExpiration
+            ? dateVersJour(a.dateExpiration)
+            : null,
+          quantite: a.quantite,
+          statut: a.statut,
+          sortieManuelle: a.sortieManuelle,
+          motif: a.motif,
+          lotTechnique: a.lotTechnique,
+          coutUnitaire: a.coutUnitaire,
+        })),
       })),
       pharmacie,
     };
   }
 
-  private reponseRejeu(vente: VenteAvecLignes, pharmacie: PharmacieRecu) {
+  private reponseRejeu(
+    vente: VenteComplete,
+    pharmacie: PharmacieRecu,
+    peutVoirMarge: boolean,
+  ) {
     this.logger.log(`vente.rejeu venteId=${vente.id}`);
     return {
-      data: { ...this.presenterVente(vente, pharmacie), rejeu: true },
+      data: masquerCouts(
+        { ...this.presenterVente(vente, pharmacie), rejeu: true },
+        peutVoirMarge,
+      ),
       message: 'Cette vente était déjà enregistrée.',
       success: true,
     };
@@ -171,23 +359,27 @@ export class VenteService {
     enTeteIdempotence?: string,
     ip?: string | null,
   ) {
-    const { user, structure } = await this.verifierPharmacie(
+    const { user, structure } = await this.accesPharmacie.verifier(
       structureId,
       userId,
     );
     const pharmacie = this.pharmacieRecu(structure);
 
-    const ids = dto.lignes.map((l) => l.stockId);
-    if (new Set(ids).size !== ids.length) {
+    const cles = dto.lignes.map((l) =>
+      cleLigneVente(l.stockId, l.unite as UniteVente | undefined),
+    );
+    if (new Set(cles).size !== cles.length) {
       throw new BadRequestException({
         message:
-          "Un même médicament ne peut apparaître qu'une fois dans la vente. Regroupez les quantités sur une seule ligne.",
+          "Un même médicament ne peut apparaître qu'une fois par unité dans la vente (une ligne à la boîte, une ligne à l'unité). Regroupez les quantités.",
         code: 'VALIDATION',
         champs: [{ champ: 'lignes', contraintes: ['stockUnique'] }],
       });
     }
 
-    // Idempotence, comme le SOS : même clé et même pharmacie dans les 24 h = même vente.
+    const peutVoirMarge = await this.peutVoirMarge(userId);
+
+    // Idempotence, comme le SOS : même clé et même pharmacie = même vente, sans limite de durée.
     const cle = lireCleIdempotence(enTeteIdempotence);
     if (cle === null && enTeteIdempotence?.trim()) {
       this.logger.warn('vente.cle_idempotence_ignoree format invalide');
@@ -197,27 +389,20 @@ export class VenteService {
         where: {
           structureId_cleIdempotence: { structureId, cleIdempotence: cle },
         },
-        include: { lignes: true },
+        include: INCLUDE_VENTE,
       });
-      if (existante) {
-        const limite = Date.now() - SOS_IDEMPOTENCE_HEURES * 3600 * 1000;
-        if (existante.createdAt.getTime() >= limite) {
-          return this.reponseRejeu(existante, pharmacie);
-        }
-        await this.prisma.vente.update({
-          where: { id: existante.id },
-          data: { cleIdempotence: null },
-        });
-        this.logger.log(
-          `vente.cle_idempotence_expiree venteId=${existante.id}`,
-        );
-      }
+      if (existante)
+        return this.reponseRejeu(existante, pharmacie, peutVoirMarge);
     }
 
-    let resultat: { vente: VenteAvecLignes; passages: LignePassage[] };
+    let resultat: {
+      vente: VenteComplete;
+      passages: LignePassage[];
+      ouverteAutomatiquement: boolean;
+    };
     try {
       resultat = await this.prisma.$transaction(
-        (tx) => this.enregistrerVente(tx, structureId, user, dto, cle, ip),
+        (tx) => this.enregistrerVente(tx, { structure, user, dto, cle, ip }),
         OPTIONS_TRANSACTION_VENTE,
       );
     } catch (erreur) {
@@ -227,56 +412,63 @@ export class VenteService {
           where: {
             structureId_cleIdempotence: { structureId, cleIdempotence: cle },
           },
-          include: { lignes: true },
+          include: INCLUDE_VENTE,
         });
         if (existante) {
           this.logger.log(`vente.rejeu_concurrent venteId=${existante.id}`);
-          return this.reponseRejeu(existante, pharmacie);
+          return this.reponseRejeu(existante, pharmacie, peutVoirMarge);
         }
       }
       throw erreur;
     }
 
-    const { vente, passages } = resultat;
+    const { vente, passages, ouverteAutomatiquement } = resultat;
     await this.alerterStockBas(structureId, vente.id, passages);
     this.logger.log(`vente.creee venteId=${vente.id} numero=${vente.numero}`);
 
     return {
-      data: this.presenterVente(vente, pharmacie),
+      data: masquerCouts(
+        this.presenterVente(vente, pharmacie, ouverteAutomatiquement),
+        peutVoirMarge,
+      ),
       message: `Vente enregistrée (${vente.numero}).`,
       success: true,
     };
   }
 
-  /** Corps de la transaction de création : tout ou rien. */
+  /** Corps de la transaction de création : tout ou rien (D535). */
   private async enregistrerVente(
     tx: Prisma.TransactionClient,
-    structureId: string,
-    user: { id: string; nom: string; prenom: string },
-    dto: CreerVenteDto,
-    cle: string | null,
-    ip?: string | null,
-  ): Promise<{ vente: VenteAvecLignes; passages: LignePassage[] }> {
-    const maintenant = new Date();
-    const annee = maintenant.getUTCFullYear();
+    entree: {
+      structure: { id: string; nom: string; adminId: string | null };
+      user: { id: string; nom: string; prenom: string };
+      dto: CreerVenteDto;
+      cle: string | null;
+      ip?: string | null;
+    },
+  ): Promise<{
+    vente: VenteComplete;
+    passages: LignePassage[];
+    ouverteAutomatiquement: boolean;
+  }> {
+    const { structure, user, dto, cle, ip } = entree;
+    const structureId = structure.id;
+    const utilisateurNom = `${user.prenom} ${user.nom}`.trim();
 
-    // Le compteur verrouille la ligne : les ventes d'une pharmacie passent l'une après l'autre.
-    const [{ dernierNumero }] = await tx.$queryRaw<
-      { dernierNumero: number }[]
-    >`INSERT INTO "CompteurVente" ("structureId", "annee", "dernierNumero") VALUES (${structureId}, ${annee}, 1) ON CONFLICT ("structureId", "annee") DO UPDATE SET "dernierNumero" = "CompteurVente"."dernierNumero" + 1 RETURNING "dernierNumero"`;
+    // 0. Verrou de journée partagé (D613) : aucune clôture ne s'intercale
+    await verrouillerJourneesPartage(tx, structureId);
 
-    const ids = dto.lignes.map((l) => l.stockId);
-    const stocks = await tx.stockMedicament.findMany({
-      where: { id: { in: ids }, structureId },
+    // 1. Fiches
+    const ids = [...new Set(dto.lignes.map((l) => l.stockId))];
+    const fiches = await tx.stockMedicament.findMany({
+      where: { id: { in: ids }, structureId, archiveLe: null },
       include: {
         medicament: {
           select: { id: true, nom: true, ordonnanceRequise: true },
         },
       },
     });
-    const parId = new Map(stocks.map((s) => [s.id, s]));
-
-    // Refus, un seul code par réponse, toutes les lignes concernées dans `details`.
+    const parId = new Map(fiches.map((f) => [f.id, f]));
     const introuvables = ids.filter((id) => !parId.has(id));
     if (introuvables.length > 0) {
       throw new NotFoundException({
@@ -289,47 +481,87 @@ export class VenteService {
       });
     }
 
-    const jourMaintenant = jourConakry(maintenant);
-    const perimes = stocks.filter(
-      (s) =>
-        s.dateExpiration !== null &&
-        jourConakry(s.dateExpiration) < jourMaintenant,
-    );
-    if (perimes.length > 0) {
+    // 2. Lignes : prix de la fiche, jamais du client
+    const calculees = dto.lignes.map((l) => {
+      const fiche = parId.get(l.stockId)!;
+      const resultat = calculerLigne({
+        unite: l.unite ?? 'BOITE',
+        nombre: l.quantite,
+        coefficientBoite: fiche.coefficientBoite,
+        prixBoite: fiche.prixUnitaire,
+        prixUnite: fiche.prixUnite,
+        deconditionnable: fiche.deconditionnable,
+      });
+      return { ligne: l, fiche, resultat };
+    });
+    const refus = (code: string) => {
+      const vus = new Set<string>();
+      const lignes: { stockId: string; nom: string }[] = [];
+      for (const c of calculees) {
+        if (c.resultat.ok || c.resultat.code !== code) continue;
+        if (vus.has(c.fiche.id)) continue;
+        vus.add(c.fiche.id);
+        lignes.push({ stockId: c.fiche.id, nom: c.fiche.medicament.nom });
+      }
+      return lignes;
+    };
+    const interdites = refus('VENTE_UNITE_INTERDITE');
+    if (interdites.length > 0) {
       throw new BadRequestException({
-        message:
-          perimes.length === 1
-            ? `Vente impossible : « ${perimes[0].medicament.nom} » est périmé. Retirez-le du panier.`
-            : `Vente impossible : ${perimes.length} médicaments du panier sont périmés. Retirez-les du panier.`,
-        code: 'MEDICAMENT_EXPIRE',
-        details: perimes.map((s) => ({
-          stockId: s.id,
-          nom: s.medicament.nom,
-        })),
+        message: messageVenteUniteInterdite(interdites.map((i) => i.nom)),
+        code: 'VENTE_UNITE_INTERDITE',
+        details: interdites,
       });
     }
-
-    const sansPrix = stocks.filter(
-      (s) => s.prixUnitaire === null || s.prixUnitaire <= 0,
-    );
+    const sansPrixUnite = refus('PRIX_UNITE_MANQUANT');
+    if (sansPrixUnite.length > 0) {
+      throw new BadRequestException({
+        message: messagePrixUniteManquant(sansPrixUnite.map((i) => i.nom)),
+        code: 'PRIX_UNITE_MANQUANT',
+        details: sansPrixUnite,
+      });
+    }
+    const sansPrix = refus('PRIX_MANQUANT');
     if (sansPrix.length > 0) {
       throw new BadRequestException({
         message:
           sansPrix.length === 1
-            ? `Vente impossible : « ${sansPrix[0].medicament.nom} » n'a pas de prix. Ajoutez son prix dans le stock puis validez de nouveau.`
+            ? `Vente impossible : « ${sansPrix[0].nom} » n'a pas de prix. Ajoutez son prix dans le stock puis validez de nouveau.`
             : `Vente impossible : ${sansPrix.length} médicaments du panier n'ont pas de prix. Ajoutez leur prix dans le stock puis validez de nouveau.`,
         code: 'PRIX_MANQUANT',
-        details: sansPrix.map((s) => ({
-          stockId: s.id,
-          nom: s.medicament.nom,
-        })),
+        details: sansPrix,
       });
     }
+    const lignesCalculees = calculees.map((c) => {
+      if (!c.resultat.ok) {
+        throw new RangeError('Ligne refusée non traitée.');
+      }
+      return { ligne: c.ligne, fiche: c.fiche, calcul: c.resultat };
+    });
 
+    // 3. Motifs des sorties manuelles
+    const motifs = new Map<number, string>();
+    dto.lignes.forEach((l, index) => {
+      if (!l.sortieManuelle) return;
+      const motif = (l.sortieManuelle.motif ?? '').trim();
+      if (motif.length < 3) {
+        throw new BadRequestException({
+          message: MESSAGE_MOTIF_SORTIE_REQUIS,
+          code: 'MOTIF_REQUIS',
+        });
+      }
+      motifs.set(index, motif);
+    });
+
+    // 4. Ordonnance
     if (dto.ordonnanceVerifiee !== true) {
-      const surOrdonnance = stocks.filter(
-        (s) => s.medicament.ordonnanceRequise,
-      );
+      const surOrdonnance = [
+        ...new Map(
+          lignesCalculees
+            .filter((c) => c.fiche.medicament.ordonnanceRequise)
+            .map((c) => [c.fiche.id, c.fiche]),
+        ).values(),
+      ];
       if (surOrdonnance.length > 0) {
         throw new BadRequestException({
           message:
@@ -343,20 +575,11 @@ export class VenteService {
       }
     }
 
-    // Montants : le prix vient du stock, jamais du client.
-    const lignes = dto.lignes.map((l) => {
-      const stock = parId.get(l.stockId)!;
-      const prixUnitaire = stock.prixUnitaire!;
-      return {
-        medicamentId: stock.medicamentId,
-        stockMedicamentId: stock.id,
-        nomMedicament: stock.medicament.nom,
-        prixUnitaire,
-        quantite: l.quantite,
-        sousTotal: prixUnitaire * l.quantite,
-      };
-    });
-    const total = lignes.reduce((somme, l) => somme + l.sousTotal, 0);
+    // 5. Total
+    const total = lignesCalculees.reduce(
+      (somme, c) => somme + c.calcul.montantLigne,
+      0,
+    );
     if (total > PRIX_MAX) {
       throw new BadRequestException({
         message:
@@ -366,103 +589,346 @@ export class VenteService {
       });
     }
 
-    // La vente est créée avant les retraits : un rejeu simultané de la même clé échoue ici.
-    const vente = await tx.vente.create({
-      data: {
+    // 6. Paiements
+    const modes = await tx.modePaiement.findMany({ where: { actif: true } });
+    const prepares = preparerPaiements(
+      total,
+      dto.paiements?.map((p) => ({
+        mode: p.mode,
+        montant: p.montant,
+        reference: p.reference,
+        montantRecu: p.montantRecu,
+      })),
+      modes,
+    );
+    if (!prepares.ok) {
+      switch (prepares.code) {
+        case 'MODE_PAIEMENT_INCONNU':
+          throw new BadRequestException({
+            message: messageModeInconnu(prepares.mode),
+            code: 'MODE_PAIEMENT_INCONNU',
+          });
+        case 'MODE_EN_DOUBLE':
+          throw new BadRequestException({
+            message:
+              'Un même mode de paiement ne peut apparaître qu’une fois. Regroupez les montants.',
+            code: 'VALIDATION',
+            champs: [{ champ: 'paiements', contraintes: ['modeUnique'] }],
+          });
+        case 'MONTANT_RECU_INSUFFISANT':
+          throw new BadRequestException({
+            message:
+              'La somme reçue en espèces est inférieure au montant à payer en espèces.',
+            code: 'VALIDATION',
+            champs: [
+              { champ: 'paiements', contraintes: ['montantRecuInsuffisant'] },
+            ],
+          });
+        case 'PAIEMENTS_INCOHERENTS':
+          throw new BadRequestException({
+            message: messagePaiementsIncoherents(prepares.somme, total),
+            code: 'PAIEMENTS_INCOHERENTS',
+          });
+      }
+    }
+    const paiements = prepares.paiements;
+
+    // 7. Poste
+    let posteId = dto.posteId;
+    if (!posteId) {
+      const pointDeVente =
+        (await tx.pointDeVente.findFirst({
+          where: { structureId },
+          orderBy: { ordre: 'asc' },
+        })) ?? (await assurerPointDeVente(tx, structure)).pointDeVente;
+      posteId = await this.posteParDefaut(tx, pointDeVente.id, user, ip);
+    }
+
+    // 8. Session de caisse
+    const ouverte = await this.ouvrirSessionVerrouillee(tx, {
+      structureId,
+      userId: user.id,
+      utilisateurNom,
+      posteId,
+    });
+    const {
+      sessionId,
+      posteCode,
+      pointDeVenteId,
+      ordre,
+      jourMetier,
+      ouverteAutomatiquement,
+    } = ouverte;
+
+    // 9. Numéro de ticket
+    const [{ numero: numeroTicket }] = await tx.$queryRaw<
+      { numero: number }[]
+    >`INSERT INTO "CompteurTicket" ("pointDeVenteId", "prochainNumero") VALUES (${pointDeVenteId}, 2)
+      ON CONFLICT ("pointDeVenteId") DO UPDATE SET "prochainNumero" = "CompteurTicket"."prochainNumero" + 1
+      RETURNING "prochainNumero" - 1 AS "numero"`;
+    const numero = formaterNumeroTicket(ordre, Number(numeroTicket));
+
+    // 10. Verrous et lots
+    await this.mouvementsStock.verrouillerFiches(tx, ids);
+    const coefficients = await tx.stockMedicament.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, coefficientBoite: true },
+    });
+    const modifiees = fiches.filter(
+      (f) =>
+        coefficients.find((c) => c.id === f.id)?.coefficientBoite !==
+        f.coefficientBoite,
+    );
+    if (modifiees.length > 0) {
+      throw new ConflictException({
+        message: MESSAGE_FICHE_MODIFIEE,
+        code: 'FICHE_MODIFIEE',
+        details: modifiees.map((f) => ({
+          stockId: f.id,
+          nom: f.medicament.nom,
+        })),
+      });
+    }
+    const agregatsAvant = await tx.agregatStockProduit.findMany({
+      where: { pointDeVenteId, stockMedicamentId: { in: ids } },
+    });
+    const avantParFiche = new Map(
+      agregatsAvant.map((a) => [a.stockMedicamentId, a.quantite]),
+    );
+    const lotsParFiche = await lireLotsCandidats(tx, pointDeVenteId, ids);
+    const jour = jourConakry(new Date());
+
+    // 11. Lots de sortie manuelle
+    for (const l of dto.lignes) {
+      if (!l.sortieManuelle) continue;
+      const lotId = l.sortieManuelle.lotId;
+      const connus = lotsParFiche.get(l.stockId) ?? [];
+      if (connus.some((c) => c.id === lotId)) continue;
+      const lot = await tx.lotStock.findFirst({
+        where: { id: lotId, stockMedicamentId: l.stockId, pointDeVenteId },
+      });
+      if (!lot) throw new NotFoundException(MESSAGE_LOT_INTROUVABLE);
+      throw new ConflictException({
+        message: MESSAGE_STOCK_LOT_INSUFFISANT,
+        code: 'STOCK_LOT_NEGATIF',
+      });
+    }
+
+    // 12. Allocation
+    const aAllouer: LigneAAllouer[] = lignesCalculees.map((c, index) => ({
+      index,
+      stockMedicamentId: c.fiche.id,
+      unite: c.calcul.uniteAffichee,
+      quantiteUm: c.calcul.quantiteUm,
+      sortieManuelle: c.ligne.sortieManuelle
+        ? { lotId: c.ligne.sortieManuelle.lotId, motif: motifs.get(index)! }
+        : null,
+    }));
+    const allouees = allouerLignes(jour, aAllouer, lotsParFiche);
+    // Contrôle du stock vendable, sous les verrous (D713 à D715) : d'abord le
+    // stock insuffisant, puis la sortie manuelle requise.
+    const { insuffisantes, sortiesManuelles: aSortieManuelle } =
+      controlerStockVente({
+        lignes: lignesCalculees.map((c, index) => ({
+          index,
+          stockMedicamentId: c.fiche.id,
+          nom: c.fiche.medicament.nom,
+          unite: c.calcul.uniteAffichee,
+          nombre: c.ligne.quantite,
+          quantiteUm: c.calcul.quantiteUm,
+          coefficientLigne:
+            c.calcul.uniteAffichee === 'UNITE'
+              ? 1
+              : c.calcul.coefficientApplique,
+          sortieManuelle: Boolean(c.ligne.sortieManuelle),
+        })),
+        allouees,
+        soldeProduit: avantParFiche,
+      });
+    if (insuffisantes.length > 0) {
+      const fichesEnCause = new Map<string, FicheStockInsuffisant>();
+      for (const i of insuffisantes) {
+        const f = parId.get(i.stockMedicamentId)!;
+        fichesEnCause.set(f.id, {
+          nom: f.medicament.nom,
+          disponibleUm: i.disponibleUm,
+          coefficientBoite: f.coefficientBoite,
+          uniteMinimale: f.uniteMinimale,
+        });
+      }
+      throw new ConflictException({
+        message: messageStockInsuffisant([...fichesEnCause.values()]),
+        code: 'STOCK_INSUFFISANT',
+        details: insuffisantes.map((i) => ({
+          stockId: i.stockMedicamentId,
+          nom: i.nom,
+          unite: i.unite,
+          demande: i.demande,
+          disponible: i.disponible,
+          disponibleUm: i.disponibleUm,
+        })),
+      });
+    }
+    if (aSortieManuelle.length > 0) {
+      const noms = aSortieManuelle.map(
+        (a) => lignesCalculees[a.index].fiche.medicament.nom,
+      );
+      throw new ConflictException({
+        message: messageSortieManuelleRequise(noms),
+        code: 'SORTIE_MANUELLE_REQUISE',
+        details: aSortieManuelle.map((a) => ({
+          stockId: lignesCalculees[a.index].fiche.id,
+          nom: lignesCalculees[a.index].fiche.medicament.nom,
+          disponible: a.quantiteAllouee,
+          demande: lignesCalculees[a.index].calcul.quantiteUm,
+          lots: a.lotsPerimesDisponibles,
+        })),
+      });
+    }
+
+    // 13 à 16. Pièce, paiements, mouvements et anomalies de stock négatif (D657)
+    const { venteId, apresParFiche } = await ecrirePieceVente(
+      tx,
+      this.mouvementsStock,
+      {
         structureId,
-        numero: formaterNumero(annee, dernierNumero),
-        vendeurId: user.id,
-        vendeurNom: `${user.prenom} ${user.nom}`.trim(),
+        adminId: structure.adminId,
+        pointDeVenteId,
+        posteId,
+        posteCode,
+        sessionId,
+        typePiece: 'VENTE',
+        provisoireAutorise: false,
+        numero,
+        numeroTicket: Number(numeroTicket),
+        jourMetier,
+        vendeur: { id: user.id, nom: utilisateurNom },
         clientNom: dto.clientNom?.trim() || null,
         clientTelephone: dto.clientTelephone?.trim() || null,
         ordonnanceVerifiee: dto.ordonnanceVerifiee === true,
         total,
         cleIdempotence: cle,
-        lignes: { create: lignes },
+        lignes: lignesCalculees.map((c, index) => ({
+          fiche: {
+            id: c.fiche.id,
+            medicamentId: c.fiche.medicamentId,
+            nom: c.fiche.medicament.nom,
+          },
+          calcul: c.calcul,
+          allocation: allouees[index],
+        })),
+        paiements,
       },
-      include: { lignes: true },
-    });
-
-    // Retraits atomiques, dans un ordre stable (pas d'interblocage entre ventes).
-    const insuffisantes: string[] = [];
-    const triees = [...lignes].sort((a, b) =>
-      a.stockMedicamentId < b.stockMedicamentId
-        ? -1
-        : a.stockMedicamentId > b.stockMedicamentId
-          ? 1
-          : 0,
     );
-    for (const l of triees) {
-      const { count } = await tx.stockMedicament.updateMany({
-        where: {
-          id: l.stockMedicamentId,
-          structureId,
-          quantite: { gte: l.quantite },
-        },
-        data: { quantite: { decrement: l.quantite } },
-      });
-      if (count === 0) insuffisantes.push(l.stockMedicamentId);
-    }
-    if (insuffisantes.length > 0) {
-      const restants = await tx.stockMedicament.findMany({
-        where: { id: { in: insuffisantes } },
-        select: { id: true, quantite: true },
-      });
-      const details = insuffisantes.map((stockId) => {
-        const stock = parId.get(stockId)!;
-        const disponible =
-          restants.find((r) => r.id === stockId)?.quantite ?? 0;
-        const demande =
-          lignes.find((l) => l.stockMedicamentId === stockId)?.quantite ?? 0;
-        return { stockId, nom: stock.medicament.nom, disponible, demande };
-      });
-      throw new ConflictException({
-        message:
-          details.length === 1
-            ? `Le stock ne suffit plus pour « ${details[0].nom} » : il en reste ${details[0].disponible}. Ajustez la quantité puis validez de nouveau.`
-            : `Le stock ne suffit plus pour ${details.length} médicaments du panier. Ajustez les quantités puis validez de nouveau.`,
-        code: 'STOCK_INSUFFISANT',
-        details,
-      });
-    }
 
-    await tx.stockMedicament.updateMany({
-      where: { id: { in: ids }, structureId, quantite: 0 },
-      data: { disponible: false },
-    });
-
-    const apresStocks = await tx.stockMedicament.findMany({
-      where: { id: { in: ids } },
-      select: { id: true, quantite: true },
-    });
-    const passages: LignePassage[] = [];
-    for (const l of lignes) {
-      const apres = apresStocks.find(
-        (s) => s.id === l.stockMedicamentId,
-      )?.quantite;
-      if (apres === undefined) continue;
-      const avant = apres + l.quantite;
-      if (avant >= SEUIL_STOCK_BAS && apres < SEUIL_STOCK_BAS) {
-        passages.push({ nom: l.nomMedicament, apres });
-      }
-    }
-
+    // 17. Audit
     await tx.auditLog.create({
       data: {
         userId: user.id,
         action: 'create',
         entityType: 'Vente',
-        entityId: vente.id,
+        entityId: venteId,
         ip: ip ?? null,
         metadata: {
-          numero: vente.numero,
+          numero,
           total,
-          nombreLignes: lignes.length,
+          nombreLignes: lignesCalculees.length,
+          sessionOuverteAutomatiquement: ouverteAutomatiquement,
         },
       },
     });
 
-    return { vente, passages };
+    // 18. Stock bas
+    const parametres = await tx.parametresPharmacie.findUnique({
+      where: { structureId },
+      select: { seuilStockBas: true },
+    });
+    const seuil = parametres?.seuilStockBas ?? SEUIL_STOCK_BAS_DEFAUT;
+    const passages = passagesStockBas(
+      fiches.map((f) => ({
+        nom: f.medicament.nom,
+        coefficientBoite: f.coefficientBoite,
+        avant: avantParFiche.get(f.id) ?? 0,
+        apres: apresParFiche.get(f.id) ?? avantParFiche.get(f.id) ?? 0,
+      })),
+      seuil,
+    );
+
+    // 19. Relecture (les paiements sont créés après la vente)
+    const complete = await tx.vente.findUniqueOrThrow({
+      where: { id: venteId },
+      include: INCLUDE_VENTE,
+    });
+    return { vente: complete, passages, ouverteAutomatiquement };
+  }
+
+  /** Poste web par défaut de l'utilisateur dans ce point de vente, créé à la volée (D536). */
+  private async posteParDefaut(
+    tx: Prisma.TransactionClient,
+    pointDeVenteId: string,
+    user: { id: string; prenom: string },
+    ip?: string | null,
+  ): Promise<string> {
+    const appareilId = PREFIXE_APPAREIL_WEB_DEFAUT + user.id;
+    const existant = await tx.poste.findFirst({
+      where: { pointDeVenteId, appareilId },
+    });
+    return (
+      existant ??
+      (
+        await assurerPoste(tx, {
+          pointDeVenteId,
+          type: 'WEB',
+          appareilId,
+          user,
+          ip,
+        })
+      ).poste
+    ).id;
+  }
+
+  /**
+   * Session OUVERTE de l'utilisateur sur ce poste, ouverte si besoin, verrouillée
+   * (ordre D527 : poste, puis session) ; fermée entre-temps : une seule réouverture.
+   */
+  private async ouvrirSessionVerrouillee(
+    tx: Prisma.TransactionClient,
+    entree: {
+      structureId: string;
+      userId: string;
+      utilisateurNom: string;
+      posteId: string;
+    },
+  ): Promise<{
+    sessionId: string;
+    posteCode: string;
+    pointDeVenteId: string;
+    ordre: number;
+    jourMetier: Date;
+    ouverteAutomatiquement: boolean;
+  }> {
+    const ouvrirEtVerrouiller = async () => {
+      const { session, ouverteMaintenant } =
+        await this.sessionsCaisse.ouvrirDansTransaction(tx, entree);
+      const lignes = await tx.$queryRaw<LigneSession[]>`
+        SELECT s."statut"::text AS "statut", s."pointDeVenteId", s."jourMetier", pv."ordre"
+        FROM "SessionCaisse" s JOIN "PointDeVente" pv ON pv."id" = s."pointDeVenteId"
+        WHERE s."id" = ${session.id} FOR UPDATE OF s`;
+      return { session, ouverteMaintenant, ligne: lignes[0] };
+    };
+    let ouverte = await ouvrirEtVerrouiller();
+    if (!ouverte.ligne || ouverte.ligne.statut !== 'OUVERTE') {
+      // Fermée entre-temps : le poste est verrouillé, on en ouvre une nouvelle.
+      ouverte = await ouvrirEtVerrouiller();
+    }
+    return {
+      sessionId: ouverte.session.id,
+      posteCode: ouverte.session.poste.code,
+      pointDeVenteId: ouverte.ligne.pointDeVenteId,
+      ordre: ouverte.ligne.ordre,
+      jourMetier: new Date(ouverte.ligne.jourMetier),
+      ouverteAutomatiquement: ouverte.ouverteMaintenant,
+    };
   }
 
   /** Alerte de stock bas aux pharmaciens ; n'échoue jamais la vente. */
@@ -498,7 +964,7 @@ export class VenteService {
     userId: string,
     query: ListerVentesQueryDto,
   ) {
-    await this.verifierPharmacie(structureId, userId);
+    await this.accesPharmacie.verifier(structureId, userId);
 
     const jour = query.date ?? jourConakry(new Date());
     const dateValide = new Date(`${jour}T00:00:00.000Z`);
@@ -513,8 +979,7 @@ export class VenteService {
       });
     }
     const page = query.page ?? 1;
-    const { debut, fin } = bornesDuJour(jour);
-    const filtre = { structureId, createdAt: { gte: debut, lt: fin } };
+    const filtre = { structureId, jourMetier: jourVersDate(jour) };
 
     const [nombre, somme, ventes] = await Promise.all([
       this.prisma.vente.count({ where: filtre }),
@@ -527,7 +992,11 @@ export class VenteService {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * VENTES_PAR_PAGE,
         take: VENTES_PAR_PAGE,
-        include: { lignes: { select: { quantite: true } } },
+        include: {
+          lignes: { select: { quantite: true } },
+          venteOrigine: { select: { id: true, numero: true } },
+          pieceLiee: { select: SELECT_PIECE_LIEE },
+        },
       }),
     ]);
 
@@ -539,16 +1008,28 @@ export class VenteService {
         page,
         parPage: VENTES_PAR_PAGE,
         totalPages: Math.max(1, Math.ceil(nombre / VENTES_PAR_PAGE)),
-        ventes: ventes.map((v) => ({
-          id: v.id,
-          numero: v.numero,
-          createdAt: v.createdAt,
-          statut: v.statut,
-          total: v.total,
-          nombreArticles: v.lignes.reduce((n, l) => n + l.quantite, 0),
-          vendeur: { id: v.vendeurId, nom: v.vendeurNom },
-          clientNom: v.clientNom,
-        })),
+        ventes: ventes.map((v) => {
+          const etat = deriverAnnulation(v, v.pieceLiee);
+          return {
+            id: v.id,
+            numero: v.numero,
+            createdAt: v.createdAt,
+            statut: etat.statut,
+            total: v.total,
+            nombreArticles: v.lignes.reduce((n, l) => n + l.quantite, 0),
+            vendeur: { id: v.vendeurId, nom: v.vendeurNom },
+            clientNom: v.clientNom,
+            typePiece: v.typePiece,
+            numeroTicket: v.numeroTicket,
+            jourMetier: dateVersJour(v.jourMetier),
+            venteOrigine: v.venteOrigine
+              ? { id: v.venteOrigine.id, numero: v.venteOrigine.numero }
+              : null,
+            annulation: etat.annulation
+              ? { id: etat.annulation.id, numero: etat.annulation.numero }
+              : null,
+          };
+        }),
       },
       message: `${nombre} vente(s) le ${jour}.`,
       success: true,
@@ -556,14 +1037,21 @@ export class VenteService {
   }
 
   async detailVente(structureId: string, venteId: string, userId: string) {
-    const { structure } = await this.verifierPharmacie(structureId, userId);
+    const { structure } = await this.accesPharmacie.verifier(
+      structureId,
+      userId,
+    );
+    const peutVoirMarge = await this.peutVoirMarge(userId);
     const vente = await this.prisma.vente.findFirst({
       where: { id: venteId, structureId },
-      include: { lignes: true },
+      include: INCLUDE_VENTE,
     });
     if (!vente) throw new NotFoundException('Cette vente est introuvable.');
     return {
-      data: this.presenterVente(vente, this.pharmacieRecu(structure)),
+      data: masquerCouts(
+        this.presenterVente(vente, this.pharmacieRecu(structure)),
+        peutVoirMarge,
+      ),
       message: 'Vente trouvée.',
       success: true,
     };
@@ -576,94 +1064,252 @@ export class VenteService {
     dto: AnnulerVenteDto,
     ip?: string | null,
   ) {
-    const { structure } = await this.verifierPharmacie(structureId, userId);
+    const { user, structure } = await this.accesPharmacie.verifier(
+      structureId,
+      userId,
+    );
+    const pharmacie = this.pharmacieRecu(structure);
+    const peutVoirMarge = await this.peutVoirMarge(userId);
+    const utilisateurNom = `${user.prenom} ${user.nom}`.trim();
+    const motif = dto.motif.trim();
 
-    const { vente, lignesNonRemises } = await this.prisma.$transaction(
-      async (tx) => {
-        const maintenant = new Date();
-        const courante = await tx.vente.findFirst({
+    const dejaAnnulee = () =>
+      new ConflictException({
+        message: MESSAGE_VENTE_DEJA_ANNULEE,
+        code: 'VENTE_DEJA_ANNULEE',
+      });
+    const nonAnnulable = (message: string) =>
+      new ConflictException({ message, code: 'PIECE_NON_ANNULABLE' });
+
+    let resultat: {
+      vente: VenteComplete;
+      numeroPiece: string;
+      pieceId: string;
+    };
+    try {
+      resultat = await this.prisma.$transaction(async (tx) => {
+        // 0. Verrou de journée partagé (D613) : aucune clôture ne s'intercale
+        await verrouillerJourneesPartage(tx, structureId);
+
+        // 1. Origine
+        const origine = await tx.vente.findFirst({
           where: { id: venteId, structureId },
-          include: { lignes: true },
-        });
-        if (!courante)
-          throw new NotFoundException('Cette vente est introuvable.');
-
-        const dejaAnnulee = new ConflictException({
-          message: 'Cette vente a déjà été annulée.',
-          code: 'VENTE_DEJA_ANNULEE',
-        });
-        if (courante.statut === 'ANNULEE') throw dejaAnnulee;
-        if (jourConakry(courante.createdAt) !== jourConakry(maintenant)) {
-          throw new ConflictException({
-            message:
-              "Une vente ne peut être annulée que le jour même. Celle-ci date d'un autre jour.",
-            code: 'ANNULATION_HORS_DELAI',
-          });
-        }
-
-        // Passage conditionnel : une annulation simultanée ne remet pas le stock deux fois.
-        const { count } = await tx.vente.updateMany({
-          where: { id: venteId, structureId, statut: 'VALIDEE' },
-          data: {
-            statut: 'ANNULEE',
-            annuleeLe: maintenant,
-            annuleeParId: userId,
-            motifAnnulation: dto.motif,
+          include: {
+            lignes: { include: { allocations: true } },
+            paiements: true,
+            pieceLiee: { select: { id: true, typePiece: true } },
+            sessionCaisse: { select: { technique: true } },
           },
         });
-        if (count === 0) throw dejaAnnulee;
-
-        let nonRemises = 0;
-        const triees = [...courante.lignes].sort((a, b) =>
-          a.stockMedicamentId < b.stockMedicamentId
-            ? -1
-            : a.stockMedicamentId > b.stockMedicamentId
-              ? 1
-              : 0,
-        );
-        for (const l of triees) {
-          const remise = await tx.stockMedicament.updateMany({
-            where: { id: l.stockMedicamentId, structureId },
-            data: { quantite: { increment: l.quantite }, disponible: true },
-          });
-          if (remise.count === 0) nonRemises += 1;
+        if (!origine) {
+          throw new NotFoundException('Cette vente est introuvable.');
+        }
+        if (origine.typePiece !== 'VENTE') {
+          throw nonAnnulable(MESSAGE_PIECE_NON_ANNULABLE);
+        }
+        if (
+          origine.statut === 'ANNULEE' ||
+          origine.pieceLiee?.typePiece === 'ANNULATION'
+        ) {
+          throw dejaAnnulee();
+        }
+        if (origine.pieceLiee) {
+          throw nonAnnulable(MESSAGE_VENTE_REGULARISEE);
+        }
+        if (origine.sessionCaisse.technique) {
+          throw nonAnnulable(MESSAGE_VENTE_HISTORIQUE_NON_ANNULABLE);
         }
 
+        // 2. Poste et session de l'auteur (verrous : poste, session)
+        const posteId =
+          dto.posteId ??
+          (await this.posteParDefaut(tx, origine.pointDeVenteId, user, ip));
+        const session = await this.ouvrirSessionVerrouillee(tx, {
+          structureId,
+          userId: user.id,
+          utilisateurNom,
+          posteId,
+        });
+        if (session.pointDeVenteId !== origine.pointDeVenteId) {
+          throw new ConflictException({
+            message: MESSAGE_POSTE_AUTRE_POINT_DE_VENTE,
+            code: 'POSTE_INCONNU',
+          });
+        }
+
+        // 3. Verrou de l'origine : deux annulations simultanées sont sérialisées (D545).
+        await tx.$queryRaw`SELECT "id" FROM "Vente" WHERE "id" = ${origine.id} FOR UPDATE`;
+        const liee = await tx.vente.findUnique({
+          where: { venteOrigineId: origine.id },
+          select: { typePiece: true },
+        });
+        if (liee) {
+          throw liee.typePiece === 'ANNULATION'
+            ? dejaAnnulee()
+            : nonAnnulable(MESSAGE_VENTE_REGULARISEE);
+        }
+
+        // 4. Verrous des fiches
+        await this.mouvementsStock.verrouillerFiches(
+          tx,
+          origine.lignes.map((l) => l.stockMedicamentId),
+        );
+
+        // 4a. Allocations relues sous les verrous des fiches : une réception a pu résoudre une provisoire (D578)
+        const allocationsRelues = await tx.allocationLot.findMany({
+          where: { ligneVenteId: { in: origine.lignes.map((l) => l.id) } },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        });
+        const lignesOrigine = origine.lignes.map((l) => ({
+          ...l,
+          allocations: allocationsRelues.filter((a) => a.ligneVenteId === l.id),
+        }));
+
+        // 4b. Vente antérieure à une multiplication du stock (D561)
+        const lotsAlloues = [
+          ...new Set(
+            lignesOrigine
+              .flatMap((l) => l.allocations)
+              .map((a) => a.lotId)
+              .filter((id): id is string => id !== null),
+          ),
+        ];
+        if (lotsAlloues.length > 0) {
+          const qualification = await tx.mouvementStock.findFirst({
+            where: {
+              pieceOrigineType: 'QUALIFICATION',
+              lotId: { in: lotsAlloues },
+              horodatageServeur: { gte: origine.createdAt },
+            },
+            select: { id: true },
+          });
+          if (qualification) {
+            throw nonAnnulable(MESSAGE_VENTE_AVANT_QUALIFICATION);
+          }
+        }
+
+        // 5. Calcul des opposés
+        const lignes = lignesInverses(lignesOrigine);
+        const paiements = paiementsInverses(origine.paiements, origine.total);
+        const total = origine.total === 0 ? 0 : -origine.total;
+        const numero = numeroAnnulation(origine.numero);
+
+        // 6. Pièce d'annulation
+        const piece = await tx.vente.create({
+          data: {
+            structureId,
+            pointDeVenteId: session.pointDeVenteId,
+            posteId,
+            sessionCaisseId: session.sessionId,
+            typePiece: 'ANNULATION',
+            venteOrigineId: origine.id,
+            numero,
+            numeroTicket: null,
+            jourMetier: session.jourMetier,
+            vendeurId: user.id,
+            vendeurNom: utilisateurNom,
+            clientNom: origine.clientNom,
+            clientTelephone: origine.clientTelephone,
+            ordonnanceVerifiee: origine.ordonnanceVerifiee,
+            total,
+            motifAnnulation: motif,
+            lignes: {
+              create: lignes.map((l) => ({
+                medicamentId: l.medicamentId,
+                stockMedicamentId: l.stockMedicamentId,
+                nomMedicament: l.nomMedicament,
+                prixUnitaire: l.prixUnitaire,
+                quantite: l.quantite,
+                sousTotal: l.sousTotal,
+                uniteAffichee: l.uniteAffichee,
+                nombreAffiche: l.nombreAffiche,
+                coefficientApplique: l.coefficientApplique,
+                allocations: {
+                  create: l.allocations.map((a) => ({
+                    lotId: a.lotId,
+                    numeroLot: a.numeroLot,
+                    dateExpiration: a.dateExpiration,
+                    quantite: a.quantite,
+                    coutUnitaire: a.coutUnitaire,
+                    lotTechnique: a.lotTechnique,
+                    statut: a.statut,
+                    sortieManuelle: false,
+                    motif: null,
+                    auteurId: user.id,
+                  })),
+                },
+              })),
+            },
+          },
+          select: { id: true },
+        });
+
+        // 7. Remboursement dans la session de l'auteur
+        await tx.paiement.createMany({
+          data: paiements.map((p) => ({
+            venteId: piece.id,
+            sessionCaisseId: session.sessionId,
+            modePaiementId: p.modePaiementId,
+            montant: p.montant,
+            referenceExterne: null,
+            montantRecu: null,
+          })),
+        });
+
+        // 8. Mouvements de stock : retour dans les lots d'origine
+        for (const l of lignes) {
+          for (const a of l.allocations) {
+            await this.mouvementsStock.ecrire(tx, {
+              pointDeVenteId: session.pointDeVenteId,
+              stockMedicamentId: l.stockMedicamentId,
+              lotId: a.lotId,
+              type: 'CORRECTION',
+              quantite: -a.quantite,
+              pieceOrigineType: 'ANNULATION',
+              pieceOrigineId: piece.id,
+              motif,
+              auteurId: user.id,
+              posteId,
+            });
+          }
+        }
+
+        // 9. Audit (jamais le motif ni le client)
         await tx.auditLog.create({
           data: {
-            userId,
+            userId: user.id,
             action: 'annuler',
             entityType: 'Vente',
-            entityId: venteId,
+            entityId: origine.id,
             ip: ip ?? null,
             metadata: {
-              numero: courante.numero,
-              total: courante.total,
-              lignesNonRemises: nonRemises,
+              numero: origine.numero,
+              total: origine.total,
+              pieceId: piece.id,
+              numeroPiece: numero,
+              sessionCaisseId: session.sessionId,
+              sessionOuverteAutomatiquement: session.ouverteAutomatiquement,
             },
           },
         });
 
-        const apres = await tx.vente.findFirst({
-          where: { id: venteId, structureId },
-          include: { lignes: true },
+        // 10. Relecture de l'origine
+        const vente = await tx.vente.findUniqueOrThrow({
+          where: { id: origine.id },
+          include: INCLUDE_VENTE,
         });
-        if (!apres) throw new NotFoundException('Cette vente est introuvable.');
-        return { vente: apres, lignesNonRemises: nonRemises };
-      },
-      OPTIONS_TRANSACTION_VENTE,
-    );
+        return { vente, numeroPiece: numero, pieceId: piece.id };
+      }, OPTIONS_TRANSACTION_VENTE);
+    } catch (erreur) {
+      if (estDoublonSur(erreur, 'Vente')) throw dejaAnnulee();
+      throw erreur;
+    }
 
-    this.logger.log(`vente.annulee venteId=${vente.id}`);
-    const message =
-      lignesNonRemises === 0
-        ? `Vente ${vente.numero} annulée. Les quantités ont été remises en stock.`
-        : lignesNonRemises === 1
-          ? `Vente ${vente.numero} annulée. 1 médicament n'était plus dans le stock et n'y a pas été remis.`
-          : `Vente ${vente.numero} annulée. ${lignesNonRemises} médicaments n'étaient plus dans le stock et n'y ont pas été remis.`;
+    const { vente, numeroPiece, pieceId } = resultat;
+    this.logger.log(`vente.annulee venteId=${vente.id} pieceId=${pieceId}`);
     return {
-      data: this.presenterVente(vente, this.pharmacieRecu(structure)),
-      message,
+      data: masquerCouts(this.presenterVente(vente, pharmacie), peutVoirMarge),
+      message: messageVenteAnnulee(vente.numero, numeroPiece),
       success: true,
     };
   }

@@ -1,0 +1,259 @@
+{
+  "vte-p1-1": {
+    "data": {
+      "annuleeLe": null,
+      "annuleeParId": null,
+      "clientNom": null,
+      "clientTelephone": null,
+      "createdAt": "J+0j 08:00:00.000",
+      "id": "vte-p1-1",
+      "lignes": [
+        {
+          "id": "lv-01",
+          "medicamentId": "med-11",
+          "nomMedicament": "Albendazole 400 mg",
+          "prixUnitaire": 1500,
+          "quantite": 2,
+          "sousTotal": 3000,
+          "stockId": "stk-11"
+        },
+        {
+          "id": "lv-02",
+          "medicamentId": "med-15",
+          "nomMedicament": "Metformine 500 mg",
+          "prixUnitaire": 12000,
+          "quantite": 1,
+          "sousTotal": 12000,
+          "stockId": "stk-15"
+        }
+      ],
+      "motifAnnulation": null,
+      "numero": "V-AAAA-000001",
+      "ordonnanceVerifiee": false,
+      "pharmacie": {
+        "adresse": "Kaloum",
+        "id": "str-pharma-1",
+        "logoUrl": null,
+        "nom": "Pharmacie de Kaloum (harnais)",
+        "telephone": "+224620100001",
+        "ville": "Conakry"
+      },
+      "statut": "VALIDEE",
+      "total": 15000,
+      "vendeur": {
+        "id": "usr-pharm-p1",
+        "nom": "Mamadou Diallo"
+      }
+    },
+    "message": "Vente trouvée.",
+    "success": true
+  },
+  "vte-p1-2": {
+    "data": {
+      "annuleeLe": null,
+      "annuleeParId": null,
+      "clientNom": "Mariama Bah",
+      "clientTelephone": "+224620000001",
+      "createdAt": "J+0j 09:00:00.000",
+      "id": "vte-p1-2",
+      "lignes": [
+        {
+          "id": "lv-03",
+          "medicamentId": "med-03",
+          "nomMedicament": "Amoxicilline 500 mg",
+          "prixUnitaire": 2500,
+          "quantite": 3,
+          "sousTotal": 7500,
+          "stockId": "stk-03"
+        }
+      ],
+      "motifAnnulation": null,
+      "numero": "V-AAAA-000002",
+      "ordonnanceVerifiee": true,
+      "pharmacie": {
+        "adresse": "Kaloum",
+        "id": "str-pharma-1",
+        "logoUrl": null,
+        "nom": "Pharmacie de Kaloum (harnais)",
+        "telephone": "+224620100001",
+        "ville": "Conakry"
+      },
+      "statut": "VALIDEE",
+      "total": 7500,
+      "vendeur": {
+        "id": "usr-admin-p1",
+        "nom": "Fatoumata Camara"
+      }
+    },
+    "message": "Vente trouvée.",
+    "success": true
+  },
+  "vte-p1-3": {
+    "data": {
+      "annuleeLe": "J+0j 10:15:00.000",
+      "annuleeParId": "usr-admin-p1",
+      "clientNom": null,
+      "clientTelephone": null,
+      "createdAt": "J+0j 10:00:00.000",
+      "id": "vte-p1-3",
+      "lignes": [
+        {
+          "id": "lv-04",
+          "medicamentId": "med-16",
+          "nomMedicament": "Salbutamol sirop",
+          "prixUnitaire": 1500,
+          "quantite": 1,
+          "sousTotal": 1500,
+          "stockId": "stk-16"
+        }
+      ],
+      "motifAnnulation": "Erreur de saisie",
+      "numero": "V-AAAA-000003",
+      "ordonnanceVerifiee": false,
+      "pharmacie": {
+        "adresse": "Kaloum",
+        "id": "str-pharma-1",
+        "logoUrl": null,
+        "nom": "Pharmacie de Kaloum (harnais)",
+        "telephone": "+224620100001",
+        "ville": "Conakry"
+      },
+      "statut": "ANNULEE",
+      "total": 1500,
+      "vendeur": {
+        "id": "usr-pharm-p1",
+        "nom": "Mamadou Diallo"
+      }
+    },
+    "message": "Vente trouvée.",
+    "success": true
+  },
+  "vte-p1-4": {
+    "data": {
+      "annuleeLe": null,
+      "annuleeParId": null,
+      "clientNom": null,
+      "clientTelephone": null,
+      "createdAt": "J+0j 11:00:00.000",
+      "id": "vte-p1-4",
+      "lignes": [
+        {
+          "id": "lv-05",
+          "medicamentId": "med-11",
+          "nomMedicament": "Albendazole 400 mg",
+          "prixUnitaire": 1500,
+          "quantite": 1,
+          "sousTotal": 1500,
+          "stockId": "stk-11"
+        }
+      ],
+      "motifAnnulation": null,
+      "numero": "V-AAAA-000004",
+      "ordonnanceVerifiee": false,
+      "pharmacie": {
+        "adresse": "Kaloum",
+        "id": "str-pharma-1",
+        "logoUrl": null,
+        "nom": "Pharmacie de Kaloum (harnais)",
+        "telephone": "+224620100001",
+        "ville": "Conakry"
+      },
+      "statut": "VALIDEE",
+      "total": 1500,
+      "vendeur": {
+        "id": "usr-pharm-p1",
+        "nom": "Mamadou Diallo"
+      }
+    },
+    "message": "Vente trouvée.",
+    "success": true
+  },
+  "vte-p2-1": {
+    "data": {
+      "annuleeLe": null,
+      "annuleeParId": null,
+      "clientNom": null,
+      "clientTelephone": null,
+      "createdAt": "J-1j 15:00:00.000",
+      "id": "vte-p2-1",
+      "lignes": [
+        {
+          "id": "lv-06",
+          "medicamentId": "med-06",
+          "nomMedicament": "Oméprazole 20 mg",
+          "prixUnitaire": 1500,
+          "quantite": 4,
+          "sousTotal": 6000,
+          "stockId": "stk-26"
+        }
+      ],
+      "motifAnnulation": null,
+      "numero": "V-AAAA-000001",
+      "ordonnanceVerifiee": false,
+      "pharmacie": {
+        "adresse": "Matoto",
+        "id": "str-pharma-2",
+        "logoUrl": null,
+        "nom": "Pharmacie de Matoto (harnais)",
+        "telephone": "+224620100002",
+        "ville": "Conakry"
+      },
+      "statut": "VALIDEE",
+      "total": 6000,
+      "vendeur": {
+        "id": "usr-pharm-p2",
+        "nom": "Aïssatou Barry"
+      }
+    },
+    "message": "Vente trouvée.",
+    "success": true
+  },
+  "vte-p2-1 depuis str-pharma-1": {
+    "reponse": {
+      "error": "Not Found",
+      "message": "Cette vente est introuvable.",
+      "statusCode": 404
+    },
+    "statut": 404
+  },
+  "vte-p2-2": {
+    "data": {
+      "annuleeLe": "J-1j 16:05:00.000",
+      "annuleeParId": "usr-admin-p2",
+      "clientNom": null,
+      "clientTelephone": null,
+      "createdAt": "J-1j 16:00:00.000",
+      "id": "vte-p2-2",
+      "lignes": [
+        {
+          "id": "lv-07",
+          "medicamentId": "med-15",
+          "nomMedicament": "Metformine 500 mg",
+          "prixUnitaire": 12000,
+          "quantite": 2,
+          "sousTotal": 24000,
+          "stockId": "stk-35"
+        }
+      ],
+      "motifAnnulation": "Client parti sans payer",
+      "numero": "V-AAAA-000002",
+      "ordonnanceVerifiee": false,
+      "pharmacie": {
+        "adresse": "Matoto",
+        "id": "str-pharma-2",
+        "logoUrl": null,
+        "nom": "Pharmacie de Matoto (harnais)",
+        "telephone": "+224620100002",
+        "ville": "Conakry"
+      },
+      "statut": "ANNULEE",
+      "total": 24000,
+      "vendeur": {
+        "id": "usr-pharm-p2",
+        "nom": "Aïssatou Barry"
+      }
+    },
+    "message": "Vente trouvée.",
+    "success": true
+  }
+}

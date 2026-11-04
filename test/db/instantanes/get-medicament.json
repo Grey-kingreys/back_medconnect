@@ -1,0 +1,1049 @@
+{
+  "med-01": {
+    "data": {
+      "categorie": "Antalgique",
+      "createdAt": "<volatil>",
+      "description": null,
+      "formes": [
+        "comprimé"
+      ],
+      "id": "med-01",
+      "nom": "Paracétamol 500 mg",
+      "nomGenerique": null,
+      "ordonnanceRequise": false,
+      "stocks": [
+        {
+          "dateExpiration": "J-30j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-21",
+          "medicamentId": "med-01",
+          "notes": null,
+          "prixUnitaire": 1500,
+          "quantite": 9,
+          "structure": {
+            "adresse": "Matoto",
+            "id": "str-pharma-2",
+            "latitude": 9.5716,
+            "longitude": -13.6476,
+            "nom": "Pharmacie de Matoto (harnais)",
+            "telephone": "+224620100002",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": null,
+          "disponible": true,
+          "id": "stk-36",
+          "medicamentId": "med-01",
+          "notes": "Note du harnais",
+          "prixUnitaire": 1500,
+          "quantite": 240,
+          "structure": {
+            "adresse": "Ratoma",
+            "id": "str-pharma-3",
+            "latitude": null,
+            "longitude": null,
+            "nom": "Pharmacie de Ratoma (harnais)",
+            "telephone": null,
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-3",
+          "updatedAt": "<volatil>"
+        }
+      ],
+      "updatedAt": "<volatil>"
+    },
+    "message": "Médicament trouvé",
+    "success": true
+  },
+  "med-02": {
+    "data": {
+      "categorie": "Anti-inflammatoire",
+      "createdAt": "<volatil>",
+      "description": null,
+      "formes": [
+        "comprimé"
+      ],
+      "id": "med-02",
+      "nom": "Ibuprofène 400 mg",
+      "nomGenerique": null,
+      "ordonnanceRequise": false,
+      "stocks": [
+        {
+          "dateExpiration": "J+0j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-02",
+          "medicamentId": "med-02",
+          "notes": null,
+          "prixUnitaire": null,
+          "quantite": 1,
+          "structure": {
+            "adresse": "Kaloum",
+            "id": "str-pharma-1",
+            "latitude": 9.5092,
+            "longitude": -13.7122,
+            "nom": "Pharmacie de Kaloum (harnais)",
+            "telephone": "+224620100001",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+0j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-22",
+          "medicamentId": "med-02",
+          "notes": "Note du harnais",
+          "prixUnitaire": null,
+          "quantite": 10,
+          "structure": {
+            "adresse": "Matoto",
+            "id": "str-pharma-2",
+            "latitude": 9.5716,
+            "longitude": -13.6476,
+            "nom": "Pharmacie de Matoto (harnais)",
+            "telephone": "+224620100002",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        }
+      ],
+      "updatedAt": "<volatil>"
+    },
+    "message": "Médicament trouvé",
+    "success": true
+  },
+  "med-03": {
+    "data": {
+      "categorie": "Antibiotique",
+      "createdAt": "<volatil>",
+      "description": null,
+      "formes": [
+        "gélule"
+      ],
+      "id": "med-03",
+      "nom": "Amoxicilline 500 mg",
+      "nomGenerique": null,
+      "ordonnanceRequise": true,
+      "stocks": [
+        {
+          "dateExpiration": "J+180j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-03",
+          "medicamentId": "med-03",
+          "notes": null,
+          "prixUnitaire": 2500,
+          "quantite": 9,
+          "structure": {
+            "adresse": "Kaloum",
+            "id": "str-pharma-1",
+            "latitude": 9.5092,
+            "longitude": -13.7122,
+            "nom": "Pharmacie de Kaloum (harnais)",
+            "telephone": "+224620100001",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+180j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-23",
+          "medicamentId": "med-03",
+          "notes": null,
+          "prixUnitaire": 2500,
+          "quantite": 11,
+          "structure": {
+            "adresse": "Matoto",
+            "id": "str-pharma-2",
+            "latitude": 9.5716,
+            "longitude": -13.6476,
+            "nom": "Pharmacie de Matoto (harnais)",
+            "telephone": "+224620100002",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+0j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-38",
+          "medicamentId": "med-03",
+          "notes": null,
+          "prixUnitaire": 2500,
+          "quantite": 1,
+          "structure": {
+            "adresse": "Ratoma",
+            "id": "str-pharma-3",
+            "latitude": null,
+            "longitude": null,
+            "nom": "Pharmacie de Ratoma (harnais)",
+            "telephone": null,
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-3",
+          "updatedAt": "<volatil>"
+        }
+      ],
+      "updatedAt": "<volatil>"
+    },
+    "message": "Médicament trouvé",
+    "success": true
+  },
+  "med-04": {
+    "data": {
+      "categorie": "Antibiotique",
+      "createdAt": "<volatil>",
+      "description": null,
+      "formes": [
+        "comprimé"
+      ],
+      "id": "med-04",
+      "nom": "Métronidazole 250 mg",
+      "nomGenerique": null,
+      "ordonnanceRequise": false,
+      "stocks": [
+        {
+          "dateExpiration": null,
+          "disponible": true,
+          "id": "stk-04",
+          "medicamentId": "med-04",
+          "notes": null,
+          "prixUnitaire": 0,
+          "quantite": 10,
+          "structure": {
+            "adresse": "Kaloum",
+            "id": "str-pharma-1",
+            "latitude": 9.5092,
+            "longitude": -13.7122,
+            "nom": "Pharmacie de Kaloum (harnais)",
+            "telephone": "+224620100001",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": null,
+          "disponible": true,
+          "id": "stk-24",
+          "medicamentId": "med-04",
+          "notes": null,
+          "prixUnitaire": 0,
+          "quantite": 240,
+          "structure": {
+            "adresse": "Matoto",
+            "id": "str-pharma-2",
+            "latitude": 9.5716,
+            "longitude": -13.6476,
+            "nom": "Pharmacie de Matoto (harnais)",
+            "telephone": "+224620100002",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+180j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-39",
+          "medicamentId": "med-04",
+          "notes": null,
+          "prixUnitaire": 0,
+          "quantite": 9,
+          "structure": {
+            "adresse": "Ratoma",
+            "id": "str-pharma-3",
+            "latitude": null,
+            "longitude": null,
+            "nom": "Pharmacie de Ratoma (harnais)",
+            "telephone": null,
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-3",
+          "updatedAt": "<volatil>"
+        }
+      ],
+      "updatedAt": "<volatil>"
+    },
+    "message": "Médicament trouvé",
+    "success": true
+  },
+  "med-05": {
+    "data": {
+      "categorie": "Antipaludéen",
+      "createdAt": "<volatil>",
+      "description": null,
+      "formes": [
+        "comprimé"
+      ],
+      "id": "med-05",
+      "nom": "Artéméther Luméfantrine",
+      "nomGenerique": null,
+      "ordonnanceRequise": false,
+      "stocks": [
+        {
+          "dateExpiration": "J-30j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-05",
+          "medicamentId": "med-05",
+          "notes": null,
+          "prixUnitaire": 12000,
+          "quantite": 11,
+          "structure": {
+            "adresse": "Kaloum",
+            "id": "str-pharma-1",
+            "latitude": 9.5092,
+            "longitude": -13.7122,
+            "nom": "Pharmacie de Kaloum (harnais)",
+            "telephone": "+224620100001",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": null,
+          "disponible": true,
+          "id": "stk-40",
+          "medicamentId": "med-05",
+          "notes": null,
+          "prixUnitaire": 12000,
+          "quantite": 10,
+          "structure": {
+            "adresse": "Ratoma",
+            "id": "str-pharma-3",
+            "latitude": null,
+            "longitude": null,
+            "nom": "Pharmacie de Ratoma (harnais)",
+            "telephone": null,
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-3",
+          "updatedAt": "<volatil>"
+        }
+      ],
+      "updatedAt": "<volatil>"
+    },
+    "message": "Médicament trouvé",
+    "success": true
+  },
+  "med-06": {
+    "data": {
+      "categorie": "Antiulcéreux",
+      "createdAt": "<volatil>",
+      "description": null,
+      "formes": [
+        "gélule"
+      ],
+      "id": "med-06",
+      "nom": "Oméprazole 20 mg",
+      "nomGenerique": null,
+      "ordonnanceRequise": false,
+      "stocks": [
+        {
+          "dateExpiration": "J+0j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-06",
+          "medicamentId": "med-06",
+          "notes": null,
+          "prixUnitaire": 1500,
+          "quantite": 240,
+          "structure": {
+            "adresse": "Kaloum",
+            "id": "str-pharma-1",
+            "latitude": 9.5092,
+            "longitude": -13.7122,
+            "nom": "Pharmacie de Kaloum (harnais)",
+            "telephone": "+224620100001",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+0j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-26",
+          "medicamentId": "med-06",
+          "notes": null,
+          "prixUnitaire": 1500,
+          "quantite": 1,
+          "structure": {
+            "adresse": "Matoto",
+            "id": "str-pharma-2",
+            "latitude": 9.5716,
+            "longitude": -13.6476,
+            "nom": "Pharmacie de Matoto (harnais)",
+            "telephone": "+224620100002",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        }
+      ],
+      "updatedAt": "<volatil>"
+    },
+    "message": "Médicament trouvé",
+    "success": true
+  },
+  "med-07": {
+    "data": {
+      "categorie": "Réhydratation",
+      "createdAt": "<volatil>",
+      "description": null,
+      "formes": [
+        "sachet"
+      ],
+      "id": "med-07",
+      "nom": "Sel de réhydratation orale",
+      "nomGenerique": null,
+      "ordonnanceRequise": false,
+      "stocks": [
+        {
+          "dateExpiration": "J+180j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-27",
+          "medicamentId": "med-07",
+          "notes": null,
+          "prixUnitaire": null,
+          "quantite": 9,
+          "structure": {
+            "adresse": "Matoto",
+            "id": "str-pharma-2",
+            "latitude": 9.5716,
+            "longitude": -13.6476,
+            "nom": "Pharmacie de Matoto (harnais)",
+            "telephone": "+224620100002",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        }
+      ],
+      "updatedAt": "<volatil>"
+    },
+    "message": "Médicament trouvé",
+    "success": true
+  },
+  "med-08": {
+    "data": {
+      "categorie": "Antibiotique",
+      "createdAt": "<volatil>",
+      "description": null,
+      "formes": [
+        "comprimé"
+      ],
+      "id": "med-08",
+      "nom": "Cotrimoxazole 480 mg",
+      "nomGenerique": null,
+      "ordonnanceRequise": true,
+      "stocks": [
+        {
+          "dateExpiration": null,
+          "disponible": true,
+          "id": "stk-08",
+          "medicamentId": "med-08",
+          "notes": "Note du harnais",
+          "prixUnitaire": 2500,
+          "quantite": 1,
+          "structure": {
+            "adresse": "Kaloum",
+            "id": "str-pharma-1",
+            "latitude": 9.5092,
+            "longitude": -13.7122,
+            "nom": "Pharmacie de Kaloum (harnais)",
+            "telephone": "+224620100001",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": null,
+          "disponible": true,
+          "id": "stk-28",
+          "medicamentId": "med-08",
+          "notes": null,
+          "prixUnitaire": 2500,
+          "quantite": 10,
+          "structure": {
+            "adresse": "Matoto",
+            "id": "str-pharma-2",
+            "latitude": 9.5716,
+            "longitude": -13.6476,
+            "nom": "Pharmacie de Matoto (harnais)",
+            "telephone": "+224620100002",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        }
+      ],
+      "updatedAt": "<volatil>"
+    },
+    "message": "Médicament trouvé",
+    "success": true
+  },
+  "med-09": {
+    "data": {
+      "categorie": "Vitamine",
+      "createdAt": "<volatil>",
+      "description": null,
+      "formes": [
+        "comprimé"
+      ],
+      "id": "med-09",
+      "nom": "Vitamine C 500 mg",
+      "nomGenerique": null,
+      "ordonnanceRequise": false,
+      "stocks": [
+        {
+          "dateExpiration": "J-30j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-09",
+          "medicamentId": "med-09",
+          "notes": null,
+          "prixUnitaire": 0,
+          "quantite": 9,
+          "structure": {
+            "adresse": "Kaloum",
+            "id": "str-pharma-1",
+            "latitude": 9.5092,
+            "longitude": -13.7122,
+            "nom": "Pharmacie de Kaloum (harnais)",
+            "telephone": "+224620100001",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J-30j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-29",
+          "medicamentId": "med-09",
+          "notes": "Note du harnais",
+          "prixUnitaire": 0,
+          "quantite": 11,
+          "structure": {
+            "adresse": "Matoto",
+            "id": "str-pharma-2",
+            "latitude": 9.5716,
+            "longitude": -13.6476,
+            "nom": "Pharmacie de Matoto (harnais)",
+            "telephone": "+224620100002",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        }
+      ],
+      "updatedAt": "<volatil>"
+    },
+    "message": "Médicament trouvé",
+    "success": true
+  },
+  "med-10": {
+    "data": {
+      "categorie": "Supplément",
+      "createdAt": "<volatil>",
+      "description": null,
+      "formes": [
+        "comprimé"
+      ],
+      "id": "med-10",
+      "nom": "Fer acide folique",
+      "nomGenerique": null,
+      "ordonnanceRequise": false,
+      "stocks": [
+        {
+          "dateExpiration": "J+0j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-10",
+          "medicamentId": "med-10",
+          "notes": null,
+          "prixUnitaire": 12000,
+          "quantite": 10,
+          "structure": {
+            "adresse": "Kaloum",
+            "id": "str-pharma-1",
+            "latitude": 9.5092,
+            "longitude": -13.7122,
+            "nom": "Pharmacie de Kaloum (harnais)",
+            "telephone": "+224620100001",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+0j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-30",
+          "medicamentId": "med-10",
+          "notes": null,
+          "prixUnitaire": 12000,
+          "quantite": 240,
+          "structure": {
+            "adresse": "Matoto",
+            "id": "str-pharma-2",
+            "latitude": 9.5716,
+            "longitude": -13.6476,
+            "nom": "Pharmacie de Matoto (harnais)",
+            "telephone": "+224620100002",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        }
+      ],
+      "updatedAt": "<volatil>"
+    },
+    "message": "Médicament trouvé",
+    "success": true
+  },
+  "med-11": {
+    "data": {
+      "categorie": "Antiparasitaire",
+      "createdAt": "<volatil>",
+      "description": null,
+      "formes": [
+        "comprimé"
+      ],
+      "id": "med-11",
+      "nom": "Albendazole 400 mg",
+      "nomGenerique": null,
+      "ordonnanceRequise": false,
+      "stocks": [
+        {
+          "dateExpiration": "J+180j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-11",
+          "medicamentId": "med-11",
+          "notes": null,
+          "prixUnitaire": 1500,
+          "quantite": 11,
+          "structure": {
+            "adresse": "Kaloum",
+            "id": "str-pharma-1",
+            "latitude": 9.5092,
+            "longitude": -13.7122,
+            "nom": "Pharmacie de Kaloum (harnais)",
+            "telephone": "+224620100001",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        }
+      ],
+      "updatedAt": "<volatil>"
+    },
+    "message": "Médicament trouvé",
+    "success": true
+  },
+  "med-12": {
+    "data": {
+      "categorie": "Antipaludéen",
+      "createdAt": "<volatil>",
+      "description": null,
+      "formes": [
+        "comprimé"
+      ],
+      "id": "med-12",
+      "nom": "Quinine 300 mg",
+      "nomGenerique": null,
+      "ordonnanceRequise": false,
+      "stocks": [
+        {
+          "dateExpiration": null,
+          "disponible": true,
+          "id": "stk-12",
+          "medicamentId": "med-12",
+          "notes": null,
+          "prixUnitaire": null,
+          "quantite": 240,
+          "structure": {
+            "adresse": "Kaloum",
+            "id": "str-pharma-1",
+            "latitude": 9.5092,
+            "longitude": -13.7122,
+            "nom": "Pharmacie de Kaloum (harnais)",
+            "telephone": "+224620100001",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": null,
+          "disponible": true,
+          "id": "stk-32",
+          "medicamentId": "med-12",
+          "notes": null,
+          "prixUnitaire": null,
+          "quantite": 1,
+          "structure": {
+            "adresse": "Matoto",
+            "id": "str-pharma-2",
+            "latitude": 9.5716,
+            "longitude": -13.6476,
+            "nom": "Pharmacie de Matoto (harnais)",
+            "telephone": "+224620100002",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        }
+      ],
+      "updatedAt": "<volatil>"
+    },
+    "message": "Médicament trouvé",
+    "success": true
+  },
+  "med-13": {
+    "data": {
+      "categorie": "Anti-inflammatoire",
+      "createdAt": "<volatil>",
+      "description": null,
+      "formes": [
+        "comprimé"
+      ],
+      "id": "med-13",
+      "nom": "Diclofénac 50 mg",
+      "nomGenerique": null,
+      "ordonnanceRequise": false,
+      "stocks": [
+        {
+          "dateExpiration": "J-30j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-33",
+          "medicamentId": "med-13",
+          "notes": null,
+          "prixUnitaire": 2500,
+          "quantite": 9,
+          "structure": {
+            "adresse": "Matoto",
+            "id": "str-pharma-2",
+            "latitude": 9.5716,
+            "longitude": -13.6476,
+            "nom": "Pharmacie de Matoto (harnais)",
+            "telephone": "+224620100002",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        }
+      ],
+      "updatedAt": "<volatil>"
+    },
+    "message": "Médicament trouvé",
+    "success": true
+  },
+  "med-14": {
+    "data": {
+      "categorie": "Antihypertenseur",
+      "createdAt": "<volatil>",
+      "description": null,
+      "formes": [
+        "comprimé"
+      ],
+      "id": "med-14",
+      "nom": "Amlodipine 5 mg",
+      "nomGenerique": null,
+      "ordonnanceRequise": true,
+      "stocks": [
+        {
+          "dateExpiration": "J+0j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-14",
+          "medicamentId": "med-14",
+          "notes": null,
+          "prixUnitaire": 0,
+          "quantite": 1,
+          "structure": {
+            "adresse": "Kaloum",
+            "id": "str-pharma-1",
+            "latitude": 9.5092,
+            "longitude": -13.7122,
+            "nom": "Pharmacie de Kaloum (harnais)",
+            "telephone": "+224620100001",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+0j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-34",
+          "medicamentId": "med-14",
+          "notes": null,
+          "prixUnitaire": 0,
+          "quantite": 10,
+          "structure": {
+            "adresse": "Matoto",
+            "id": "str-pharma-2",
+            "latitude": 9.5716,
+            "longitude": -13.6476,
+            "nom": "Pharmacie de Matoto (harnais)",
+            "telephone": "+224620100002",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        }
+      ],
+      "updatedAt": "<volatil>"
+    },
+    "message": "Médicament trouvé",
+    "success": true
+  },
+  "med-15": {
+    "data": {
+      "categorie": "Antidiabétique",
+      "createdAt": "<volatil>",
+      "description": null,
+      "formes": [
+        "comprimé"
+      ],
+      "id": "med-15",
+      "nom": "Metformine 500 mg",
+      "nomGenerique": null,
+      "ordonnanceRequise": false,
+      "stocks": [
+        {
+          "dateExpiration": "J+180j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-15",
+          "medicamentId": "med-15",
+          "notes": "Note du harnais",
+          "prixUnitaire": 12000,
+          "quantite": 9,
+          "structure": {
+            "adresse": "Kaloum",
+            "id": "str-pharma-1",
+            "latitude": 9.5092,
+            "longitude": -13.7122,
+            "nom": "Pharmacie de Kaloum (harnais)",
+            "telephone": "+224620100001",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        },
+        {
+          "dateExpiration": "J+180j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-35",
+          "medicamentId": "med-15",
+          "notes": null,
+          "prixUnitaire": 12000,
+          "quantite": 11,
+          "structure": {
+            "adresse": "Matoto",
+            "id": "str-pharma-2",
+            "latitude": 9.5716,
+            "longitude": -13.6476,
+            "nom": "Pharmacie de Matoto (harnais)",
+            "telephone": "+224620100002",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-2",
+          "updatedAt": "<volatil>"
+        }
+      ],
+      "updatedAt": "<volatil>"
+    },
+    "message": "Médicament trouvé",
+    "success": true
+  },
+  "med-16": {
+    "data": {
+      "categorie": "Bronchodilatateur",
+      "createdAt": "<volatil>",
+      "description": null,
+      "formes": [
+        "sirop"
+      ],
+      "id": "med-16",
+      "nom": "Salbutamol sirop",
+      "nomGenerique": null,
+      "ordonnanceRequise": false,
+      "stocks": [
+        {
+          "dateExpiration": null,
+          "disponible": true,
+          "id": "stk-16",
+          "medicamentId": "med-16",
+          "notes": null,
+          "prixUnitaire": 1500,
+          "quantite": 10,
+          "structure": {
+            "adresse": "Kaloum",
+            "id": "str-pharma-1",
+            "latitude": 9.5092,
+            "longitude": -13.7122,
+            "nom": "Pharmacie de Kaloum (harnais)",
+            "telephone": "+224620100001",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        }
+      ],
+      "updatedAt": "<volatil>"
+    },
+    "message": "Médicament trouvé",
+    "success": true
+  },
+  "med-17": {
+    "data": {
+      "categorie": "Antihistaminique",
+      "createdAt": "<volatil>",
+      "description": null,
+      "formes": [
+        "comprimé"
+      ],
+      "id": "med-17",
+      "nom": "Chlorphénamine 4 mg",
+      "nomGenerique": null,
+      "ordonnanceRequise": false,
+      "stocks": [
+        {
+          "dateExpiration": "J-30j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-17",
+          "medicamentId": "med-17",
+          "notes": null,
+          "prixUnitaire": null,
+          "quantite": 11,
+          "structure": {
+            "adresse": "Kaloum",
+            "id": "str-pharma-1",
+            "latitude": 9.5092,
+            "longitude": -13.7122,
+            "nom": "Pharmacie de Kaloum (harnais)",
+            "telephone": "+224620100001",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        }
+      ],
+      "updatedAt": "<volatil>"
+    },
+    "message": "Médicament trouvé",
+    "success": true
+  },
+  "med-18": {
+    "data": {
+      "categorie": "Antihistaminique",
+      "createdAt": "<volatil>",
+      "description": null,
+      "formes": [
+        "comprimé"
+      ],
+      "id": "med-18",
+      "nom": "Loratadine 10 mg",
+      "nomGenerique": null,
+      "ordonnanceRequise": false,
+      "stocks": [
+        {
+          "dateExpiration": "J+0j 00:00:00.000",
+          "disponible": true,
+          "id": "stk-18",
+          "medicamentId": "med-18",
+          "notes": null,
+          "prixUnitaire": 2500,
+          "quantite": 240,
+          "structure": {
+            "adresse": "Kaloum",
+            "id": "str-pharma-1",
+            "latitude": 9.5092,
+            "longitude": -13.7122,
+            "nom": "Pharmacie de Kaloum (harnais)",
+            "telephone": "+224620100001",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        }
+      ],
+      "updatedAt": "<volatil>"
+    },
+    "message": "Médicament trouvé",
+    "success": true
+  },
+  "med-19": {
+    "data": {
+      "categorie": "Antalgique",
+      "createdAt": "<volatil>",
+      "description": null,
+      "formes": [
+        "sirop"
+      ],
+      "id": "med-19",
+      "nom": "Paracétamol sirop 120 mg/5 ml",
+      "nomGenerique": null,
+      "ordonnanceRequise": false,
+      "stocks": [],
+      "updatedAt": "<volatil>"
+    },
+    "message": "Médicament trouvé",
+    "success": true
+  },
+  "med-20": {
+    "data": {
+      "categorie": "Supplément",
+      "createdAt": "<volatil>",
+      "description": null,
+      "formes": [
+        "comprimé"
+      ],
+      "id": "med-20",
+      "nom": "Zinc 20 mg",
+      "nomGenerique": null,
+      "ordonnanceRequise": false,
+      "stocks": [
+        {
+          "dateExpiration": null,
+          "disponible": true,
+          "id": "stk-20",
+          "medicamentId": "med-20",
+          "notes": null,
+          "prixUnitaire": 12000,
+          "quantite": 1,
+          "structure": {
+            "adresse": "Kaloum",
+            "id": "str-pharma-1",
+            "latitude": 9.5092,
+            "longitude": -13.7122,
+            "nom": "Pharmacie de Kaloum (harnais)",
+            "telephone": "+224620100001",
+            "ville": "Conakry"
+          },
+          "structureId": "str-pharma-1",
+          "updatedAt": "<volatil>"
+        }
+      ],
+      "updatedAt": "<volatil>"
+    },
+    "message": "Médicament trouvé",
+    "success": true
+  },
+  "med-inexistant": {
+    "reponse": {
+      "error": "Not Found",
+      "message": "Médicament non trouvé",
+      "statusCode": 404
+    },
+    "statut": 404
+  }
+}

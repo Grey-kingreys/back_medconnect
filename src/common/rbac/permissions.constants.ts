@@ -29,6 +29,13 @@ export const PERMISSIONS = {
   VENTE_READ: 'vente:read', // consulter les ventes
   VENTE_WRITE: 'vente:write', // enregistrer une vente
   VENTE_ANNULER: 'vente:annuler', // annuler une vente du jour
+  CAISSE_UTILISER: 'caisse:utiliser', // encaisser, ouvrir et fermer sa caisse
+  CAISSE_SUPERVISER: 'caisse:superviser', // sessions et comptages de tous les vendeurs
+  CLOTURE_GERER: 'cloture:gerer', // clôture journalière
+  INVENTAIRE_WRITE: 'inventaire:write',
+  RECEPTION_WRITE: 'reception:write',
+  MARGE_READ: 'marge:read', // coûts d'achat et marges
+  ANOMALIE_GERER: 'anomalie:gerer',
 
   // 🏥 Établissement (délégable, portée = sa structure)
   STRUCTURE_READ: 'structure:read',
@@ -132,6 +139,41 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   {
     code: PERMISSIONS.VENTE_ANNULER,
     libelle: 'Annuler une vente du jour',
+    categorie: 'Pharmacie',
+  },
+  {
+    code: PERMISSIONS.CAISSE_UTILISER,
+    libelle: 'Encaisser les ventes au comptoir (ouvrir et fermer sa caisse)',
+    categorie: 'Pharmacie',
+  },
+  {
+    code: PERMISSIONS.CAISSE_SUPERVISER,
+    libelle: 'Superviser les caisses de tous les vendeurs',
+    categorie: 'Pharmacie',
+  },
+  {
+    code: PERMISSIONS.CLOTURE_GERER,
+    libelle: 'Clôturer la journée de la pharmacie',
+    categorie: 'Pharmacie',
+  },
+  {
+    code: PERMISSIONS.INVENTAIRE_WRITE,
+    libelle: 'Faire un inventaire du stock',
+    categorie: 'Pharmacie',
+  },
+  {
+    code: PERMISSIONS.RECEPTION_WRITE,
+    libelle: 'Enregistrer une réception de marchandises',
+    categorie: 'Pharmacie',
+  },
+  {
+    code: PERMISSIONS.MARGE_READ,
+    libelle: 'Voir les coûts d’achat et les marges',
+    categorie: 'Pharmacie',
+  },
+  {
+    code: PERMISSIONS.ANOMALIE_GERER,
+    libelle: 'Traiter les anomalies de caisse et de stock',
     categorie: 'Pharmacie',
   },
 
@@ -298,13 +340,15 @@ export const DEFAULT_STRUCTURE_ROLES: Record<string, DefaultRoleDef[]> = {
       nom: 'Pharmacien',
       legacyRole: 'PHARMACIEN',
       description:
-        'Gère le stock, contribue au catalogue, répond aux messages de l’officine.',
+        'Gère le stock, enregistre les livraisons, contribue au catalogue, répond aux messages de l’officine.',
       permissions: [
         PERMISSIONS.STOCK_READ,
         PERMISSIONS.STOCK_WRITE,
         PERMISSIONS.CATALOGUE_WRITE,
         PERMISSIONS.VENTE_READ,
         PERMISSIONS.VENTE_WRITE,
+        PERMISSIONS.CAISSE_UTILISER,
+        PERMISSIONS.RECEPTION_WRITE,
         PERMISSIONS.CHAT_STRUCTURE,
         PERMISSIONS.STRUCTURE_READ,
         PERMISSIONS.MEMBRE_READ,
@@ -321,6 +365,13 @@ export const DEFAULT_STRUCTURE_ROLES: Record<string, DefaultRoleDef[]> = {
         PERMISSIONS.VENTE_READ,
         PERMISSIONS.VENTE_WRITE,
         PERMISSIONS.VENTE_ANNULER,
+        PERMISSIONS.CAISSE_UTILISER,
+        PERMISSIONS.CAISSE_SUPERVISER,
+        PERMISSIONS.CLOTURE_GERER,
+        PERMISSIONS.INVENTAIRE_WRITE,
+        PERMISSIONS.RECEPTION_WRITE,
+        PERMISSIONS.MARGE_READ,
+        PERMISSIONS.ANOMALIE_GERER,
         PERMISSIONS.STRUCTURE_READ,
         PERMISSIONS.STRUCTURE_WRITE,
         PERMISSIONS.MEMBRE_READ,
@@ -332,8 +383,9 @@ export const DEFAULT_STRUCTURE_ROLES: Record<string, DefaultRoleDef[]> = {
 };
 
 /**
- * Permissions toujours garanties au rôle « Administrateur de structure » d'une pharmacie,
- * y compris pour les pharmacies existantes (complétées au démarrage par RolesService).
+ * Permissions toujours garanties au rôle « Administrateur de structure » d'une pharmacie
+ * (stock, ventes, caisse, clôture, inventaire, réception, marge, anomalies), y compris pour
+ * les pharmacies existantes (complétées au démarrage par RolesService).
  */
 export const PERMISSIONS_GARANTIES_ADMIN_PHARMACIE: readonly PermissionCode[] =
   [
@@ -342,6 +394,13 @@ export const PERMISSIONS_GARANTIES_ADMIN_PHARMACIE: readonly PermissionCode[] =
     PERMISSIONS.VENTE_READ,
     PERMISSIONS.VENTE_WRITE,
     PERMISSIONS.VENTE_ANNULER,
+    PERMISSIONS.CAISSE_UTILISER,
+    PERMISSIONS.CAISSE_SUPERVISER,
+    PERMISSIONS.CLOTURE_GERER,
+    PERMISSIONS.INVENTAIRE_WRITE,
+    PERMISSIONS.RECEPTION_WRITE,
+    PERMISSIONS.MARGE_READ,
+    PERMISSIONS.ANOMALIE_GERER,
   ];
 
 // Clinique = mêmes rôles par défaut qu'un hôpital.
