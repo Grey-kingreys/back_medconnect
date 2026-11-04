@@ -50,7 +50,7 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | PD03 | Client de synchronisation : tasks/PD03-client-synchro.md (D754) | spécifié | validé (rapports/PD03-chef.md) | 2 |
 | PD04a | Pont IPC, source desktop, synchro branchée : tasks/PD04a-pont-ipc-source-desktop.md (D755, D756) | dur | validé (rapports/PD04a-chef.md) | 2 |
 | PD04b | Rester connecté hors ligne : tasks/PD04b-connexion-hors-ligne.md (D755 à D757) | dur | validé (rapports/PD04b-chef.md) | 2 |
-| PD04c | Écrans en mode desktop : tasks/PD04c-ecrans-mode-desktop.md | dur | à faire | 0 |
+| PD04c | Écrans en mode desktop : tasks/PD04c-ecrans-mode-desktop.md (D758 ; annulation en ligne et plaquette non jouées, reportées à PD05 section 7 bis) | dur | validé (rapports/PD04c-chef.md) | 2 |
 | PD05 | Impression directe : tasks/PD05-impression-directe.md | spécifié | à faire | 0 |
 | PD06 | Installation et mise à jour, mesure sur 4 Go : tasks/PD06-installation-mise-a-jour.md | spécifié | à faire | 0 |
 

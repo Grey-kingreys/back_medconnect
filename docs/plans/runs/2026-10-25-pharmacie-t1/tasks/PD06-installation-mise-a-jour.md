@@ -97,6 +97,10 @@ Sur ce poste, dossier local servi sur `http://127.0.0.1:<port libre>` par un pet
 
 Écrit sur la base de dev du porteur : le chef le dit avant. Poste désinstallé à la fin ; supprimer le dossier de test est **au porteur**, le signaler.
 
+### 6 ter. Volume réseau (D758)
+
+Lors de la preuve `https`, relever les octets réellement échangés par le poste sur une heure au repos, en ligne (Moniteur de ressources de Windows, ou compteur du relais) : le contact d'une minute est chiffré à environ 6 Ko par estimation. Au rapport, en Mo pour 12 h d'ouverture, pour que le porteur juge du coût.
+
 ### 6 bis. Mesure sur 4 Go (D750, exigée avant toute livraison)
 
 Le paquet installé, sur un PC réel ou une machine virtuelle de 4 Go (Windows 10 de préférence) : scénario de PD01 (connexion, vente, caisse, ventes, 90 s d'attente), puis une vente et un reçu. Relevés : mémoire totale utilisée par Windows, mémoire libre, `workingSetSize` et `privateBytes` par processus, temps de démarrage, délai ressenti de la vente. `memoire.ts` étant inactif en paquet, relever par le Gestionnaire des tâches ou `Get-Process`. Aucune limite de tas à réintroduire. Sans machine disponible : le rapport dit **non prouvé**, et cela bloque la livraison à une officine, pas la fiche.

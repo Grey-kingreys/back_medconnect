@@ -76,6 +76,21 @@ Sans imprimante thermique ici :
 3. réseau coupé : ticket réimprimé depuis la base locale ;
 4. A4 : une page.
 
+### 7 bis. Non joué en PD04c, à jouer ici dans Electron (D745, D753, D723)
+
+Sur l'API de dev, **écrit sur la base du porteur**, Pharmacie de Kaloum seulement : le chef le dit avant.
+
+**Annulation en ligne, bon tiroir** (défaut corrigé en PD02b, jamais joué réellement) :
+1. poste en ligne, file vide, caisse ouverte S sur le poste ; relever le théorique espèces ;
+2. annuler depuis « Ventes du jour » une vente faite sur le poste, puis une vente faite sur une caisse web ;
+3. au serveur : la pièce d'annulation porte `posteId` du poste et `sessionCaisseId` = S, **pas** la caisse web du vendeur ni celle de la vente d'origine ;
+4. sur le poste : théorique diminué du montant, stock rendu après la photographie, vente marquée annulée, pièce listée à son jour ; une vente suivante reste sur S, sans `SESSION_INCONNUE` ;
+5. caisse locale fermée, nouvelle annulation : caisse ouverte par le serveur adoptée à son `jourMetier`, vente suivante sur cette caisse, envoyée sans rejet ;
+6. file non vide : message d'attente, aucun appel ;
+7. contrôle : `stock:verifier` propre, aucune anomalie `SEQUENCE_MANQUANTE` ni `EVENEMENT_REJETE` nouvelle.
+
+**Plaquette** : créer ou prendre une fiche `PLAQUETTE`, 10 par boîte, avec prix de la plaquette, dans le jeu de la Pharmacie de Kaloum, par les écrans ou la réception, jamais par SQL. Réseau coupé : vendre 1 plaquette (« 1 boîte et 9 plaquettes », « Boîte entamée : il reste 9 plaquettes », « 3 000 GNF la plaquette »), vendre au-delà du stock (0 et « N plaquettes à régulariser », aucun négatif) ; réseau revenu : au serveur, mêmes quantités, reçu d'une plaquette imprimé en 58 mm.
+
 **Non prouvé ici** : une vraie imprimante thermique. À faire sur le terrain, marque et modèle au rapport du porteur.
 
 ## Fichiers autorisés
@@ -105,6 +120,7 @@ Sans imprimante thermique ici :
 - [ ] Imprimante choisie une fois, gardée au redémarrage
 - [ ] Impression sans réseau, réimpression
 - [ ] Échec d'impression sans effet sur la vente
+- [ ] Annulation en ligne jouée sur le bon tiroir, plaquette jouée (7 bis)
 - [ ] Web inchangé
 
 ## Return
