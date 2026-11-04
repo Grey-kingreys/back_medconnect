@@ -122,6 +122,7 @@ Le bandeau web D694 reste tel quel tant qu'aucune adresse de téléchargement n'
 | Certificat de signature Windows | Non signé, SmartScreen documenté (Q05). Une mise à jour non signée n'est vérifiée que par `sha512` de `latest.yml` : l'hébergement doit être sûr |
 | Hébergement des mises à jour et du téléchargement | Aucun : `MC_MAJ_URL` absente, installation manuelle. Proposition : dossier sur le R2 public existant, `https` |
 | Cible Windows | Windows 10 et 11, 64 bits. Electron ne fournit **pas** de version 32 bits et ne tourne pas sous Windows 7 ou 8 |
+| Vente bloquée à l'envoi (D754) | Aucune sortie : les ventes restent sur le poste jusqu'à une nouvelle version. Sortie d'assistance à décider, sans elle un blocage arrête tout envoi de ce poste |
 | Parc réel des officines | À vérifier sur le terrain : version de Windows, 32 ou 64 bits, mémoire, modèle d'imprimante, avant toute livraison |
 
 ## Fichiers autorisés

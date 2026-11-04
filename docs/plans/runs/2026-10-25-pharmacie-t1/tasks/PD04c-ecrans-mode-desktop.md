@@ -42,7 +42,7 @@ Rendu en haut du contenu du tableau de bord (`dashboard/layout.tsx`, après la `
 | `!catalogueDisponible` | « Connectez ce poste à internet une première fois pour charger le catalogue. » |
 | `autrePharmacie` | « Ce poste est rattaché à une autre pharmacie. » |
 
-Pastille d'alerte en plus : `plageEpuisee` « Numéros de tickets épuisés : les ventes continuent, avec un numéro de secours. » ; `rejetes > 0` « N opération(s) refusée(s) par le serveur : le titulaire les voit dans ses anomalies. » ; `heureFausse` « L'heure de cet ordinateur semble fausse : vérifiez-la, elle sert aux péremptions. » ; `posteDesactive` « Ce poste a été désactivé : les ventes sont encore envoyées, mais le catalogue n'est plus mis à jour. Contactez le titulaire. ».
+Pastille d'alerte en plus, à ne jamais masquer : `messageEnvoi` affiché tel quel (envoi bloqué, D754 ; test de rendu exigé) ; `plageEpuisee` « Numéros de tickets épuisés : les ventes continuent, avec un numéro de secours. » ; `rejetes > 0` « N opération(s) refusée(s) par le serveur : le titulaire les voit dans ses anomalies. » ; `heureFausse` « L'heure de cet ordinateur semble fausse : vérifiez-la, elle sert aux péremptions. » ; `posteDesactive` « Ce poste a été désactivé : les ventes sont encore envoyées, mais le catalogue n'est plus mis à jour. Contactez le titulaire. ».
 
 Le bandeau web D694 (« Cette page a besoin d'internet... », `vente/page.tsx`, `caisse/page.tsx`) : masqué si `!sourceCaisse().enLigneSeulement`, inchangé sur le web.
 

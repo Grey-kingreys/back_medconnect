@@ -47,7 +47,7 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | PD01 | Squelette Electron et embarquement standalone, dépôt front, branche orch/pharmacie-t1-desktop : tasks/PD01-squelette-electron-standalone.md (D733 à D736, D749 à D751) | dur | validé (rapports/PD01-chef.md) | 2 |
 | PD02a | Règles portées, stockage local, catalogue et stock dérivé : tasks/PD02a-regles-stockage-catalogue.md | dur | validé (rapports/PD02a-chef.md) | 2 |
 | PD02b | Cœur hors ligne : vente, caisse, journal, plages : tasks/PD02b-coeur-vente-caisse.md (D752, D753 ; `annulation` du back enrichie, à déployer avant ou avec le desktop) | dur | validé (rapports/PD02b-chef.md) | 2 |
-| PD03 | Client de synchronisation : tasks/PD03-client-synchro.md | spécifié | à faire | 0 |
+| PD03 | Client de synchronisation : tasks/PD03-client-synchro.md (D754) | spécifié | validé (rapports/PD03-chef.md) | 2 |
 | PD04a | Pont IPC, source desktop, synchro branchée : tasks/PD04a-pont-ipc-source-desktop.md | dur | à faire | 0 |
 | PD04b | Rester connecté hors ligne : tasks/PD04b-connexion-hors-ligne.md | dur | à faire | 0 |
 | PD04c | Écrans en mode desktop : tasks/PD04c-ecrans-mode-desktop.md | dur | à faire | 0 |
@@ -71,6 +71,7 @@ Back de la tranche (PB01 à PB19) validé ; bilan, décisions à faire valider p
 - Porteur, après PB19b : décisions D601 à D682 de cette reprise à valider (liste et révisions de décisions antérieures dans rapports/PB19b-chef.md).
 - Porteur, après PF03b : attendu et écart sont visibles en direct pendant le comptage de fermeture, donc ajustables avant la confirmation (DEMANDE.md ligne 77 : « sa propre activité [...] et ensuite l'écart »). Recommandation de l'orchestrateur principal : les masquer jusqu'à la confirmation. Comportement inchangé en attendant.
 - Porteur, après PF04 : le reçu d'une vente en plaquettes dit « 6 unités de X » faute de libellé d'unité sur la ligne de vente, et les alertes de péremption (PF06b) disent aussi « unités ». Ajouter ce libellé aux réponses du back ?
+- Porteur, desktop (D754) : sortie d'assistance pour une vente bloquée à l'envoi. Aujourd'hui, aucune : plus aucune vente de ce poste n'atteint le serveur (400 ou 413), la règle de saut de 24 h ne se déclenche pas faute de vente reçue après le trou, et une clôture peut passer sans ces ventes, qui remonteront en régularisation.
 - Porteur, desktop (D748) : signature de code, hébergement des mises à jour, cible Windows, parc réel des officines, adresse de l'API déployée avec `DESKTOP_ORIGINS` ; à valider : D737 et D743.
 - Reprises du run parqué 2026-10-22-lot8 : voir son decisions.md et l'historique git de ce fichier (questions TB3, B2, B4, U1, B8, B10, B11, B12, B14 toujours ouvertes).
 

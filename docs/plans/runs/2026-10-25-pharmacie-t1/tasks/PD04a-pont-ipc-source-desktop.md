@@ -35,6 +35,8 @@ export interface EtatPosteDesktop {
   enLigne: boolean; connexionARefaire: boolean; nonEnregistre: boolean; catalogueDisponible: boolean;
   fileEnAttente: number; rejetes: number; plageEpuisee: boolean; heureFausse: boolean; posteDesactive: boolean;
   autrePharmacie: boolean; dernierContactLe: string | null; photographieLe: string | null;
+  /** Message de `moteur.etat().erreur` (envoi bloqué D754, refus 403), null sinon. */
+  messageEnvoi: string | null;
 }
 export interface PontDesktop {
   version: string;
