@@ -13,7 +13,7 @@ Dépend de: PD02a validé
 
 Le cœur enregistre ventes, ouvertures, comptages, mouvements et fermetures sur le poste, chacun en une transaction avec son événement du journal. Tout est testé sans Electron ni réseau. Le corps de chaque événement respecte exactement les DTO du back.
 
-Décisions : D424, D427, D428, D651, D652, D654, D655, D713.2, D719, D723, D737, D739, D741. Puce PB18 de `back_medconnect/CLAUDE.md`. CA19, CA23, CA24 du plan.
+Décisions : D424, D427, D428, D632, D651, D652, D654, D655, D713.2, D719, D723, D737, D739, D741, D752. Puce PB18 de `back_medconnect/CLAUDE.md`. CA19, CA23, CA24 du plan.
 
 ### 1. Méthodes de `CoeurCaisse`
 
@@ -106,6 +106,28 @@ Réponse : forme `Vente` complète, coûts absents, `typePiece: "VENTE"`, `statu
 
 Le stock revient par la photographie suivante. Test : théorique diminué, session adoptée, aucun événement créé.
 
+### 7. Base en retard sur le serveur : ne jamais réutiliser un numéro (D752)
+
+Cas : base repartie à vide (D740) ou restaurée depuis une copie, même `appareilId`. Le serveur a reçu des ventes que le poste ne connaît plus ; une plage revient avec `dernierUtilise` nul, et le poste réimprimerait des numéros déjà donnés à des clients (le serveur les renumérote `N...` avec anomalie, le ticket du client reste faux).
+
+Détection, dans `appliquerPhotographie`, avant la mise à jour de `prochaineSequence` : **`photo.poste.sequenceMaxRecue >= prochaineSequence`**. Jamais vrai en marche normale : le serveur ne peut pas avoir reçu un événement que le poste n'a pas créé. Pas de condition « base neuve » : une copie restaurée a le même défaut.
+
+Dans la même transaction, si détecté :
+- `photo.poste.plages` compte **deux** plages : la plus ancienne est abandonnée (`dernierUtilise = fin`), la plus récente reste à `NULL`. Elle est intacte au serveur : si une pièce y portait un numéro, la plus ancienne serait déjà épuisée et absente de la réponse (D632, `lirePlagesNonEpuisees`) ;
+- **une** plage : abandonnée, elle a pu servir en partie. Sans numéro restant, PD03 réclame une plage neuve (une seule plage ouverte au serveur : pas de `PLAGES_SUFFISANTES`), et son usage épuisera l'ancienne côté serveur ;
+- toute autre plage locale : abandonnée, seule la plus récente du cas à deux plages reste servie, même si PD03 vient de la recevoir (le cycle demande la plage avant la photographie) ;
+- `prochainSecours = MAX(prochainSecours, sequenceMaxRecue + 1)` : chaque numéro de secours a coûté au moins une séquence, donc aucun n'a dépassé `sequenceMaxRecue`.
+
+Tant qu'aucune plage n'est servie (hors ligne, par exemple) : numéro de secours, jamais de blocage. La détection n'écrit aucun événement. Une plage neuve abandonnée à tort (une seule plage dans la réponse, reçue à l'instant) coûte ses numéros et rien d'autre : la plage suivante est demandée au cycle d'après, et `prochaineSequence` à jour empêche un second abandon.
+
+Tests, dans `coeur.test.ts` :
+1. marche normale : `sequenceMaxRecue` 40, `prochaineSequence` 41 : rien d'abandonné ;
+2. poste neuf : `sequenceMaxRecue` 0, `prochaineSequence` 1 : plage utilisable depuis `debut` ;
+3. base neuve, une plage, `sequenceMaxRecue` 40 : plage abandonnée, vente suivante en numéro de secours `n` = 41, puis plage neuve reçue : numéro pris dans la neuve ;
+4. base neuve, deux plages : première vente au `debut` de la plus récente ;
+5. copie restaurée : `prochaineSequence` 10, `sequenceMaxRecue` 40, plage locale entamée : abandonnée, événement suivant en 41 ;
+6. photographie suivante, redevenue normale : plage neuve entamée conservée, abandon non rejoué.
+
 ## Fichiers autorisés
 
 `desktop/coeur/**`. Rien sous `src/` : un manque dans les règles se signale au chef.
@@ -129,6 +151,7 @@ Dans `desktop/` : `npm run types`, `npm test`. À la racine du front : `docker c
 - [ ] Vente en une transaction, sans aucun refus de stock
 - [ ] 0 et « N à régulariser », unité plaquette comprise
 - [ ] Plages, numéros de secours, CA23 côté poste
+- [ ] Base en retard : aucun numéro réutilisé (D752)
 - [ ] Caisse complète, CA15 et CA18
 - [ ] Corps conformes aux DTO du back, test de contrat vert
 

@@ -95,7 +95,7 @@ Besoin : numéros restants, toutes plages locales confondues, sous `seuilRecharg
 10. reprise : réseau coupé 10 cycles : 5 s, 10 s, 20 s, plafond 5 min, retour à 30 s au succès ;
 11. rechargement : sous 20 % : plage demandée ; 409 `PLAGES_SUFFISANTES` : sans erreur ;
 12. `EN_ATTENTE` puis `differe` : ligne mise à jour, `fileVide` faux entre-temps ;
-13. poste réinstallé : `sequenceMaxRecue` 40 : prochain événement en 41 ;
+13. poste réinstallé : `sequenceMaxRecue` 40 : prochain événement en 41 ; le faux serveur garde une plage entamée ouverte : après le cycle (plage demandée, puis photographie à deux plages), seule la neuve sert (D752), aucun numéro déjà servi ;
 14. D719 : photographie `quantite` 0, `quantiteARegulariser` 1 + vente provisoire locale : 0 et 2.
 
 ### 6. Vérification contre le vrai contrat

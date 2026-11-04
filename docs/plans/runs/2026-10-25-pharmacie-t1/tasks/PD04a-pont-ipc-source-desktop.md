@@ -13,7 +13,7 @@ Dépend de: PD03 validé
 
 Le processus principal ouvre la base, fait tourner la synchro, et répond à des gestionnaires IPC validés. Le front gagne une source desktop et un sélecteur de source. Les écrans n'en profitent pas encore (PD04c), sauf `vente/page.tsx` qui passe déjà par la source. **Sur le web, rien ne change.**
 
-Décisions : D442, D737, D739, D741, D742, D743. Plan 4.3, 4.4, 4.8.
+Décisions : D442, D737, D739, D740, D741, D742, D743, D752. Plan 4.3, 4.4, 4.8.
 
 ### Contexte vérifié
 
@@ -104,7 +104,20 @@ Après `creerVente` réussie : `moteur.cycle("apres-vente")` sans attendre. Ratt
 
 ### 5. Base illisible (D740)
 
-`quick_check` en échec : boîte de dialogue « Les ventes enregistrées sur ce poste n'ont pas pu être relues. Le fichier est conservé. Appelez le support avant de continuer. » avec « Quitter » et « Repartir d'une base vide ». Le second : renomme le fichier en `caisse-illisible-<AAAAMMJJ-HHmm>.sqlite` (jamais supprimé), recrée, le poste reprend après `sequenceMaxRecue`. Test du renommage dans `desktop/coeur` (fonction pure sur `fs`, injectée).
+Non codé en PD02a, qui ne fournit que `controlerBase` et `ouvrirStockage`. **Illisible** = `ouvrirStockage` lève (un fichier abîmé échoue dès le `PRAGMA journal_mode`, avant `controlerBase`) ou `quick_check` échoue. `migrer` qui refuse une base plus récente **n'est pas** ce cas : message de mise à jour, jamais de renommage ; WAL refusé par `exigerWal` non plus : message, quitter.
+
+Boîte de dialogue « Les ventes enregistrées sur ce poste n'ont pas pu être relues. Le fichier est conservé. Appelez le support avant de continuer. » avec « Quitter » (défaut) et « Repartir d'une base vide ». Le second : renomme le fichier en `caisse-illisible-<AAAAMMJJ-HHmm>.sqlite`, avec ses `-wal` et `-shm` s'ils existent, sans jamais rien supprimer ni écraser (suffixe si le nom existe), recrée la base. Le renommage échoue (fichier verrouillé) : message, quitter, aucune base neuve.
+
+**Même poste après la remise à vide (D752)** : l'`appareilId` vit dans la base, une base vide en créerait un autre, donc un second poste au serveur, et l'ancien resterait attendu à la clôture. `electron/appareil.ts` écrit `appareilId` dans `userData/appareil.json` dès sa création ; à l'ouverture d'une base sans identifiant, `CoeurCaisse.fixerAppareilId(id)` (seulement si nul) le reprend. Le poste reprend alors après `sequenceMaxRecue`, sans réutiliser de numéro (PD02b, section 7).
+
+`desktop/coeur/base_illisible.ts`, `traiterBaseIllisible(chemin, { demander, fichiers, horloge })`, `demander` et `fichiers` injectés. **Preuves exigées** :
+1. test sur un **vrai fichier abîmé** (en-tête écrasé, dossier temporaire) : `ouvrirStockage` lève, reconnu illisible ; second test, page interne abîmée : `quick_check` faux, si elle se provoque simplement, sinon le dire ;
+2. « Quitter » : fichier intact octet pour octet, aucune base neuve ;
+3. « Repartir » : fichier renommé, contenu identique octet pour octet, `-wal` et `-shm` suivis, base neuve migrée, même `appareilId` lu de `appareil.json` ;
+4. renommage en échec : aucune base neuve ;
+5. nom déjà pris : rien d'écrasé ;
+6. base plus récente : jamais renommée ;
+7. dans Electron, `userData` de test (`--user-data-dir`, jamais le dossier réel), fichier abîmé : boîte vue à l'écran, capture au rapport, ou **dit non joué** si aucune session graphique n'est disponible.
 
 ### 6. Preuves
 
@@ -134,7 +147,8 @@ Après `creerVente` réussie : `moteur.cycle("apres-vente")` sans attendre. Ratt
 - [ ] Chaque gestionnaire contrôle l'origine et valide ses arguments
 - [ ] Les refus du cœur se lisent comme ceux de l'API
 - [ ] Synchro réelle tournante, jeton en mémoire seulement
-- [ ] Base illisible conservée, jamais supprimée
+- [ ] Base illisible conservée, jamais supprimée, sept preuves de la section 5 rendues
+- [ ] Même `appareilId` après une remise à vide
 - [ ] Web inchangé, tests existants intacts
 
 ## Return
