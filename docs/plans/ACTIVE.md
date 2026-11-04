@@ -44,7 +44,17 @@ Run parqué, non exécuté : docs/plans/runs/2026-10-22-lot8/ (B14, admin de pha
 | PB21 | Unité PLAQUETTE, coefficient de réception dans les lots : tasks/PB21-unite-plaquette.md (D723, D724, dépend de PB20) | spécifié | validé (rapports/PB21-chef.md) | 2 |
 | PF09 | Unité plaquette à l'écran, libellés accordés : tasks/PF09-unite-plaquette.md (D723 à D725, dépend de PB21 et PF08) | spécifié | contrôlé par le chef (front 8a2a159, rapports/PF09-chef.md), test navigateur à faire | validé (test navigateur OK, 8a2a159, rapports/PF09-chef.md du run) |
 
-Ordre proposé : PB20, PF08, PB21, PF09, puis reprise de PF07d et des fiches PF03 à PF06, qui appliquent D713 (aucune quantité négative affichée).
+| PD01 | Squelette Electron et embarquement standalone, dépôt front, branche orch/pharmacie-t1-desktop : tasks/PD01-squelette-electron-standalone.md (D733 à D736, D749 à D751) | dur | validé (rapports/PD01-chef.md) | 2 |
+| PD02a | Règles portées, stockage local, catalogue et stock dérivé : tasks/PD02a-regles-stockage-catalogue.md | dur | à faire | 0 |
+| PD02b | Cœur hors ligne : vente, caisse, journal, plages : tasks/PD02b-coeur-vente-caisse.md | dur | à faire | 0 |
+| PD03 | Client de synchronisation : tasks/PD03-client-synchro.md | spécifié | à faire | 0 |
+| PD04a | Pont IPC, source desktop, synchro branchée : tasks/PD04a-pont-ipc-source-desktop.md | dur | à faire | 0 |
+| PD04b | Rester connecté hors ligne : tasks/PD04b-connexion-hors-ligne.md | dur | à faire | 0 |
+| PD04c | Écrans en mode desktop : tasks/PD04c-ecrans-mode-desktop.md | dur | à faire | 0 |
+| PD05 | Impression directe : tasks/PD05-impression-directe.md | spécifié | à faire | 0 |
+| PD06 | Installation et mise à jour, mesure sur 4 Go : tasks/PD06-installation-mise-a-jour.md | spécifié | à faire | 0 |
+
+Web fusionné vers dev (back #36, front #43) ; le suivi du run reste sur cette branche. Desktop dans l'ordre du tableau, une fiche à la fois, un commit par fiche sur orch/pharmacie-t1-desktop du front.
 
 Back de la tranche (PB01 à PB19) validé ; bilan, décisions à faire valider par le porteur et consignes pour le front : rapports/PB19b-chef.md. Front : 14 sous-fiches dans l'ordre PF01a, PF01b, PF02a, PF02b, PF07a, PF07b, PF07c, PF07d, PF03a, PF03b, PF04, PF05, PF06a, PF06b (D685), une à la fois sur l'arbre principal du dépôt front_medconnect, en attente de validation des fiches par l'orchestrateur principal.
 
@@ -61,6 +71,7 @@ Back de la tranche (PB01 à PB19) validé ; bilan, décisions à faire valider p
 - Porteur, après PB19b : décisions D601 à D682 de cette reprise à valider (liste et révisions de décisions antérieures dans rapports/PB19b-chef.md).
 - Porteur, après PF03b : attendu et écart sont visibles en direct pendant le comptage de fermeture, donc ajustables avant la confirmation (DEMANDE.md ligne 77 : « sa propre activité [...] et ensuite l'écart »). Recommandation de l'orchestrateur principal : les masquer jusqu'à la confirmation. Comportement inchangé en attendant.
 - Porteur, après PF04 : le reçu d'une vente en plaquettes dit « 6 unités de X » faute de libellé d'unité sur la ligne de vente, et les alertes de péremption (PF06b) disent aussi « unités ». Ajouter ce libellé aux réponses du back ?
+- Porteur, desktop (D748) : signature de code, hébergement des mises à jour, cible Windows, parc réel des officines, adresse de l'API déployée avec `DESKTOP_ORIGINS` ; à valider : D737 et D743.
 - Reprises du run parqué 2026-10-22-lot8 : voir son decisions.md et l'historique git de ce fichier (questions TB3, B2, B4, U1, B8, B10, B11, B12, B14 toujours ouvertes).
 
 ## Dernières décisions (5 max, historique complet dans decisions.md)
