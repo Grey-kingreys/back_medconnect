@@ -159,13 +159,16 @@ describe('RolesService (administrateur de pharmacie)', () => {
     expect(permissions.invalidateRole).toHaveBeenCalledWith('r1');
   });
 
-  it('7. définitions : le pharmacien a caisse:utiliser et aucune autre permission T1', () => {
+  it('7. définitions : le pharmacien a caisse:utiliser et reception:write (D732) et aucune autre permission T1', () => {
     const pharmacien = DEFAULT_STRUCTURE_ROLES.PHARMACIE.find(
       (def) => def.legacyRole === 'PHARMACIEN',
     );
     const codes = pharmacien?.permissions as string[];
     expect(codes).toContain('caisse:utiliser');
-    for (const code of PERMISSIONS_T1.filter((c) => c !== 'caisse:utiliser')) {
+    expect(codes).toContain('reception:write');
+    for (const code of PERMISSIONS_T1.filter(
+      (c) => c !== 'caisse:utiliser' && c !== 'reception:write',
+    )) {
       expect(codes).not.toContain(code);
     }
     for (const code of PERMISSIONS_T1) {

@@ -340,7 +340,7 @@ export const DEFAULT_STRUCTURE_ROLES: Record<string, DefaultRoleDef[]> = {
       nom: 'Pharmacien',
       legacyRole: 'PHARMACIEN',
       description:
-        'Gère le stock, contribue au catalogue, répond aux messages de l’officine.',
+        'Gère le stock, enregistre les livraisons, contribue au catalogue, répond aux messages de l’officine.',
       permissions: [
         PERMISSIONS.STOCK_READ,
         PERMISSIONS.STOCK_WRITE,
@@ -348,6 +348,7 @@ export const DEFAULT_STRUCTURE_ROLES: Record<string, DefaultRoleDef[]> = {
         PERMISSIONS.VENTE_READ,
         PERMISSIONS.VENTE_WRITE,
         PERMISSIONS.CAISSE_UTILISER,
+        PERMISSIONS.RECEPTION_WRITE,
         PERMISSIONS.CHAT_STRUCTURE,
         PERMISSIONS.STRUCTURE_READ,
         PERMISSIONS.MEMBRE_READ,

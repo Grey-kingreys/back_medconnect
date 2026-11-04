@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { ConfigService } from '@nestjs/config';
 import { DemoSeeder } from 'src/demo/demo.seeder';
 import { COMPTES_DEMO, STRUCTURES_DEMO } from 'src/demo/demo.donnees';
+import { DEFAULT_STRUCTURE_ROLES } from 'src/common/rbac/permissions.constants';
 import type { PermissionsService } from 'src/common/rbac/permissions.service';
 import type { RolesService } from 'src/common/rbac/roles.service';
 import { EncryptionService } from 'src/common/services/encryption.service';
@@ -380,6 +381,20 @@ describe('Jeu démo de pharmacie : création, scénario et purge, sur base de te
         ).rows[0].adminId,
       ),
     ).toBe(titulaire);
+
+    // D732 : le compte pharmacien démo reçoit reception:write, mais ni inventaire:write ni marge:read.
+    // Ce harnais simule RolesService : on prouve le rattachement par l'enum du compte et le rôle par défaut
+    // que RolesService lui attribue (resolveAssignableRoleId prend le rôle de legacyRole PHARMACIEN).
+    expect(
+      (await sql('SELECT "role" FROM "User" WHERE "id" = $1', [vendeur]))
+        .rows[0].role,
+    ).toBe('PHARMACIEN');
+    const droitsVendeur = (DEFAULT_STRUCTURE_ROLES.PHARMACIE.find(
+      (def) => def.legacyRole === 'PHARMACIEN',
+    )?.permissions ?? []) as string[];
+    expect(droitsVendeur).toContain('reception:write');
+    expect(droitsVendeur).not.toContain('inventaire:write');
+    expect(droitsVendeur).not.toContain('marge:read');
   });
 
   it('2. stock calculé non nul et cohérent', async () => {

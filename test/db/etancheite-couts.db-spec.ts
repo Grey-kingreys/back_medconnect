@@ -740,6 +740,51 @@ describe('Étanchéité des coûts, sur base de test (PB16b, CA22)', () => {
     return resultats;
   }
 
+  it("D732 : le Pharmacien par défaut enregistre une réception sans recevoir de coût, et reste refusé sur l'inventaire", async () => {
+    const permissions = app.get(PermissionsService);
+    const droits = await permissions.getUserPermissions(PROFILS.vendeur.userId);
+    expect(droits).toContain(PERMISSIONS.RECEPTION_WRITE);
+    expect(droits).not.toContain(PERMISSIONS.INVENTAIRE_WRITE);
+    expect(droits).not.toContain(PERMISSIONS.MARGE_READ);
+
+    const fiche = await nouvelleFiche('D732', 'Produit livraison pharmacien');
+    const reception = await request(serveur())
+      .post(`/pharmacie/${S}/receptions`)
+      .set('x-essai-user', PROFILS.vendeur.userId)
+      .send({
+        lignes: [
+          {
+            stockId: fiche.stockId,
+            nombreBoites: 2,
+            dateExpiration: jour(150),
+            coutAchatBoite: 6000,
+          },
+        ],
+      });
+    expect(estSucces(reception)).toBe(true);
+    expect(cheminsCout(reception.body)).toEqual([]);
+    const detail = await request(serveur())
+      .get(
+        `/pharmacie/${S}/receptions/${String((reception.body as { data: { id: string } }).data.id)}`,
+      )
+      .set('x-essai-user', PROFILS.vendeur.userId);
+    expect(detail.status).toBe(200);
+    expect(cheminsCout(detail.body)).toEqual([]);
+    // Le coût saisi est bien enregistré (lu par le titulaire seulement).
+    const cout = await sql(
+      `SELECT "coutUnitaire" FROM "LotStock" WHERE "stockMedicamentId" = $1`,
+      [fiche.stockId],
+    );
+    expect(cout.rows).toHaveLength(1);
+    expect(Number(cout.rows[0].coutUnitaire)).toBe(6000);
+
+    const inventaire = await request(serveur())
+      .post(`/pharmacie/${S}/inventaires`)
+      .set('x-essai-user', PROFILS.vendeur.userId)
+      .send({ lignes: [{ stockId: fiche.stockId, quantiteComptee: 5 }] });
+    expect(inventaire.status).toBe(403);
+  });
+
   it("le Pharmacien par défaut n'a pas marge:read, le titulaire l'a", async () => {
     const permissions = app.get(PermissionsService);
     expect(

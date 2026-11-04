@@ -16,6 +16,7 @@ import {
 import { chargerFormatActuel } from './fixtures/format-actuel';
 
 const M1 = '20261026090000_pharmacie_t1_permissions';
+const M8 = '20261104100000_pharmacie_t1_pharmacien_reception';
 const T1 = [
   'caisse:utiliser',
   'caisse:superviser',
@@ -136,9 +137,10 @@ describe('Migration M1, permissions de la tranche pharmacie 1 (PB03)', () => {
         [...etatAvant.roles[id], ...T1].sort(),
       );
     }
+    // La base porte toutes les migrations : M8 (D732) ajoute reception:write au rôle Pharmacien.
     for (const id of VENDEURS) {
       expect(await codesDuRole(client(), id)).toEqual(
-        [...etatAvant.roles[id], 'caisse:utiliser'].sort(),
+        [...etatAvant.roles[id], 'caisse:utiliser', 'reception:write'].sort(),
       );
     }
     for (const id of HOPITAL) {
@@ -176,6 +178,11 @@ describe('Migration M1, permissions de la tranche pharmacie 1 (PB03)', () => {
         jusqua: M1,
       }),
     ).resolves.toEqual([M1]);
+    // M8 (D732) s'appuie sur les permissions de M1 : la supprimer a retiré le droit des pharmaciens.
+    await appliquerSql(
+      client(),
+      readFileSync(path.join(DOSSIER_MIGRATIONS, M8, 'migration.sql'), 'utf8'),
+    );
     expect(await etatRbac(client())).toEqual(etatHaut);
   });
 });
