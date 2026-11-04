@@ -13,7 +13,9 @@ Dépend de: PD04a validé
 
 Démarrer l'application sans réseau garde le dernier utilisateur connecté, avec ses permissions, et le jeton d'accès arrive au processus principal à chaque changement. **Le web garde son comportement exact, même là où il déconnecte.**
 
-Décisions : D442, D743. Plan 4.4. Question Q06.
+Décisions : D442, D743, D755, D756. Plan 4.4. Question Q06.
+
+**Fiche corrigée après PD04a** : l'identité vient du serveur, jamais du rendu. `definirUtilisateur` et `profil.enregistrer` n'existent pas et ne doivent pas être créés. Le rendu pousse le jeton (`definirJeton`), lit le profil, et appelle `deconnexion()` selon le tableau de la section 3.
 
 ### Contexte vérifié : le code actuel déconnecte hors ligne
 
@@ -39,18 +41,30 @@ Tests : sans pont : `panneReseauDesktop` toujours faux, `pousserJeton` sans effe
 
 ### 2. Contrat et cœur
 
-`PontDesktop` gagne `profil: { lire(): Promise<UserProfile | null>; enregistrer(p: UserProfile): Promise<void> }`. Gestionnaires `profil:lire`, `profil:enregistrer` validés (`utilisateurId` string, objet) ; `CoeurCaisse.lireProfil`, `enregistrerProfil` sur `profil_local`. Enregistrer un utilisateur différent remplace la ligne. **Aucune clé de jeton** : le document est filtré (test : `access_token`, `refresh_token` retirés même s'ils sont fournis).
+`PontDesktop` gagne `profil: { lire(): Promise<UserProfile | null> }`, lecture seule, gestionnaire `profil:lire` protégé par `expediteurAutorise`. Aucune écriture du profil par le rendu.
+
+`Passerelle.confirmerIdentite` n'enregistre aujourd'hui que `id`, `nom`, `structureId`, `permissions` : il doit garder le `data` complet de `/auth/me`, que `lireContexteAcces` et le menu lisent (`structureType`, rôle, etc.), sans aucune clé de jeton (test : `access_token`, `refresh_token`, `refreshToken` retirés même s'ils sont fournis). `identiteDepuisProfil` relit déjà ce format. Aucun autre chemin d'écriture de `profil_local`.
 
 ### 3. `hooks/useAuth.tsx`
 
 Sans pont, chaque chemin reste **exactement** celui d'aujourd'hui.
 
-- `refreshProfile`, succès : si pont : `profil.enregistrer(res.data)` et `definirUtilisateur({ id, nom: prenom + nom, structureId, permissions })`.
+Quel appel, quand (D756) :
+
+| Situation | Appel au pont | Effet au processus principal |
+|---|---|---|
+| Jeton écrit ou renouvelé | `definirJeton(jeton)` | identité confirmée par `/auth/me` ; jeton d'un autre compte : l'ancienne identité tombe aussitôt |
+| Jeton retiré ou expiré, **panne réseau** | `definirJeton(null)`, sans purge | identité gardée, vente hors ligne possible |
+| `logout` volontaire | `deconnexion()` | identité et profil local effacés, en ligne comme hors ligne |
+| Session refusée par le serveur (refresh en 401, motifs forcés, purge de `authFetch`) | `deconnexion()` | idem : **toute purge réelle** du rendu l'appelle, sinon le poste continuerait à vendre au redémarrage |
+
+Dans le processus principal, un 401 simple garde l'identité (jeton expiré) et demande un jeton ; le refus définitif vient de l'étape du refresh ci-dessus, ou d'un 401 à code reçu par `/auth/me`.
+
 - `refreshProfile`, `catch` : si `panneReseauDesktop(err)` : `chargerProfilLocal()` et retour, sans refresh, sans purge.
 - `refreshProfile`, second `catch` (refresh échoué), et `checkAuth`, les deux `catch` : si `panneReseauDesktop` : garder `user`, `chargerProfilLocal()`, ne rien purger.
-- `chargerProfilLocal()` : lit le profil du pont ; s'il correspond à `user.id` : `setProfile` et `definirUtilisateur`.
+- `chargerProfilLocal()` : lit le profil du pont ; s'il correspond à `user.id` : `setProfile`. Sinon ou s'il est absent (déconnexion ou session retirée) : pas de reprise, retour à la connexion.
 - `checkAuth` : sans jeton mais avec `user` en mémoire et un profil local en desktop : session conservée hors ligne (le jeton a expiré ou a été retiré), pas de purge tant qu'aucun refus du serveur n'est reçu.
-- `logout` volontaire : `definirUtilisateur(null)`, `pousserJeton(null)`. Le profil local est effacé, **jamais le journal ni les ventes**. Hors ligne, se déconnecter empêche de se reconnecter : dialogue « Sans connexion, vous ne pourrez pas vous reconnecter tant qu'internet n'est pas revenu. Les ventes de ce poste restent enregistrées. » avec « Rester connecté » et « Se déconnecter ». Réutiliser le composant de confirmation existant du tableau de bord.
+- `logout` volontaire : `deconnexion()`. Le profil local est effacé, **jamais le journal ni les ventes**. Hors ligne, se déconnecter empêche de se reconnecter : dialogue « Sans connexion, vous ne pourrez pas vous reconnecter tant qu'internet n'est pas revenu. Les ventes de ce poste restent enregistrées. » avec « Rester connecté » et « Se déconnecter ». Réutiliser le composant de confirmation existant du tableau de bord.
 
 `pousserJeton` après chaque écriture de `access_token` : `api_auth.ts:283` et `useAuth.tsx` lignes ~115, ~149, ~224, ~259 ; `pousserJeton(null)` après chaque retrait.
 
@@ -74,8 +88,9 @@ Nouveau `hooks/useAuth.desktop.test.tsx`, pont simulé :
 3. 401 `SESSION_REVOQUEE` en desktop : purge et motif, comme le web ;
 4. 401 simple et refresh en 401 : purge, comme le web ;
 5. `authFetch` : 401 puis refresh en panne réseau : erreur réseau, jeton gardé ;
-6. chaque renouvellement pousse le jeton ; `logout` pousse `null` et efface le profil ;
-7. `surDemandeJeton` : refresh puis jeton poussé.
+6. chaque renouvellement pousse le jeton ; `logout` appelle `deconnexion()` ; refresh refusé par le serveur (401) : `deconnexion()` ; panne réseau : jamais `deconnexion()` ;
+7. `surDemandeJeton` : refresh puis jeton poussé ;
+8. **vendeur suivant, hors ligne** : A se déconnecte sans réseau, relance de l'application : page de connexion, `chargerStock` et `creerVente` du pont en 401, aucune vente possible au nom de A. Scénario joué aussi dans Electron par la sonde, sans réseau.
 
 **Non-régression web** : les tests existants `api_auth.*.test.ts`, `deconnexion_forcee.test.ts`, `layout.test.tsx` verts sans modification ; un test sans pont vérifie qu'une panne réseau à `checkAuth` purge encore comme aujourd'hui. Ce comportement du web est gardé tel quel ; il sera signalé au porteur (D743).
 
