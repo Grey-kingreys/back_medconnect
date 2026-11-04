@@ -92,6 +92,8 @@ Sur l'API de dev, **écrit sur la base de dev du porteur**, Pharmacie de Kaloum 
 6. Fermer la caisse : comptage, écart, commentaire. Bilan affiché.
 7. Relancer le back : `N` tombe à 0 sans geste. **Au serveur** : ventes présentes avec le même numéro, session fermée, anomalie `STOCK_NEGATIF` de la vente à 0, stock de la page web égal au stock du poste, 0 et « à régulariser » sur les deux.
 8. Rejouer l'envoi en remettant un événement à `A_ENVOYER` par la sonde : `DEJA_APPLIQUE`, aucun doublon (CA25).
+8 bis. **Cookie de refresh à la déconnexion (D757, jamais joué dans Electron)** : connexion en ligne, `session.defaultSession.cookies.get({ name: "refresh_token" })` trouve le cookie (booléen seul) ; déconnexion par le bouton de l'application : plus aucun cookie, aucune ligne « cookie de refresh non retiré » au journal ; même contrôle pour une déconnexion hors ligne (back arrêté), puis relance du back : aucune session rouverte sans nouvelle connexion, page de connexion affichée, vente du pont en 401.
+8 ter. **Port changé (D757)** : 47613 occupé par un programme de test, relance : stockage vide sur 47614 : session reprise du profil, un jeton obtenu du cookie, envoi repris sans geste ; relève si la page de connexion s'affiche d'abord (le proxy n'a pas encore le cookie témoin) et dis combien de temps.
 9. `npm run stock:verifier` dans le conteneur backend : propre, ou seulement ce qui existait avant ; à relever avant l'étape 1.
 
 Mis au rapport : captures clair et sombre du bandeau, liste de vente, reçu, page réservée.

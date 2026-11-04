@@ -82,7 +82,7 @@ Le schéma SQLite migre seul au démarrage (`user_version`) : une version plus a
 
 ### 5. Preuve contre une API `https`
 
-Paquet construit vers l'API déployée, si le porteur fournit l'adresse et y a réglé `DESKTOP_ORIGINS` : connexion, refresh après suppression du jeton, vente, envoi. Sans ces deux éléments : le rapport dit **non prouvé**, c'est bloquant pour la livraison à une officine, pas pour la fiche (D736).
+Paquet construit vers l'API déployée, si le porteur fournit l'adresse et y a réglé `DESKTOP_ORIGINS` : connexion, refresh après suppression du jeton, vente, envoi, déconnexion : cookie `Secure` de refresh bien retiré (D757 ; le poste journalise un échec, aucune ligne attendue). Sans ces deux éléments : le rapport dit **non prouvé**, c'est bloquant pour la livraison à une officine, pas pour la fiche (D736).
 
 ### 6. Preuve d'installation et de mise à jour
 
