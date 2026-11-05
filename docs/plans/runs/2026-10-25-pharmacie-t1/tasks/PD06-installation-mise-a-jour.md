@@ -167,3 +167,8 @@ Fichiers touchés, sorties des gates, taille de l'installateur, sortie des fusib
 ## Historique
 
 ## Validation
+
+## Complément, 2026-11-05 (D759, demande du porteur)
+
+- Appliquer D759 dans cet ordre, en prouvant le démarrage et la vente après chaque mesure : aucun secret ni `.map` (contrôle par `controler-sortie`), bytecode ou obfuscation du processus principal et du cœur, tentative pour le serveur Next dans une archive. Rapporter ce qui reste lisible, sans l'enjoliver.
+- Le porteur veut installer et tester lui-même : `npm run dist` doit produire `desktop/sortie/MedConnecte Caisse Setup <version>.exe`, et l'adresse d'API choisie au build doit être visible dans « Ce poste » (adresse seule). La documenter dans `desktop/README.md`.
