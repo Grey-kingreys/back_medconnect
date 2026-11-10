@@ -17,3 +17,7 @@ Mesure défensive proposée au porteur (non codée) : au démarrage, avant l'ouv
 ## Restes bloquants avant une officine
 
 Incident ci-dessus, preuve `https`, mesure sur un PC de 4 Go (D750), signature et hébergement des mises à jour.
+
+## Suite (2026-11-10, accord du porteur)
+
+Mesure défensive codée (D760), front `88a9e73` : journal de démarrage et refus d'ouvrir une base vue vide avec un `-wal` quand `appareil.json` existe. Test réel : vraie base de 300 ventes plus `-wal` d'une base neuve tuée ; refus, empreintes de `caisse.sqlite` et du `-wal` inchangées, 300 ventes relues sans le `-wal`. Cause de l'absence de `journal.log` : rien n'y était écrit lors d'un démarrage sain ; corrigé par le journal de démarrage. Contrôle : tsc OK, 192 tests desktop (16 fichiers).
