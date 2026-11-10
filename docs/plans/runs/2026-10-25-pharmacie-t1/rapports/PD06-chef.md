@@ -21,3 +21,7 @@ Incident ci-dessus, preuve `https`, mesure sur un PC de 4 Go (D750), signature e
 ## Suite (2026-11-10, accord du porteur)
 
 Mesure défensive codée (D760), front `88a9e73` : journal de démarrage et refus d'ouvrir une base vue vide avec un `-wal` quand `appareil.json` existe. Test réel : vraie base de 300 ventes plus `-wal` d'une base neuve tuée ; refus, empreintes de `caisse.sqlite` et du `-wal` inchangées, 300 ventes relues sans le `-wal`. Cause de l'absence de `journal.log` : rien n'y était écrit lors d'un démarrage sain ; corrigé par le journal de démarrage. Contrôle : tsc OK, 192 tests desktop (16 fichiers).
+
+## Cause établie (2026-11-10, D761)
+
+Pas de défaut du code. L'application Claude de bureau (paquet MSIX) virtualise `%APPDATA%` : les lancements faits depuis une session Claude écrivent dans `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\MedConnecte Caisse` et voient un mélange de ce dossier et du vrai. Le vrai poste du porteur (base `3cbd6dab`, poste D5, créé par le lancement automatique de l'installateur le 5 novembre à 08:31) est cohérent ; la base `8e9226e1` (D3) n'existe que dans la copie virtuelle des essais d'agents. Le constat « incident présent, ne pas relancer » du journal était faux : rien à réparer chez le porteur, surtout ne pas retirer son `-wal`. Règle : agents toujours avec `--user-data-dir` hors de `%APPDATA%`.
