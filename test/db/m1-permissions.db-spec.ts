@@ -26,6 +26,8 @@ const T1 = [
   'marge:read',
   'anomalie:gerer',
 ];
+const M11 = '20261113100000_pharmacie_t2_cahier_credit';
+const CREDIT = ['credit:read', 'credit:write'];
 const TITULAIRES = ['rol-p1-admin', 'rol-p2-admin', 'rol-p3-admin'];
 const VENDEURS = [
   'rol-p1-pharmacien',
@@ -134,13 +136,18 @@ describe('Migration M1, permissions de la tranche pharmacie 1 (PB03)', () => {
   it('M1 haut : titulaires avec les 7, pharmaciens avec caisse:utiliser seulement, rien d autre ne change', async () => {
     for (const id of TITULAIRES) {
       expect(await codesDuRole(client(), id)).toEqual(
-        [...etatAvant.roles[id], ...T1].sort(),
+        [...etatAvant.roles[id], ...T1, ...CREDIT].sort(),
       );
     }
     // La base porte toutes les migrations : M8 (D732) ajoute reception:write au rôle Pharmacien.
     for (const id of VENDEURS) {
       expect(await codesDuRole(client(), id)).toEqual(
-        [...etatAvant.roles[id], 'caisse:utiliser', 'reception:write'].sort(),
+        [
+          ...etatAvant.roles[id],
+          'caisse:utiliser',
+          'reception:write',
+          ...CREDIT,
+        ].sort(),
       );
     }
     for (const id of HOPITAL) {
@@ -164,6 +171,8 @@ describe('Migration M1, permissions de la tranche pharmacie 1 (PB03)', () => {
 
   it('retour arrière : haut, bas, haut sur la base chargée', async () => {
     const etatHaut = await etatRbac(client());
+    // M11 d'abord (ordre inverse des migrations) : elle s'appuie sur le catalogue de permissions.
+    await appliquerRetourArriere(client(), M11);
     await appliquerRetourArriere(client(), M1);
     expect(await etatRbac(client())).toEqual(etatAvant);
     const restantes = await client().query<{ n: number }>(
@@ -182,6 +191,10 @@ describe('Migration M1, permissions de la tranche pharmacie 1 (PB03)', () => {
     await appliquerSql(
       client(),
       readFileSync(path.join(DOSSIER_MIGRATIONS, M8, 'migration.sql'), 'utf8'),
+    );
+    await appliquerSql(
+      client(),
+      readFileSync(path.join(DOSSIER_MIGRATIONS, M11, 'migration.sql'), 'utf8'),
     );
     expect(await etatRbac(client())).toEqual(etatHaut);
   });

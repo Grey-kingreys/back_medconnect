@@ -71,6 +71,7 @@ import {
   type StatutResultat,
 } from './rejeu-regles';
 import { validerCorps } from './valider-corps';
+import { CODE_CREDIT } from '../credit/credit-regles';
 
 const OPTIONS_TRANSACTION = { maxWait: 5_000, timeout: 15_000 };
 const DELAI_SAUT_MS = 24 * 60 * 60 * 1000;
@@ -889,6 +890,11 @@ export class SynchroService {
       select: { id: true },
     });
     if (existante) throw new RejetSynchro('IDENTIFIANT_DEJA_UTILISE');
+
+    // Le crédit demande une connexion (client, reste à payer) : pas de vente à crédit rejouée depuis un poste.
+    if (corps.paiements.some((p) => p.mode === CODE_CREDIT)) {
+      throw new RejetSynchro('CREDIT_HORS_LIGNE', { champs: ['paiements'] });
+    }
 
     const coherence = verifierCoherenceVente(corps);
     if (!coherence.ok) {

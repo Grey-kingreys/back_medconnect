@@ -21,7 +21,8 @@ export type CodeRejet =
   | 'COMPTAGE_DEJA_SAISI'
   | 'IDENTIFIANT_DEJA_UTILISE'
   | 'STOCK_INTROUVABLE'
-  | 'EVENEMENT_INAPPLICABLE';
+  | 'EVENEMENT_INAPPLICABLE'
+  | 'CREDIT_HORS_LIGNE';
 
 export type CodeARenvoyer =
   | 'SERVICE_INDISPONIBLE'
@@ -48,6 +49,8 @@ export const MESSAGES_REJET: Record<CodeRejet | CodeARenvoyer, string> = {
     'Un médicament de cette vente est inconnu de la pharmacie. La vente a été mise de côté pour le responsable.',
   EVENEMENT_INAPPLICABLE:
     "Cette opération n'a pas pu être enregistrée après plusieurs essais. Elle a été mise de côté : le responsable de la pharmacie la retrouvera dans les anomalies.",
+  CREDIT_HORS_LIGNE:
+    'Le crédit demande une connexion. Cette vente à crédit a été mise de côté : le responsable de la pharmacie la retrouvera dans les anomalies.',
   SERVICE_INDISPONIBLE:
     'Le service est momentanément indisponible : cette opération sera renvoyée automatiquement.',
   REGULARISATION_INDISPONIBLE:

@@ -53,6 +53,8 @@ describe('Permissions selon le type de structure (B10)', () => {
         'reception:write',
         'marge:read',
         'anomalie:gerer',
+        'credit:read',
+        'credit:write',
         'structure:read',
         'structure:write',
         'membre:read',

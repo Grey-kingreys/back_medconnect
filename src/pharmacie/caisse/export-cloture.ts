@@ -1,4 +1,5 @@
 import { instantLisible } from '../jour-metier';
+import { CODE_CREDIT } from '../credit/credit-regles';
 
 /** Pièce de vente d'une journée, réduite à ce que l'export a le droit de montrer (D622). */
 export interface PieceExport {
@@ -146,10 +147,11 @@ export function exporterCloture(
         (a.codeMode < b.codeMode ? -1 : a.codeMode > b.codeMode ? 1 : 0),
     );
     for (const pa of paiements) {
+      // Une vente à crédit n'est pas de l'argent encaissé : sa ligne est à part, jamais « Paiement ».
       rangees.push(
         ligne([
           jour,
-          'Paiement',
+          pa.codeMode === CODE_CREDIT ? 'Vente à crédit' : 'Paiement',
           p.numero,
           type,
           p.numeroOrigine,

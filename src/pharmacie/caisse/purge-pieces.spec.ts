@@ -5,6 +5,9 @@ const MODELES = [
   'paiement',
   'ligneVente',
   'vente',
+  'echeanceCredit',
+  'remboursementCredit',
+  'clientCredit',
   'mouvementCaisse',
   'resultatSessionMode',
   'releveModePaiement',
@@ -27,7 +30,13 @@ function creerTx() {
     allocationLot: modele(),
     paiement: modele(),
     ligneVente: modele(),
-    vente: modele(),
+    vente: {
+      ...modele(),
+      findMany: jest.fn().mockResolvedValue([{ id: 'v1' }, { id: 'v2' }]),
+    },
+    echeanceCredit: modele(),
+    remboursementCredit: modele(),
+    clientCredit: modele(),
     mouvementCaisse: modele(),
     resultatSessionMode: modele(),
     releveModePaiement: modele(),
@@ -71,6 +80,9 @@ describe('purgerPiecesPharmacies', () => {
     });
     expect(tx.ligneVente.deleteMany).toHaveBeenCalledWith({
       where: { vente: F },
+    });
+    expect(tx.echeanceCredit.deleteMany).toHaveBeenCalledWith({
+      where: { venteId: { in: ['v1', 'v2'] } },
     });
     expect(tx.vente.deleteMany).toHaveBeenCalledTimes(2);
     expect(tx.vente.deleteMany).toHaveBeenNthCalledWith(1, {
@@ -117,6 +129,7 @@ describe('purgerPiecesPharmacies', () => {
       tx.allocationLot.deleteMany.mock.invocationCallOrder[0],
       tx.paiement.deleteMany.mock.invocationCallOrder[0],
       tx.ligneVente.deleteMany.mock.invocationCallOrder[0],
+      tx.echeanceCredit.deleteMany.mock.invocationCallOrder[0],
       tx.vente.deleteMany.mock.invocationCallOrder[0],
       tx.vente.deleteMany.mock.invocationCallOrder[1],
       tx.mouvementCaisse.deleteMany.mock.invocationCallOrder[0],

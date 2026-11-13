@@ -1,3 +1,4 @@
+import { CODE_CREDIT } from '../credit/credit-regles';
 import { ConflictException, Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { StorageService } from 'src/storage/storage.service';
@@ -161,7 +162,7 @@ export class CatalogueSynchroService {
           where: { structureId: structure.id },
         });
         const modesPaiement = await tx.modePaiement.findMany({
-          where: { actif: true },
+          where: { actif: true, code: { not: CODE_CREDIT } },
           orderBy: [{ ordre: 'asc' }, { code: 'asc' }],
           select: {
             code: true,

@@ -317,6 +317,36 @@ export const ROUTES_PHARMACIE = {
     porteCout: false,
     exigeMarge: false,
   },
+  'GET /pharmacie/:structureId/credits': {
+    classe: J,
+    porteCout: false,
+    exigeMarge: false,
+  },
+  'POST /pharmacie/:structureId/credits/clients': {
+    classe: J,
+    porteCout: false,
+    exigeMarge: false,
+  },
+  'GET /pharmacie/:structureId/credits/clients/:clientId': {
+    classe: J,
+    porteCout: false,
+    exigeMarge: false,
+  },
+  'PATCH /pharmacie/:structureId/credits/clients/:clientId': {
+    classe: J,
+    porteCout: false,
+    exigeMarge: false,
+  },
+  'PATCH /pharmacie/:structureId/credits/prises/:venteId/date-limite': {
+    classe: J,
+    porteCout: false,
+    exigeMarge: false,
+  },
+  'POST /pharmacie/:structureId/credits/clients/:clientId/remboursements': {
+    classe: J,
+    porteCout: false,
+    exigeMarge: false,
+  },
 } as const satisfies Record<string, RouteInventoriee>;
 
 export type CleRoutePharmacie = keyof typeof ROUTES_PHARMACIE;

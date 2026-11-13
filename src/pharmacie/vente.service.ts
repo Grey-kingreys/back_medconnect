@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -32,6 +33,7 @@ import {
   type UniteMinimaleLisible,
 } from './domaine/quantites';
 import { ecrirePieceVente } from './ecriture-vente';
+import { CODE_CREDIT, estVenteACredit } from './credit/credit-regles';
 import { jourConakry } from './jour-metier';
 import { masquerCouts } from './masquer-couts';
 import { assurerPointDeVente } from './point-de-vente';
@@ -178,6 +180,13 @@ const INCLUDE_VENTE = {
 } satisfies Prisma.VenteInclude;
 type VenteComplete = Prisma.VenteGetPayload<{ include: typeof INCLUDE_VENTE }>;
 
+export interface CreditVente {
+  clientCreditId: string;
+  nomComplet: string;
+  /** AAAA-MM-JJ ou null. */
+  dateLimite: string | null;
+}
+
 export interface PharmacieRecu {
   id: string;
   nom: string;
@@ -285,6 +294,7 @@ export class VenteService {
       telephonePrescripteur: vente.telephonePrescripteur,
       clientNom: vente.clientNom,
       clientTelephone: vente.clientTelephone,
+      clientCreditId: vente.clientCreditId,
       vendeur: { id: vente.vendeurId, nom: vente.vendeurNom },
       annuleeLe: etat.annuleeLe,
       annuleeParId: etat.annuleeParId,
@@ -340,6 +350,34 @@ export class VenteService {
     };
   }
 
+  /** Ajoute `credit` (client et date limite) à la réponse d'une vente à crédit ; null sinon. */
+  private async avecCredit<T extends object>(
+    data: T,
+    vente: { id: string; clientCreditId: string | null; structureId: string },
+  ): Promise<T & { credit: CreditVente | null }> {
+    if (!vente.clientCreditId) return { ...data, credit: null };
+    const [client, echeance] = await Promise.all([
+      this.prisma.clientCredit.findFirst({
+        where: { id: vente.clientCreditId, structureId: vente.structureId },
+        select: { id: true, nomComplet: true },
+      }),
+      this.prisma.echeanceCredit.findUnique({
+        where: { venteId: vente.id },
+        select: { dateLimite: true },
+      }),
+    ]);
+    return {
+      ...data,
+      credit: client
+        ? {
+            clientCreditId: client.id,
+            nomComplet: client.nomComplet,
+            dateLimite: echeance ? dateVersJour(echeance.dateLimite) : null,
+          }
+        : null,
+    };
+  }
+
   private reponseRejeu(
     vente: VenteComplete,
     pharmacie: PharmacieRecu,
@@ -381,7 +419,20 @@ export class VenteService {
       });
     }
 
-    const peutVoirMarge = await this.peutVoirMarge(userId);
+    const permissionsUtilisateur =
+      await this.permissions.getUserPermissions(userId);
+    const peutVoirMarge = permissionsUtilisateur.includes(
+      PERMISSIONS.MARGE_READ,
+    );
+    // Vente à crédit : credit:write en plus des droits de vente.
+    if (
+      estVenteACredit(dto) &&
+      !permissionsUtilisateur.includes(PERMISSIONS.CREDIT_WRITE)
+    ) {
+      throw new ForbiddenException(
+        "Vous n'avez pas la permission d'effectuer cette action.",
+      );
+    }
 
     // Idempotence, comme le SOS : même clé et même pharmacie = même vente, sans limite de durée.
     const cle = lireCleIdempotence(enTeteIdempotence);
@@ -395,8 +446,10 @@ export class VenteService {
         },
         include: INCLUDE_VENTE,
       });
-      if (existante)
-        return this.reponseRejeu(existante, pharmacie, peutVoirMarge);
+      if (existante) {
+        const rejeu = this.reponseRejeu(existante, pharmacie, peutVoirMarge);
+        return { ...rejeu, data: await this.avecCredit(rejeu.data, existante) };
+      }
     }
 
     let resultat: {
@@ -420,7 +473,11 @@ export class VenteService {
         });
         if (existante) {
           this.logger.log(`vente.rejeu_concurrent venteId=${existante.id}`);
-          return this.reponseRejeu(existante, pharmacie, peutVoirMarge);
+          const rejeu = this.reponseRejeu(existante, pharmacie, peutVoirMarge);
+          return {
+            ...rejeu,
+            data: await this.avecCredit(rejeu.data, existante),
+          };
         }
       }
       throw erreur;
@@ -431,11 +488,16 @@ export class VenteService {
     this.logger.log(`vente.creee venteId=${vente.id} numero=${vente.numero}`);
 
     return {
-      data: masquerCouts(
-        this.presenterVente(vente, pharmacie, ouverteAutomatiquement),
-        peutVoirMarge,
+      data: await this.avecCredit(
+        masquerCouts(
+          this.presenterVente(vente, pharmacie, ouverteAutomatiquement),
+          peutVoirMarge,
+        ),
+        vente,
       ),
-      message: `Vente enregistrée (${vente.numero}).`,
+      message: vente.clientCreditId
+        ? `Vente à crédit enregistrée (${vente.numero}).`
+        : `Vente enregistrée (${vente.numero}).`,
       success: true,
     };
   }
@@ -593,16 +655,26 @@ export class VenteService {
       });
     }
 
+    // 5b. Vente à crédit : client du cahier de la pharmacie, date limite
+    const credit = await this.preparerCredit(tx, {
+      structureId,
+      userId: user.id,
+      dto,
+      ip,
+    });
+
     // 6. Paiements
     const modes = await tx.modePaiement.findMany({ where: { actif: true } });
     const prepares = preparerPaiements(
       total,
-      dto.paiements?.map((p) => ({
-        mode: p.mode,
-        montant: p.montant,
-        reference: p.reference,
-        montantRecu: p.montantRecu,
-      })),
+      credit
+        ? [{ mode: CODE_CREDIT, montant: total }]
+        : dto.paiements?.map((p) => ({
+            mode: p.mode,
+            montant: p.montant,
+            reference: p.reference,
+            montantRecu: p.montantRecu,
+          })),
       modes,
     );
     if (!prepares.ok) {
@@ -807,8 +879,10 @@ export class VenteService {
         numeroTicket: Number(numeroTicket),
         jourMetier,
         vendeur: { id: user.id, nom: utilisateurNom },
-        clientNom: dto.clientNom?.trim() || null,
-        clientTelephone: dto.clientTelephone?.trim() || null,
+        clientNom: dto.clientNom?.trim() || credit?.nomComplet || null,
+        clientTelephone:
+          dto.clientTelephone?.trim() || credit?.telephone || null,
+        clientCreditId: credit?.clientCreditId ?? null,
         ordonnanceVerifiee: dto.ordonnanceVerifiee === true,
         telephonePrescripteur: dto.telephonePrescripteur ?? null,
         total,
@@ -826,6 +900,13 @@ export class VenteService {
       },
     );
 
+    // 16b. Date limite de la prise à crédit (Vente est immuable : la date vit à part)
+    if (credit?.dateLimite) {
+      await tx.echeanceCredit.create({
+        data: { venteId, dateLimite: jourVersDate(credit.dateLimite) },
+      });
+    }
+
     // 17. Audit
     await tx.auditLog.create({
       data: {
@@ -839,6 +920,13 @@ export class VenteService {
           total,
           nombreLignes: lignesCalculees.length,
           sessionOuverteAutomatiquement: ouverteAutomatiquement,
+          ...(credit
+            ? {
+                credit: true,
+                clientCreditId: credit.clientCreditId,
+                dateLimite: credit.dateLimite,
+              }
+            : {}),
         },
       },
     });
@@ -865,6 +953,129 @@ export class VenteService {
       include: INCLUDE_VENTE,
     });
     return { vente: complete, passages, ouverteAutomatiquement };
+  }
+
+  /**
+   * Vente à crédit : vérifie le corps, retrouve le client de la pharmacie ou le crée dans
+   * la transaction, contrôle la date limite. Null si la vente n'est pas à crédit.
+   */
+  private async preparerCredit(
+    tx: Prisma.TransactionClient,
+    entree: {
+      structureId: string;
+      userId: string;
+      dto: CreerVenteDto;
+      ip?: string | null;
+    },
+  ): Promise<{
+    clientCreditId: string;
+    nomComplet: string;
+    telephone: string | null;
+    dateLimite: string | null;
+  } | null> {
+    const { structureId, userId, dto, ip } = entree;
+    if (!estVenteACredit(dto)) {
+      if (dto.dateLimiteCredit !== undefined) {
+        throw new BadRequestException({
+          message:
+            "Une date limite ne s'applique qu'à une vente à crédit : choisissez un client de crédit.",
+          code: 'CREDIT_PAIEMENTS_INCOHERENTS',
+        });
+      }
+      return null;
+    }
+    if (dto.clientCreditId && dto.nouveauClientCredit) {
+      throw new BadRequestException({
+        message:
+          'Choisissez un client existant ou créez-en un nouveau, pas les deux.',
+        code: 'VALIDATION',
+        champs: [{ champ: 'nouveauClientCredit', contraintes: ['exclusif'] }],
+      });
+    }
+    if (!dto.clientCreditId && !dto.nouveauClientCredit) {
+      throw new BadRequestException({
+        message: 'Choisissez le client à qui accorder ce crédit.',
+        code: 'CREDIT_CLIENT_REQUIS',
+      });
+    }
+    if (
+      dto.paiements &&
+      !(dto.paiements.length === 1 && dto.paiements[0].mode === CODE_CREDIT)
+    ) {
+      throw new BadRequestException({
+        message:
+          'Une vente à crédit se règle entièrement à crédit : retirez les autres paiements.',
+        code: 'CREDIT_PAIEMENTS_INCOHERENTS',
+      });
+    }
+    const dateLimite = dto.dateLimiteCredit ?? null;
+    if (dateLimite !== null) {
+      const valide = new Date(`${dateLimite}T00:00:00.000Z`);
+      if (
+        Number.isNaN(valide.getTime()) ||
+        jourConakry(valide) !== dateLimite
+      ) {
+        throw new BadRequestException({
+          message: 'La date limite doit être une date valide (AAAA-MM-JJ).',
+          code: 'VALIDATION',
+          champs: [{ champ: 'dateLimiteCredit', contraintes: ['dateValide'] }],
+        });
+      }
+      if (dateLimite < jourConakry(new Date())) {
+        throw new BadRequestException({
+          message: "La date limite ne peut pas être antérieure à aujourd'hui.",
+          code: 'DATE_LIMITE_PASSEE',
+        });
+      }
+    }
+
+    if (dto.clientCreditId) {
+      const client = await tx.clientCredit.findFirst({
+        where: { id: dto.clientCreditId, structureId },
+        select: { id: true, nomComplet: true, telephone: true },
+      });
+      if (!client) {
+        throw new NotFoundException({
+          message: 'Ce client de crédit est introuvable.',
+          code: 'CLIENT_CREDIT_INTROUVABLE',
+        });
+      }
+      return {
+        clientCreditId: client.id,
+        nomComplet: client.nomComplet,
+        telephone: client.telephone,
+        dateLimite,
+      };
+    }
+    const nouveau = dto.nouveauClientCredit as NonNullable<
+      CreerVenteDto['nouveauClientCredit']
+    >;
+    const cree = await tx.clientCredit.create({
+      data: {
+        structureId,
+        nomComplet: nouveau.nomComplet,
+        telephone: nouveau.telephone ?? null,
+        auteurId: userId,
+      },
+      select: { id: true, nomComplet: true, telephone: true },
+    });
+    // Jamais le nom ni le téléphone dans le journal.
+    await tx.auditLog.create({
+      data: {
+        userId,
+        action: 'create',
+        entityType: 'ClientCredit',
+        entityId: cree.id,
+        ip: ip ?? null,
+        metadata: { structureId, origine: 'vente' },
+      },
+    });
+    return {
+      clientCreditId: cree.id,
+      nomComplet: cree.nomComplet,
+      telephone: cree.telephone,
+      dateLimite,
+    };
   }
 
   /** Poste web par défaut de l'utilisateur dans ce point de vente, créé à la volée (D536). */
@@ -1024,6 +1235,7 @@ export class VenteService {
             nombreArticles: v.lignes.reduce((n, l) => n + l.quantite, 0),
             vendeur: { id: v.vendeurId, nom: v.vendeurNom },
             clientNom: v.clientNom,
+            clientCreditId: v.clientCreditId,
             telephonePrescripteur: v.telephonePrescripteur,
             typePiece: v.typePiece,
             numeroTicket: v.numeroTicket,
@@ -1054,9 +1266,12 @@ export class VenteService {
     });
     if (!vente) throw new NotFoundException('Cette vente est introuvable.');
     return {
-      data: masquerCouts(
-        this.presenterVente(vente, this.pharmacieRecu(structure)),
-        peutVoirMarge,
+      data: await this.avecCredit(
+        masquerCouts(
+          this.presenterVente(vente, this.pharmacieRecu(structure)),
+          peutVoirMarge,
+        ),
+        vente,
       ),
       message: 'Vente trouvée.',
       success: true,
@@ -1124,6 +1339,13 @@ export class VenteService {
         }
         if (origine.sessionCaisse.technique) {
           throw nonAnnulable(MESSAGE_VENTE_HISTORIQUE_NON_ANNULABLE);
+        }
+
+        // 1b. Vente à crédit : verrou du client AVANT tout autre, comme le remboursement (ordre des
+        // verrous : journées, client de crédit, poste, session, vente d'origine, fiches). Un remboursement
+        // concurrent relit ainsi le reste après cette annulation et ne peut plus le dépasser.
+        if (origine.clientCreditId) {
+          await tx.$queryRaw`SELECT "id" FROM "ClientCredit" WHERE "id" = ${origine.clientCreditId} FOR UPDATE`;
         }
 
         // 2. Poste et session de l'auteur (verrous : poste, session)
@@ -1316,7 +1538,9 @@ export class VenteService {
     this.logger.log(`vente.annulee venteId=${vente.id} pieceId=${pieceId}`);
     return {
       data: masquerCouts(this.presenterVente(vente, pharmacie), peutVoirMarge),
-      message: messageVenteAnnulee(vente.numero, numeroPiece),
+      message: vente.clientCreditId
+        ? `Vente à crédit ${vente.numero} annulée (${numeroPiece}). Les quantités ont été remises en stock et le crédit du client est réduit d'autant : aucun argent n'a été rendu.`
+        : messageVenteAnnulee(vente.numero, numeroPiece),
       success: true,
     };
   }

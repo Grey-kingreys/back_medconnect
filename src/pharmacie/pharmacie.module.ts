@@ -27,6 +27,8 @@ import { SynchroController } from './synchro/synchro.controller';
 import { CatalogueSynchroService } from './synchro/catalogue-synchro.service';
 import { SynchroService } from './synchro/synchro.service';
 import { ScenarioDemoPharmacieService } from './demo/scenario-demo-pharmacie.service';
+import { CreditController } from './credit/credit.controller';
+import { CreditService } from './credit/credit.service';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { AuthModule } from 'src/auth/auth.module';
 
@@ -46,6 +48,7 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
     RapportsController,
     ClotureController,
     SynchroController,
+    CreditController,
   ],
   providers: [
     PharmacieService,
@@ -64,6 +67,7 @@ import { NotificationsModule } from 'src/notifications/notifications.module';
     ClotureService,
     CatalogueSynchroService,
     SynchroService,
+    CreditService,
     ScenarioDemoPharmacieService,
     PrismaService,
   ],

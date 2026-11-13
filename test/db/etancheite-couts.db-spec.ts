@@ -509,6 +509,60 @@ describe('Étanchéité des coûts, sur base de test (PB16b, CA22)', () => {
           commentaire: 'Contrôle de fin de journée',
         }),
     ],
+    'GET /pharmacie/:structureId/credits': async (c) => [
+      await c.en('get', `/pharmacie/${S}/credits`),
+    ],
+    'POST /pharmacie/:structureId/credits/clients': async (c) => {
+      const r = await c
+        .en('post', `/pharmacie/${S}/credits/clients`)
+        .send({ nomComplet: `Client crédit ${c.profil}` });
+      retenir(c, 'clientCreditId', r);
+      return [r];
+    },
+    'GET /pharmacie/:structureId/credits/clients/:clientId': async (c) => [
+      await c.en(
+        'get',
+        `/pharmacie/${S}/credits/clients/${id(c, 'clientCreditId')}`,
+      ),
+    ],
+    'PATCH /pharmacie/:structureId/credits/clients/:clientId': async (c) => [
+      await c
+        .en(
+          'patch',
+          `/pharmacie/${S}/credits/clients/${id(c, 'clientCreditId')}`,
+        )
+        .send({ note: 'Voisin' }),
+    ],
+    'PATCH /pharmacie/:structureId/credits/prises/:venteId/date-limite': async (
+      c,
+    ) => {
+      const vente = await c.en('post', `/pharmacie/${S}/ventes`).send({
+        posteId: id(c, 'posteId'),
+        lignes: [{ stockId: ficheF, quantite: 1 }],
+        ordonnanceVerifiee: true,
+        clientCreditId: id(c, 'clientCreditId'),
+        dateLimiteCredit: jour(30),
+      });
+      retenir(c, 'venteCreditId', vente);
+      return [
+        vente,
+        await c
+          .en(
+            'patch',
+            `/pharmacie/${S}/credits/prises/${id(c, 'venteCreditId')}/date-limite`,
+          )
+          .send({ dateLimite: jour(40) }),
+      ];
+    },
+    'POST /pharmacie/:structureId/credits/clients/:clientId/remboursements':
+      async (c) => [
+        await c
+          .en(
+            'post',
+            `/pharmacie/${S}/credits/clients/${id(c, 'clientCreditId')}/remboursements`,
+          )
+          .send({ montant: 1000 }),
+      ],
     'GET /pharmacie/:structureId/fournisseurs': async (c) => [
       await c.en('get', `/pharmacie/${S}/fournisseurs`),
     ],
@@ -830,7 +884,7 @@ describe('Étanchéité des coûts, sur base de test (PB16b, CA22)', () => {
     const codes = PERMISSIONS_AUTORISEES_PHARMACIE.filter(
       (code) => code !== PERMISSIONS.MARGE_READ,
     );
-    expect(codes).toHaveLength(19);
+    expect(codes).toHaveLength(21);
     await sql(
       `INSERT INTO "AppRole" ("id", "nom", "structureId", "isSystem", "updatedAt") VALUES ('rol-p1-vendeur-etendu', 'Vendeur étendu (test)', $1, false, now())`,
       [S],
@@ -839,7 +893,7 @@ describe('Étanchéité des coûts, sur base de test (PB16b, CA22)', () => {
       `SELECT "id", "code" FROM "Permission" WHERE "code" = ANY($1)`,
       [codes],
     );
-    expect(permissionsBase.rows).toHaveLength(19);
+    expect(permissionsBase.rows).toHaveLength(21);
     for (const ligne of permissionsBase.rows) {
       await sql(
         `INSERT INTO "RolePermission" ("appRoleId", "permissionId") VALUES ('rol-p1-vendeur-etendu', $1)`,

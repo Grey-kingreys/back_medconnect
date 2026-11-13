@@ -8,6 +8,7 @@ import { PrismaService } from 'src/common/services/prisma.service';
 import { AccesPharmacieService } from '../acces-pharmacie.service';
 import { jourValide } from '../domaine/reception';
 import { jourConakry, jourLisible, joursAvant } from '../jour-metier';
+import { CODE_CREDIT } from '../credit/credit-regles';
 import { assurerPointDeVente } from '../point-de-vente';
 import type { Reponse } from '../points-de-vente.service';
 import { MESSAGE_JOUR_INVALIDE } from '../rapports/rapports.service';
@@ -128,6 +129,8 @@ export interface PreparationCloture {
   sessionsOuvertes: SessionResume[];
   postesAttendus: PosteAttendu[];
   totaux: TotalCloture[];
+  /** Ventes à crédit des caisses fermées ou incluses (annulations déduites) : à part, jamais dans les totaux ni dans l'écart. */
+  ventesCredit: { montant: number; nombrePaiements: number };
   peutCloturer: boolean;
   peutForcer: boolean;
 }
@@ -292,6 +295,26 @@ export class ClotureService {
     return { resultats, modes };
   }
 
+  /** Ventes à crédit des sessions données : jamais de l'argent encaissé, donc hors des totaux. */
+  private async ventesCreditDe(
+    client: Client,
+    sessionIds: string[],
+  ): Promise<{ montant: number; nombrePaiements: number }> {
+    if (sessionIds.length === 0) return { montant: 0, nombrePaiements: 0 };
+    const agregat = await client.paiement.aggregate({
+      where: {
+        sessionCaisseId: { in: sessionIds },
+        modePaiement: { code: CODE_CREDIT },
+      },
+      _sum: { montant: true },
+      _count: { _all: true },
+    });
+    return {
+      montant: agregat._sum.montant ?? 0,
+      nombrePaiements: agregat._count._all,
+    };
+  }
+
   private versSessionResume(s: SessionLue): SessionResume {
     return {
       id: s.id,
@@ -395,6 +418,7 @@ export class ClotureService {
           sessionsOuvertes: resumes.filter((s) => s.statut === 'OUVERTE'),
           postesAttendus: [],
           totaux: totauxCloture(resultats),
+          ventesCredit: await this.ventesCreditDe(this.prisma, incluses),
           peutCloturer: false,
           peutForcer: false,
         },
@@ -422,6 +446,7 @@ export class ClotureService {
         sessionsOuvertes: resumes.filter((s) => s.statut === 'OUVERTE'),
         postesAttendus: attendus,
         totaux: totauxCloture(resultats),
+        ventesCredit: await this.ventesCreditDe(this.prisma, fermees),
         peutCloturer: attendus.length === 0,
         peutForcer: forcageAutorise(attendus),
       },

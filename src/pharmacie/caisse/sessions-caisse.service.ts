@@ -21,6 +21,7 @@ import {
   verrouillerJourneesPartage,
 } from './journee';
 import { CODE_ESPECES, totalComptage } from '../domaine/caisse';
+import { CODE_CREDIT } from '../credit/credit-regles';
 import {
   commentaireEcartRequis,
   formaterGnf,
@@ -116,6 +117,8 @@ export interface BilanSession {
       montant: number;
       nombrePaiements: number;
     }[];
+    /** Ventes à crédit de la session (annulations déduites) : jamais comptées dans montantEncaisse, ni dans l'écart de caisse. */
+    ventesCredit: { montant: number; nombrePaiements: number };
   };
   session: SessionReponse;
   fond: { montant: number; compte: boolean };
@@ -358,30 +361,15 @@ export class SessionsCaisseService {
           return { mouvement: existant, cree: false };
         }
       }
-      const codeMode = dto.mode ?? CODE_ESPECES;
-      const mode = await tx.modePaiement.findFirst({
-        where: { code: codeMode, actif: true },
-      });
-      if (!mode) {
-        throw new BadRequestException({
-          message: messageModeInconnu(codeMode),
-          code: 'MODE_PAIEMENT_INCONNU',
-        });
-      }
-      const id = dto.id ?? randomUUID();
-      const cree = await tx.mouvementCaisse.create({
-        data: {
-          id,
-          sessionCaisseId: sessionId,
-          pointDeVenteId: s.pointDeVenteId,
-          type: dto.type,
-          modePaiementId: mode.id,
-          montant: dto.montant,
-          motif,
-          auteurId: user.id,
-          evenementId: id,
-        },
-        include: { modePaiement: true },
+      const cree = await this.ecrireMouvement(tx, {
+        id: dto.id,
+        sessionId,
+        pointDeVenteId: s.pointDeVenteId,
+        type: dto.type,
+        montant: dto.montant,
+        motif,
+        auteurId: user.id,
+        codeMode: dto.mode ?? CODE_ESPECES,
       });
       return { mouvement: cree, cree: true };
     });
@@ -392,6 +380,53 @@ export class SessionsCaisseService {
         : 'Ce mouvement était déjà enregistré.',
       success: true,
     };
+  }
+
+  /**
+   * Écrit un mouvement de caisse dans une transaction déjà ouverte (session verrouillée et
+   * ouverte, journée ouverte : contrôles faits par l'appelant). Mécanisme unique des mouvements.
+   */
+  async ecrireMouvement(
+    tx: Prisma.TransactionClient,
+    entree: {
+      id?: string;
+      sessionId: string;
+      pointDeVenteId: string;
+      type: MouvementCaisseReponse['type'];
+      montant: number;
+      motif: string;
+      auteurId: string;
+      codeMode?: string;
+    },
+  ) {
+    const codeMode = entree.codeMode ?? CODE_ESPECES;
+    const mode =
+      codeMode === CODE_CREDIT
+        ? null
+        : await tx.modePaiement.findFirst({
+            where: { code: codeMode, actif: true },
+          });
+    if (!mode) {
+      throw new BadRequestException({
+        message: messageModeInconnu(codeMode),
+        code: 'MODE_PAIEMENT_INCONNU',
+      });
+    }
+    const id = entree.id ?? randomUUID();
+    return tx.mouvementCaisse.create({
+      data: {
+        id,
+        sessionCaisseId: entree.sessionId,
+        pointDeVenteId: entree.pointDeVenteId,
+        type: entree.type,
+        modePaiementId: mode.id,
+        montant: entree.montant,
+        motif: entree.motif,
+        auteurId: entree.auteurId,
+        evenementId: id,
+      },
+      include: { modePaiement: true },
+    });
   }
 
   async bilan(
@@ -771,7 +806,9 @@ export class SessionsCaisseService {
   }
 
   private modesReferentiel(client: Client) {
+    // CREDIT n'est jamais de l'argent en caisse : ni théorique, ni relevé, ni mouvement.
     return (client as Prisma.TransactionClient).modePaiement.findMany({
+      where: { code: { not: CODE_CREDIT } },
       orderBy: [{ ordre: 'asc' }, { code: 'asc' }],
     });
   }
@@ -969,7 +1006,7 @@ export class SessionsCaisseService {
     }
     const seuil = parametres.seuilEcartCaisse;
 
-    const [paiements, mouvements, pieces] = await Promise.all([
+    const [tousPaiements, mouvements, pieces] = await Promise.all([
       c.paiement.findMany({
         where: { sessionCaisseId: session.id },
         select: { montant: true, modePaiement: { select: { code: true } } },
@@ -986,6 +1023,13 @@ export class SessionsCaisseService {
       }),
     ]);
 
+    // Les ventes à crédit ne sont jamais de l'argent encaissé : elles figurent à part (ventesCredit).
+    const paiements = tousPaiements.filter(
+      (p) => p.modePaiement.code !== CODE_CREDIT,
+    );
+    const paiementsCredit = tousPaiements.filter(
+      (p) => p.modePaiement.code === CODE_CREDIT,
+    );
     const compteDe = (type: string) =>
       pieces.find((p) => p.typePiece === type)?._count._all ?? 0;
     const parMode = modes
@@ -1051,6 +1095,10 @@ export class SessionsCaisseService {
         nombreAnnulations: compteDe('ANNULATION'),
         montantEncaisse: paiements.reduce((somme, p) => somme + p.montant, 0),
         parMode,
+        ventesCredit: {
+          montant: paiementsCredit.reduce((somme, p) => somme + p.montant, 0),
+          nombrePaiements: paiementsCredit.length,
+        },
       },
       session: versSessionReponse(session),
       fond: {

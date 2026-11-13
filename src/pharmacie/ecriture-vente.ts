@@ -43,6 +43,8 @@ export interface PieceVenteAEcrire {
   ordonnanceVerifiee: boolean;
   /** Téléphone du prescripteur (ordonnance papier), facultatif. */
   telephonePrescripteur?: string | null;
+  /** Prise à crédit : client du cahier de crédit. */
+  clientCreditId?: string | null;
   total: number;
   cleIdempotence: string | null;
   horodatageLocal?: Date | null;
@@ -93,6 +95,7 @@ export async function ecrirePieceVente(
       clientTelephone: p.clientTelephone,
       ordonnanceVerifiee: p.ordonnanceVerifiee,
       telephonePrescripteur: p.telephonePrescripteur ?? null,
+      clientCreditId: p.clientCreditId ?? null,
       total: p.total,
       cleIdempotence: p.cleIdempotence,
       lignes: {

@@ -197,6 +197,7 @@ model Structure {
   // Ventes au comptoir et compteur de numérotation (pharmacies)
   ventes         Vente[]
   compteursVente CompteurVente[]
+  clientsCredit  ClientCredit[]
 
   // Tranche pharmacie 1 : points de vente, paramètres et fournisseurs (PB05)
   pointsDeVente       PointDeVente[]
@@ -533,6 +534,8 @@ model Vente {
   clientTelephone       String?
   ordonnanceVerifiee    Boolean        @default(false)
   telephonePrescripteur String? // facultatif : numéro lu sur l'ordonnance papier
+  clientCreditId        String? // prise à crédit (mode CREDIT) : client du cahier de crédit, posé à la création seulement (pièce immuable)
+  clientCredit          ClientCredit?  @relation(fields: [clientCreditId], references: [id], onDelete: Restrict)
   total                 Int // GNF, entier ; négatif pour une annulation
   statut                StatutVente    @default(VALIDEE) // gelé : plus écrit après M6
   annuleeLe             DateTime? // gelé
@@ -549,6 +552,7 @@ model Vente {
   @@index([structureId, createdAt])
   @@index([pointDeVenteId, jourMetier])
   @@index([sessionCaisseId])
+  @@index([clientCreditId])
 }
 
 // Ligne de vente, immuable depuis M6. quantite en UM, toujours égale à nombreAffiche x
@@ -1447,4 +1451,48 @@ model Session {
 
   @@index([userId])
   @@index([userId, deviceId])
+}
+
+// ====== Tranche pharmacie 2 : cahier de crédit (M11) ======
+
+// Client du cahier de crédit, propre à une pharmacie. Un client n'existe que si le pharmacien lui ouvre un crédit.
+// Reste à payer = ventes à crédit non annulées moins remboursements (jamais stocké). auteurId sans clé étrangère (D109).
+model ClientCredit {
+  id          String    @id @default(uuid())
+  structureId String
+  structure   Structure @relation(fields: [structureId], references: [id], onDelete: Restrict)
+  nomComplet  String
+  telephone   String?
+  note        String?
+  auteurId    String // sans clé étrangère
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  ventes         Vente[]
+  remboursements RemboursementCredit[]
+
+  @@index([structureId, nomComplet])
+}
+
+// Remboursement d'un client de crédit, immuable (aucune modification : un trigger la refuse).
+// mouvementCaisseId : entrée de caisse (APPORT) si l'argent est versé dans la caisse ouverte de l'auteur ; sans clé étrangère.
+model RemboursementCredit {
+  id                String       @id @default(uuid())
+  clientCreditId    String
+  clientCredit      ClientCredit @relation(fields: [clientCreditId], references: [id], onDelete: Restrict)
+  montant           Int // GNF, strictement positif
+  note              String?
+  verseEnCaisse     Boolean      @default(false)
+  mouvementCaisseId String?
+  auteurId          String // sans clé étrangère
+  createdAt         DateTime     @default(now())
+
+  @@index([clientCreditId])
+}
+
+// Date limite d'une prise à crédit. Vente est immuable : la date, modifiable, vit ici. venteId sans clé étrangère (la purge des pièces reste valable).
+model EcheanceCredit {
+  venteId    String   @id
+  dateLimite DateTime @db.Date
+  updatedAt  DateTime @updatedAt
 }
