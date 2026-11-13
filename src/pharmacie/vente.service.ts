@@ -282,6 +282,7 @@ export class VenteService {
       createdAt: vente.createdAt,
       total: vente.total,
       ordonnanceVerifiee: vente.ordonnanceVerifiee,
+      telephonePrescripteur: vente.telephonePrescripteur,
       clientNom: vente.clientNom,
       clientTelephone: vente.clientTelephone,
       vendeur: { id: vente.vendeurId, nom: vente.vendeurNom },
@@ -809,6 +810,7 @@ export class VenteService {
         clientNom: dto.clientNom?.trim() || null,
         clientTelephone: dto.clientTelephone?.trim() || null,
         ordonnanceVerifiee: dto.ordonnanceVerifiee === true,
+        telephonePrescripteur: dto.telephonePrescripteur ?? null,
         total,
         cleIdempotence: cle,
         lignes: lignesCalculees.map((c, index) => ({
@@ -1022,6 +1024,7 @@ export class VenteService {
             nombreArticles: v.lignes.reduce((n, l) => n + l.quantite, 0),
             vendeur: { id: v.vendeurId, nom: v.vendeurNom },
             clientNom: v.clientNom,
+            telephonePrescripteur: v.telephonePrescripteur,
             typePiece: v.typePiece,
             numeroTicket: v.numeroTicket,
             jourMetier: dateVersJour(v.jourMetier),
@@ -1214,6 +1217,7 @@ export class VenteService {
             clientNom: origine.clientNom,
             clientTelephone: origine.clientTelephone,
             ordonnanceVerifiee: origine.ordonnanceVerifiee,
+            telephonePrescripteur: origine.telephonePrescripteur,
             total,
             motifAnnulation: motif,
             lignes: {

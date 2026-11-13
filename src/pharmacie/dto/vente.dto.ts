@@ -21,6 +21,21 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 const rognerTexte = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim() : value;
 
+/** Téléphone du prescripteur : texte nettoyé, vide -> null (absent -> undefined). */
+export const nettoyerTelephonePrescripteur = ({
+  value,
+}: {
+  value: unknown;
+}): unknown => {
+  if (typeof value !== 'string') return value;
+  const t = value.trim();
+  return t === '' ? null : t;
+};
+
+/** Chiffres, espaces, +, tirets ; 6 à 20 chiffres utiles. */
+export const FORMAT_TELEPHONE_PRESCRIPTEUR =
+  /^(?=(?:\D*\d){6,20}\D*$)\+?[\d\s-]+$/;
+
 export const UNITES_VENTE = ['BOITE', 'UNITE'] as const;
 export type UniteVenteSaisie = (typeof UNITES_VENTE)[number];
 
@@ -142,6 +157,22 @@ export class CreerVenteDto {
   @IsOptional()
   @IsBoolean()
   ordonnanceVerifiee?: boolean;
+
+  @ApiPropertyOptional({
+    example: '+224 622 11 22 33',
+    nullable: true,
+    description:
+      "Téléphone du prescripteur lu sur l'ordonnance papier (facultatif ; chiffres, espaces, +, tirets ; 6 à 20 chiffres). Vide : non renseigné.",
+  })
+  @IsOptional()
+  @Transform(nettoyerTelephonePrescripteur)
+  @IsString()
+  @MaxLength(30)
+  @Matches(FORMAT_TELEPHONE_PRESCRIPTEUR, {
+    message:
+      'Le téléphone du prescripteur ne doit contenir que des chiffres, espaces, + et tirets (6 à 20 chiffres).',
+  })
+  telephonePrescripteur?: string | null;
 
   @ApiPropertyOptional({
     type: [PaiementVenteDto],

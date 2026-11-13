@@ -57,7 +57,7 @@ export class VenteController {
   @ApiResponse({
     status: 201,
     description:
-      "Vente enregistrée (ou rejouée avec rejeu: true), jamais au-delà du stock vendable (sinon 409 STOCK_INSUFFISANT). data : id, numero, statut, createdAt, total, ordonnanceVerifiee, clientNom, clientTelephone, vendeur { id, nom }, annuleeLe, annuleeParId, motifAnnulation, typePiece, numeroTicket, jourMetier, provisoire, poste { id, code }, session { id, ouverteAutomatiquement }, paiements [ { id, mode, libelle, montant, reference, montantRecu, rendu } ], annulation, venteOrigine, motif, lignes [ { id, stockId, medicamentId, nomMedicament, prixUnitaire, quantite, sousTotal, uniteAffichee, nombreAffiche, coefficientApplique, allocations [ ... ] } ], pharmacie { id, nom, adresse, ville, telephone, logoUrl }. Les coûts ne sont renvoyés qu'avec la permission marge:read.",
+      "Vente enregistrée (ou rejouée avec rejeu: true), jamais au-delà du stock vendable (sinon 409 STOCK_INSUFFISANT). data : id, numero, statut, createdAt, total, ordonnanceVerifiee, telephonePrescripteur, clientNom, clientTelephone, vendeur { id, nom }, annuleeLe, annuleeParId, motifAnnulation, typePiece, numeroTicket, jourMetier, provisoire, poste { id, code }, session { id, ouverteAutomatiquement }, paiements [ { id, mode, libelle, montant, reference, montantRecu, rendu } ], annulation, venteOrigine, motif, lignes [ { id, stockId, medicamentId, nomMedicament, prixUnitaire, quantite, sousTotal, uniteAffichee, nombreAffiche, coefficientApplique, allocations [ ... ] } ], pharmacie { id, nom, adresse, ville, telephone, logoUrl }. Les coûts ne sont renvoyés qu'avec la permission marge:read.",
   })
   @ApiResponse({
     status: 400,

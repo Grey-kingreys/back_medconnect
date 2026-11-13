@@ -1034,6 +1034,7 @@ export class SynchroService {
       clientNom: corps.clientNom || null,
       clientTelephone: corps.clientTelephone || null,
       ordonnanceVerifiee: corps.ordonnanceVerifiee,
+      telephonePrescripteur: corps.telephonePrescripteur ?? null,
       total: corps.total,
       cleIdempotence: null,
       horodatageLocal: local,

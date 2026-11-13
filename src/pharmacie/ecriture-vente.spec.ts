@@ -65,3 +65,48 @@ describe('ecrirePieceVente : provisoireAutorise', () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('ecrirePieceVente : telephonePrescripteur', () => {
+  async function ecrire(telephone?: string | null) {
+    const create = jest.fn().mockRejectedValue(new Error('écriture atteinte'));
+    const tx = { vente: { create } } as unknown as Prisma.TransactionClient;
+    const p: PieceVenteAEcrire = {
+      structureId: 's1',
+      adminId: null,
+      pointDeVenteId: 'pv1',
+      posteId: 'p1',
+      posteCode: 'W1',
+      sessionId: 'se1',
+      typePiece: 'VENTE',
+      provisoireAutorise: false,
+      numero: 'T1-0000001',
+      numeroTicket: 1,
+      jourMetier: new Date('2026-11-03T00:00:00.000Z'),
+      vendeur: { id: 'u1', nom: 'Essai' },
+      clientNom: null,
+      clientTelephone: null,
+      ordonnanceVerifiee: true,
+      ...(telephone === undefined ? {} : { telephonePrescripteur: telephone }),
+      total: 0,
+      cleIdempotence: null,
+      paiements: [],
+      lignes: [],
+    };
+    await expect(
+      ecrirePieceVente(tx, {} as MouvementsStockService, p),
+    ).rejects.toThrow('écriture atteinte');
+    return (create.mock.calls[0] as [{ data: Record<string, unknown> }])[0]
+      .data;
+  }
+
+  it('enregistre le numéro fourni', async () => {
+    expect((await ecrire('+224 622 11 22 33')).telephonePrescripteur).toBe(
+      '+224 622 11 22 33',
+    );
+  });
+
+  it('absent ou null : enregistre null', async () => {
+    expect((await ecrire()).telephonePrescripteur).toBeNull();
+    expect((await ecrire(null)).telephonePrescripteur).toBeNull();
+  });
+});

@@ -27,6 +27,10 @@ import {
   ReleveModeDto,
   TYPES_MOUVEMENT_CAISSE,
 } from './sessions-caisse.dto';
+import {
+  FORMAT_TELEPHONE_PRESCRIPTEUR,
+  nettoyerTelephonePrescripteur,
+} from './vente.dto';
 
 const rognerTexte = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim() : value;
@@ -321,4 +325,12 @@ export class CorpsVenteDto {
 
   @IsBoolean()
   ordonnanceVerifiee: boolean;
+
+  /** Facultatif : un ancien poste ne l'envoie pas. */
+  @IsOptional()
+  @Transform(nettoyerTelephonePrescripteur)
+  @IsString()
+  @MaxLength(30)
+  @Matches(FORMAT_TELEPHONE_PRESCRIPTEUR)
+  telephonePrescripteur?: string | null;
 }
