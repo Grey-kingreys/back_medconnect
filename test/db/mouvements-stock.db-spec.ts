@@ -1056,4 +1056,72 @@ describe('Mouvements de stock et lectures recâblées sur base de test (PB08)', 
     expect(e.statut).toBe(409);
     expect(e.corps.code).toBe('STOCK_LOT_NEGATIF');
   });
+
+  it('creerLot avec un identifiant fourni : idempotent, un seul lot et un seul mouvement ; refusé pour une autre fiche', async () => {
+    const id = await ficheAvecPartARegulariser('stk-lotid-fourni', 1);
+    const autre = await ficheAvecPartARegulariser('stk-lotid-autre', 1);
+    const lotId = '0f0f0f0f-1111-5222-8333-444444444444';
+    const nouveau = (stockMedicamentId: string) => ({
+      lotId,
+      stockMedicamentId,
+      pointDeVenteId: pv1,
+      numeroLot: 'L-HL',
+      dateExpiration: jourVersDate(jour(60)),
+      quantite: 7,
+      coutUnitaire: 0,
+      coutAchatBoite: null,
+      coefficientReception: 1,
+      fournisseurId: null,
+      receptionId: null,
+      lotTechnique: false,
+      auteurId: 'usr-admin-p1',
+      pieceOrigineType: 'RECEPTION' as const,
+      pieceOrigineId: null,
+      motif: null,
+    });
+    const premier = await prisma.$transaction((tx) =>
+      mouvements.creerLot(tx, nouveau(id)),
+    );
+    expect(premier.lot.id).toBe(lotId);
+    const second = await prisma.$transaction((tx) =>
+      mouvements.creerLot(tx, nouveau(id)),
+    );
+    expect(second.lot.id).toBe(lotId);
+    expect(second.reception.mouvement.id).toBe(premier.reception.mouvement.id);
+    expect(second.reception.soldeLot).toBe(7);
+    const lots = await sql(
+      'SELECT count(*)::int AS n FROM "LotStock" WHERE "id" = $1',
+      [lotId],
+    );
+    expect(lots.rows[0].n).toBe(1);
+    const mvts = await sql(
+      'SELECT count(*)::int AS n FROM "MouvementStock" WHERE "lotId" = $1',
+      [lotId],
+    );
+    expect(mvts.rows[0].n).toBe(1);
+
+    await expect(
+      prisma.$transaction((tx) => mouvements.creerLot(tx, nouveau(autre))),
+    ).rejects.toMatchObject({ response: { code: 'IDENTIFIANT_DEJA_UTILISE' } });
+
+    for (const different of [
+      { quantite: 8 },
+      { numeroLot: 'AUTRE' },
+      { dateExpiration: jourVersDate(jour(90)) },
+      { coutUnitaire: 5 },
+    ]) {
+      await expect(
+        prisma.$transaction((tx) =>
+          mouvements.creerLot(tx, { ...nouveau(id), ...different }),
+        ),
+      ).rejects.toMatchObject({
+        response: { code: 'IDENTIFIANT_DEJA_UTILISE' },
+      });
+    }
+    const mvtsApres = await sql(
+      'SELECT count(*)::int AS n FROM "MouvementStock" WHERE "lotId" = $1',
+      [lotId],
+    );
+    expect(mvtsApres.rows[0].n).toBe(1);
+  });
 });

@@ -4,10 +4,12 @@ import {
   HttpException,
   Injectable,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import type { Prisma } from 'generated/prisma/client';
 import { isISO8601 } from 'class-validator';
 import { PrismaService } from 'src/common/services/prisma.service';
+import { PermissionsService } from 'src/common/rbac/permissions.service';
 import { AccesPharmacieService } from '../acces-pharmacie.service';
 import {
   estJourCloture,
@@ -53,6 +55,8 @@ import {
   ARenvoyerSynchro,
   calculerLigneRejeu,
   codeRejetDepuisHttp,
+  permissionsRequisesPourType,
+  permissionsSuffisantes,
   contientNul,
   corpsIllisible,
   corpsStockable,
@@ -136,6 +140,8 @@ export interface ContexteRejeu {
   /** Échecs imprévus consécutifs de l'événement qui bloque le poste, gardés dans `dernierEtat` (D664). */
   echecImprevu: EchecImprevu | null;
   chargerUtilisateur(id: string): Promise<UtilisateurCharge | null>;
+  /** Permissions effectives de l'utilisateur (rôle, filtrées selon le type de structure), lues à la demande. */
+  chargerPermissions(id: string): Promise<string[]>;
 }
 
 interface EchecImprevu {
@@ -188,6 +194,8 @@ export class SynchroService {
     // Sert au rejeu des ventes (PB18c).
     private readonly mouvementsStock: MouvementsStockService,
     private readonly sessionsCaisse: SessionsCaisseService,
+    // Droits au rejeu des types d'événements qui exigent une permission ; sans service, ces types sont refusés.
+    @Optional() private readonly permissions?: PermissionsService,
   ) {}
 
   // ------------------------------------------------------------------ route
@@ -214,6 +222,7 @@ export class SynchroService {
     }
 
     const utilisateurs = new Map<string, UtilisateurCharge | null>();
+    const droits = new Map<string, string[]>();
     const identifiants = [
       ...new Set(
         dto.evenements
@@ -257,6 +266,17 @@ export class SynchroService {
           );
         }
         return utilisateurs.get(id) ?? null;
+      },
+      chargerPermissions: async (id) => {
+        if (!droits.has(id)) {
+          droits.set(
+            id,
+            this.permissions
+              ? await this.permissions.getUserPermissions(id)
+              : [],
+          );
+        }
+        return droits.get(id) ?? [];
       },
     };
 
@@ -758,6 +778,17 @@ export class SynchroService {
         ctx.structure.adminId !== utilisateur.id)
     ) {
       throw new RejetSynchro('UTILISATEUR_NON_AUTORISE');
+    }
+    // Droit propre au type d'événement, évalué à l'heure du rejeu : un droit retiré pendant la coupure rejette l'opération.
+    const requises = permissionsRequisesPourType(type);
+    if (
+      requises.length > 0 &&
+      !permissionsSuffisantes(
+        requises,
+        await ctx.chargerPermissions(utilisateur.id),
+      )
+    ) {
+      throw new RejetSynchro('PERMISSION_INSUFFISANTE');
     }
     const borne = horodatageBorne(local, new Date());
 
