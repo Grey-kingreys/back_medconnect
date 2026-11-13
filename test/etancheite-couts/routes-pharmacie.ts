@@ -4,10 +4,15 @@
  * src/pharmacie/etancheite-couts.spec.ts échoue. Une route qui renvoie un coût
  * doit le masquer par masquerCouts (D466).
  */
-export type ClasseRoute = 'JSON' | 'FICHIER' | 'PUBLIQUE' | 'TEXTE';
+export type ClasseRoute =
+  | 'JSON'
+  | 'FICHIER'
+  | 'PUBLIQUE'
+  | 'TEXTE'
+  | 'CLASSEUR_STOCK';
 
 export interface RouteInventoriee {
-  /** JSON : réponse lue ; FICHIER : classeur binaire, sans donnée de la pharmacie ; PUBLIQUE : sans authentification ; TEXTE : fichier texte de la pharmacie (CSV), lu en entier : aucun en-tête ni aucune valeur ne doit correspondre au motif des coûts. */
+  /** JSON : réponse lue ; FICHIER : classeur binaire, sans donnée de la pharmacie ; PUBLIQUE : sans authentification ; CLASSEUR_STOCK : classeur Excel du stock de la pharmacie, lu avec exceljs : la colonne de coût doit être vide sans marge:read ; TEXTE : fichier texte de la pharmacie (CSV), lu en entier : aucun en-tête ni aucune valeur ne doit correspondre au motif des coûts. */
   classe: ClasseRoute;
   /** Le titulaire reçoit au moins une clé de coût dans le scénario (contrôle positif). */
   porteCout: boolean;
@@ -19,6 +24,7 @@ const J: ClasseRoute = 'JSON';
 const F: ClasseRoute = 'FICHIER';
 const P: ClasseRoute = 'PUBLIQUE';
 const T: ClasseRoute = 'TEXTE';
+const CS: ClasseRoute = 'CLASSEUR_STOCK';
 
 export const ROUTES_PHARMACIE = {
   'GET /pharmacie/:structureId/referentiels': {
@@ -208,6 +214,11 @@ export const ROUTES_PHARMACIE = {
   },
   'PATCH /pharmacie/:structureId/anomalies/:anomalieId': {
     classe: J,
+    porteCout: false,
+    exigeMarge: false,
+  },
+  'GET /pharmacie/stock/:structureId/export': {
+    classe: CS,
     porteCout: false,
     exigeMarge: false,
   },

@@ -60,7 +60,7 @@ export type UniteMinimaleLisible =
   | 'PLAQUETTE'
   | 'UNITE';
 
-const LIBELLES_UNITE_MINIMALE: Record<
+export const LIBELLES_UNITE_MINIMALE: Record<
   UniteMinimaleLisible,
   { singulier: string; pluriel: string }
 > = {

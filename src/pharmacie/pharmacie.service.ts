@@ -14,7 +14,11 @@ import { PERMISSIONS } from 'src/common/rbac/permissions.constants';
 import { assurerPointDeVente } from './point-de-vente';
 import { jourConakry } from './jour-metier';
 import { masquerCouts } from './masquer-couts';
-import { etatStock } from './domaine/quantites';
+import {
+  etatStock,
+  umVersBoites,
+  LIBELLES_UNITE_MINIMALE,
+} from './domaine/quantites';
 import { avertissementEcartPrix } from './domaine/prix';
 import { MouvementsStockService } from './stock/mouvements-stock.service';
 import { estCleEtrangereViolee } from './stock/erreurs-base';
@@ -119,6 +123,30 @@ export function messageAlerteImportLivraison(nombre: number): string {
   return nombre === 1
     ? "Après l'import de la livraison, 1 médicament a encore un stock bas ou épuisé. Pensez à le réapprovisionner."
     : `Après l'import de la livraison, ${nombre} médicaments ont encore un stock bas ou épuisé. Pensez à les réapprovisionner.`;
+}
+
+/** Colonnes de la feuille « Stock » du modèle d'import (livraison) : l'export du stock les reprend à l'identique. */
+export const COLONNES_MODELE_LIVRAISON = [
+  { header: 'Médicament', key: 'nom', width: 40 },
+  { header: 'Quantité (boîtes)', key: 'quantite', width: 16 },
+  { header: 'Prix de la boîte (GNF)', key: 'prix', width: 22 },
+  { header: "Date d'expiration (AAAA-MM-JJ)", key: 'date', width: 32 },
+  { header: 'Lot', key: 'lot', width: 16 },
+  { header: "Coût d'achat de la boîte (GNF)", key: 'cout', width: 30 },
+  { header: 'Notes', key: 'notes', width: 40 },
+] as const;
+
+export type FiltreExportStock = 'tous' | 'alertes' | 'rupture' | 'qualifier';
+
+/** Nom de pharmacie pour un nom de fichier : minuscules, sans accents, tirets. */
+export function normaliserPourFichier(texte: string): string {
+  const base = texte
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return base || 'pharmacie';
 }
 
 /** Transaction interactive de l'import : jusqu'à 1000 écritures successives. */
@@ -1011,15 +1039,7 @@ export class PharmacieService {
 
       return Buffer.from(await workbook.xlsx.writeBuffer());
     }
-    feuille.columns = [
-      { header: 'Médicament', key: 'nom', width: 40 },
-      { header: 'Quantité (boîtes)', key: 'quantite', width: 16 },
-      { header: 'Prix de la boîte (GNF)', key: 'prix', width: 22 },
-      { header: "Date d'expiration (AAAA-MM-JJ)", key: 'date', width: 32 },
-      { header: 'Lot', key: 'lot', width: 16 },
-      { header: "Coût d'achat de la boîte (GNF)", key: 'cout', width: 30 },
-      { header: 'Notes', key: 'notes', width: 40 },
-    ];
+    feuille.columns = COLONNES_MODELE_LIVRAISON.map((c) => ({ ...c }));
     feuille.getRow(1).font = { bold: true };
     const ligneExemple = feuille.addRow({
       nom: exemple?.nom ?? 'Paracétamol 500 mg',
@@ -1046,6 +1066,122 @@ export class PharmacieService {
     ].forEach((texte) => aide.addRow([texte]));
 
     return Buffer.from(await workbook.xlsx.writeBuffer());
+  }
+
+  /**
+   * Export du stock au format du modèle d'import (livraison) : une ligne par lot
+   * en stock, une ligne sans péremption pour un produit sans lot. Coûts vides sans marge:read.
+   */
+  async exporterStock(
+    structureId: string,
+    adminUserId: string,
+    options: { filtre?: FiltreExportStock; q?: string } = {},
+  ): Promise<{ contenu: Buffer; nomFichier: string }> {
+    const { user, structure } = await this.accesPharmacie.verifier(
+      structureId,
+      adminUserId,
+    );
+    const jour = jourConakry(new Date());
+    const filtre = options.filtre ?? 'tous';
+    const recherche = (options.q ?? '').trim().toLowerCase();
+    const fiches = await this.lireFichesStock(
+      { structureId, archiveLe: null },
+      jour,
+    );
+    const parametres = await this.prisma.parametresPharmacie.findUnique({
+      where: { structureId },
+      select: { seuilStockBas: true },
+    });
+    const seuil = parametres?.seuilStockBas ?? SEUIL_STOCK_BAS;
+    const peutVoirMarge = await this.peutVoirMarge(user.id);
+
+    const retenues = fiches.filter((f) => {
+      if (
+        recherche &&
+        !f.medicament.nom.toLowerCase().includes(recherche) &&
+        !f.medicament.nomGenerique?.toLowerCase().includes(recherche)
+      ) {
+        return false;
+      }
+      const etat = etatStock(f.quantite, f.coefficientBoite, seuil);
+      if (filtre === 'alertes') return etat === 'BAS';
+      if (filtre === 'rupture') return etat === 'RUPTURE';
+      if (filtre === 'qualifier') return f.qualifie === false;
+      return true;
+    });
+
+    // Quantité en boîtes ENTIÈRES (réimportable) ; le reste d'une boîte entamée va dans les notes
+    const quantiteEtNotes = (
+      f: (typeof retenues)[number],
+      unites: number,
+    ): { quantite: number; notes: string | null } => {
+      const { boites, unites: reste } = umVersBoites(
+        Math.max(0, unites),
+        Math.max(1, f.coefficientBoite),
+      );
+      const libelle =
+        LIBELLES_UNITE_MINIMALE[
+          (f.uniteMinimale ?? 'UNITE') as keyof typeof LIBELLES_UNITE_MINIMALE
+        ] ?? LIBELLES_UNITE_MINIMALE.UNITE;
+      const entamee =
+        reste > 0
+          ? `Boîte entamée : ${reste} ${reste > 1 ? libelle.pluriel : libelle.singulier} en plus`
+          : null;
+      // Stock négatif : la quantité exportée reste 0, la note le dit (sans coût)
+      const negatif =
+        unites < 0
+          ? `Stock négatif dans MedConnecte : ${unites} ${unites < -1 ? libelle.pluriel : libelle.singulier}`
+          : null;
+      return {
+        quantite: boites,
+        notes: [f.notes, entamee, negatif].filter(Boolean).join(' ; ') || null,
+      };
+    };
+
+    const workbook = new Workbook();
+    const feuille = workbook.addWorksheet('Stock');
+    feuille.columns = COLONNES_MODELE_LIVRAISON.map((c) => ({ ...c }));
+    feuille.getRow(1).font = { bold: true };
+    for (const f of retenues) {
+      const commun = {
+        nom: f.medicament.nom,
+        prix: f.prixUnitaire ?? null,
+      };
+      if (f.lots.length === 0) {
+        feuille.addRow({
+          ...commun,
+          // Une fiche sans lot dont le journal est négatif : la lecture écrête à 0 et
+          // expose la part à régulariser
+          ...quantiteEtNotes(
+            f,
+            f.quantite > 0 ? f.quantite : -(f.quantiteARegulariser ?? 0),
+          ),
+          date: null,
+          lot: null,
+          cout: null,
+        });
+        continue;
+      }
+      for (const lot of f.lots) {
+        const ligne = feuille.addRow({
+          ...commun,
+          ...quantiteEtNotes(f, lot.quantite),
+          date: lot.dateExpiration,
+          lot: lot.numeroLot ?? null,
+          // coutUnitaire est par unité minimale ; 0 = coût inconnu
+          cout:
+            peutVoirMarge && lot.coutUnitaire > 0
+              ? Math.round(lot.coutUnitaire * lot.coefficientReception)
+              : null,
+        });
+        ligne.getCell('date').numFmt = 'yyyy-mm-dd';
+      }
+    }
+
+    return {
+      contenu: Buffer.from(await workbook.xlsx.writeBuffer()),
+      nomFichier: `stock-${normaliserPourFichier(structure.nom)}-${jour}.xlsx`,
+    };
   }
 
   /** Analyse le fichier sans rien écrire et renvoie le rapport ligne par ligne. */

@@ -196,6 +196,24 @@ export class OptionsImportStockDto {
   mode?: ModeImportStock;
 }
 
+/** Paramètres de la route d'export du stock. */
+export class ExportStockDto {
+  @ApiPropertyOptional({
+    enum: ['tous', 'alertes', 'rupture', 'qualifier'],
+    default: 'tous',
+    description: "Étendue : tout le stock ou l'un des onglets de la page Stock",
+  })
+  @IsOptional()
+  @IsIn(['tous', 'alertes', 'rupture', 'qualifier'])
+  filtre?: 'tous' | 'alertes' | 'rupture' | 'qualifier';
+
+  @ApiPropertyOptional({ description: 'Recherche sur le nom du médicament' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
+}
+
 /** Paramètre de la route du modèle Excel. */
 export class ModeleImportStockDto {
   @ApiPropertyOptional({

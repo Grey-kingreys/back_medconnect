@@ -70,6 +70,29 @@ interface Contexte {
 }
 type Appel = (c: Contexte) => Promise<request.Response[]>;
 
+/** Lit le classeur de l'export du stock : titres et valeur de la colonne de coût de chaque ligne. */
+async function lireClasseurStock(corps: unknown) {
+  const classeur = new Workbook();
+  await classeur.xlsx.load(corps as ArrayBuffer);
+  const feuille = classeur.getWorksheet('Stock');
+  const titres: string[] = [];
+  feuille
+    ?.getRow(1)
+    .eachCell((cellule) =>
+      titres.push(typeof cellule.value === 'string' ? cellule.value : ''),
+    );
+  const colonne = titres.indexOf("Coût d'achat de la boîte (GNF)") + 1;
+  const lignes: { cout: unknown }[] = [];
+  feuille?.eachRow((ligne, numero) => {
+    if (numero === 1) return;
+    const valeur = ligne.getCell(colonne).value;
+    lignes.push({
+      cout: valeur === undefined || valeur === '' ? null : valeur,
+    });
+  });
+  return { titres, lignes };
+}
+
 const ENTETES_LIVRAISON = [
   'Médicament',
   'Quantité (boîtes)',
@@ -590,6 +613,16 @@ describe('Étanchéité des coûts, sur base de test (PB16b, CA22)', () => {
         .en('patch', `/pharmacie/${S}/anomalies/${id(c, 'anomalieId')}`)
         .send({ commentaire: 'Écart vérifié en rayon' }),
     ],
+    'GET /pharmacie/stock/:structureId/export': async (c) => [
+      await c
+        .en('get', `/pharmacie/stock/${S}/export`)
+        .buffer(true)
+        .parse((res, cb) => {
+          const morceaux: Buffer[] = [];
+          res.on('data', (m: Buffer) => morceaux.push(m));
+          res.on('end', () => cb(null, Buffer.concat(morceaux)));
+        }),
+    ],
     'GET /pharmacie/stock/:structureId/import/modele': async (c) => [
       await c.en('get', `/pharmacie/stock/${S}/import/modele?mode=livraison`),
     ],
@@ -845,6 +878,17 @@ describe('Étanchéité des coûts, sur base de test (PB16b, CA22)', () => {
     }
   });
 
+  it("l'export du stock : coûts remplis pour le titulaire (marge:read), vides pour le vendeur", async () => {
+    const titulaire = await jouer('titulaire');
+    const reponse = titulaire.find(
+      (j) => j.cle === 'GET /pharmacie/stock/:structureId/export',
+    )?.reponses[0];
+    expect(reponse?.status).toBe(200);
+    const { titres, lignes } = await lireClasseurStock(reponse?.body);
+    expect(titres).toEqual(ENTETES_LIVRAISON);
+    expect(lignes.some((l) => l.cout !== null)).toBe(true);
+  });
+
   it('CA22 : le vendeur ne reçoit aucune donnée de coût ni de marge, route par route', async () => {
     for (const { cle, reponses } of await jouer('vendeur')) {
       const route = ROUTES_PHARMACIE[cle];
@@ -864,6 +908,13 @@ describe('Étanchéité des coûts, sur base de test (PB16b, CA22)', () => {
             cle,
             coutDansTexte: MOTIF_CLE_COUT.test(r.text),
           }).toEqual({ cle, coutDansTexte: false });
+          continue;
+        }
+        if (route.classe === 'CLASSEUR_STOCK') {
+          expect(String(r.headers['content-type'])).toContain('spreadsheetml');
+          const { lignes } = await lireClasseurStock(r.body);
+          expect(lignes.length).toBeGreaterThan(0);
+          expect(lignes.filter((l) => l.cout !== null)).toEqual([]);
           continue;
         }
         if (route.classe === 'FICHIER') {
