@@ -623,6 +623,9 @@ describe('deriverAnnulation', () => {
     createdAt: d,
     vendeurId: 'u2',
     vendeurNom: 'Fatoumata Camara',
+    posteId: 'po2',
+    sessionCaisseId: 'ses2',
+    jourMetier: new Date('2026-11-05T00:00:00.000Z'),
   };
 
   it('dérive l’annulation d’une vente de sa pièce liée', () => {
@@ -638,6 +641,9 @@ describe('deriverAnnulation', () => {
         motif: 'Erreur de quantité',
         le: d,
         par: { id: 'u2', nom: 'Fatoumata Camara' },
+        posteId: 'po2',
+        sessionCaisseId: 'ses2',
+        jourMetier: '2026-11-05',
       },
     });
   });

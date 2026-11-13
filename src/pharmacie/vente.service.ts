@@ -163,6 +163,9 @@ const SELECT_PIECE_LIEE = {
   createdAt: true,
   vendeurId: true,
   vendeurNom: true,
+  posteId: true,
+  sessionCaisseId: true,
+  jourMetier: true,
 } satisfies Prisma.VenteSelect;
 
 /** Lecture complète d'une vente : lignes, allocations, paiements et poste. */

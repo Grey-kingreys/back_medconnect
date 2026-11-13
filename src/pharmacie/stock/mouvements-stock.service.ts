@@ -55,6 +55,20 @@ export interface MouvementEcrit {
   soldeProduit: number;
 }
 
+/** Champs facultatifs d'une ligne de facture fournisseur, enregistrés tels quels sur le lot. */
+export interface ChampsFactureLot {
+  codeArticleFournisseur?: string | null;
+  codeBarres?: string | null;
+  quantiteCommandee?: number | null;
+  prixPublicBoite?: number | null;
+  codeTva?: string | null;
+  tauxTvaPourMille?: number | null;
+  montantHTLigne?: number | null;
+  colisage?: number | null;
+  tableau?: string | null;
+  bonPreparation?: string | null;
+}
+
 export interface NouveauLot {
   stockMedicamentId: string;
   pointDeVenteId: string;
@@ -76,6 +90,8 @@ export interface NouveauLot {
   dateReception?: Date;
   /** Type du premier mouvement : RECEPTION par défaut, INVENTAIRE pour un lot trouvé à l'inventaire. */
   typeMouvement?: 'RECEPTION' | 'INVENTAIRE';
+  /** Facture fournisseur (réception seulement). */
+  facture?: ChampsFactureLot;
 }
 
 export interface OuvertureConditionnement {
@@ -274,6 +290,7 @@ export class MouvementsStockService {
         dateReception: l.dateReception ?? new Date(),
         lotTechnique: l.lotTechnique,
         auteurId: l.auteurId,
+        ...(l.facture ?? {}),
       },
     });
     const reception = await this.ecrire(tx, {

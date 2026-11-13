@@ -143,7 +143,7 @@ export class VenteController {
   @ApiResponse({
     status: 200,
     description:
-      "Vente d'origine, avec statut ANNULEE et annulation { id, numero, motif, le, par { id, nom } }. Les coûts ne sont renvoyés qu'avec la permission marge:read.",
+      "Vente d'origine, avec statut ANNULEE et annulation { id, numero, motif, le, par { id, nom }, posteId, sessionCaisseId, jourMetier } (poste, caisse et jour métier de cette caisse : ceux de l'auteur, où le remboursement est enregistré). Les coûts ne sont renvoyés qu'avec la permission marge:read.",
   })
   @ApiResponse({ status: 404, description: 'Vente introuvable.' })
   @ApiResponse({

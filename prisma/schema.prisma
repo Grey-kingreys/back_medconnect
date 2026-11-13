@@ -1,6 +1,6 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider        = "prisma-client"
+  output          = "../generated/prisma"
   previewFeatures = ["partialIndexes"]
 }
 
@@ -37,8 +37,8 @@ enum StructureType {
 model Permission {
   id        String           @id @default(uuid())
   code      String           @unique // ex. "carnet:write"
-  libelle   String                   // ex. "Modifier le carnet de santé"
-  categorie String                   // ex. "Carnet de santé"
+  libelle   String // ex. "Modifier le carnet de santé"
+  categorie String // ex. "Carnet de santé"
   roles     RolePermission[]
   createdAt DateTime         @default(now())
 }
@@ -48,7 +48,7 @@ model AppRole {
   nom         String
   description String?
   isSystem    Boolean          @default(false) // non éditable / non supprimable
-  structureId String?                           // null = rôle système global
+  structureId String? // null = rôle système global
   structure   Structure?       @relation("StructureRoles", fields: [structureId], references: [id], onDelete: Cascade)
   permissions RolePermission[]
   users       User[]           @relation("UserAppRole")
@@ -68,21 +68,21 @@ model RolePermission {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String
-  nom       String
-  prenom    String
-  telephone String?
+  id                 String    @id @default(uuid())
+  email              String    @unique
+  password           String
+  nom                String
+  prenom             String
+  telephone          String?
   // Forme E.164 de `telephone`, calculée par le trigger PostgreSQL
   // "user_telephone_normalise" (TB17). Ne jamais l'écrire depuis l'application.
   telephoneNormalise String?
-  dateNaissance DateTime?
-  taille    Int?     // Taille en cm
-  poids     Float?   // Poids en kg
-  role      Role     @default(PATIENT)
-  isActive  Boolean  @default(true)
-  specialite String?  // Spécialité médicale (pour MEDECIN)
+  dateNaissance      DateTime?
+  taille             Int? // Taille en cm
+  poids              Float? // Poids en kg
+  role               Role      @default(PATIENT)
+  isActive           Boolean   @default(true)
+  specialite         String? // Spécialité médicale (pour MEDECIN)
 
   resetPasswordToken   String?   @unique
   resetPasswordExpires DateTime?
@@ -107,20 +107,20 @@ model User {
   appRole   AppRole? @relation("UserAppRole", fields: [appRoleId], references: [id])
 
   // Carnet de santé (Patient side)
-  profilMedical  ProfilMedical?
-  consultations  Consultation[] @relation("PatientConsultations")
-  ordonnances    Ordonnance[]   @relation("PatientOrdonnances")
-  analyses       ResultatAnalyse[] @relation("PatientAnalyses")
-  vaccinations   Vaccination[]   @relation("PatientVaccinations")
-  
+  profilMedical ProfilMedical?
+  consultations Consultation[]    @relation("PatientConsultations")
+  ordonnances   Ordonnance[]      @relation("PatientOrdonnances")
+  analyses      ResultatAnalyse[] @relation("PatientAnalyses")
+  vaccinations  Vaccination[]     @relation("PatientVaccinations")
+
   // Medical records created by this user (Doctor side)
-  consultationsCreees Consultation[] @relation("DoctorConsultations")
-  ordonnancesCreees   Ordonnance[]   @relation("DoctorOrdonnances")
+  consultationsCreees Consultation[]    @relation("DoctorConsultations")
+  ordonnancesCreees   Ordonnance[]      @relation("DoctorOrdonnances")
   analysesCreees      ResultatAnalyse[] @relation("DoctorAnalyses")
-  vaccinationsCreees  Vaccination[]   @relation("DoctorVaccinations")
-  autoDiagnostics AutoDiagnostic[]
-  urgences       Urgence[]
-  notifications  Notification[]
+  vaccinationsCreees  Vaccination[]     @relation("DoctorVaccinations")
+  autoDiagnostics     AutoDiagnostic[]
+  urgences            Urgence[]
+  notifications       Notification[]
 
   // Autorisations données aux structures (Niveau 1)
   autorisationsStructures AutorisationStructure[] @relation("PatientAutorisations")
@@ -149,29 +149,29 @@ model User {
   avatarFileId String?     @unique
   avatarFile   StoredFile? @relation("UserAvatar", fields: [avatarFileId], references: [id], onDelete: SetNull)
 
-  // Un numéro par compte (TB17) ; les comptes sans numéro restent possibles.
-  @@unique([telephoneNormalise], where: raw("\"telephoneNormalise\" IS NOT NULL"))
-
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Un numéro par compte (TB17) ; les comptes sans numéro restent possibles.
+  @@unique([telephoneNormalise], where: raw("\"telephoneNormalise\" IS NOT NULL"))
 }
 
 model Structure {
-  id          String        @id @default(uuid())
-  nom         String
-  type        StructureType
-  email       String        @unique
-  telephone   String?
-  adresse     String?
-  ville       String?
-  latitude    Float?
-  longitude   Float?
-  description String?
-  horaires    String?       // JSON string ex: {"lun":"08:00-18:00",...}
-  estDeGarde  Boolean       @default(false)
-  estOuvertManuel Boolean?    // null: auto, true: forcé ouvert, false: forcé fermé
-  isActive    Boolean       @default(true)
-  isConfigured Boolean      @default(false)
+  id              String        @id @default(uuid())
+  nom             String
+  type            StructureType
+  email           String        @unique
+  telephone       String?
+  adresse         String?
+  ville           String?
+  latitude        Float?
+  longitude       Float?
+  description     String?
+  horaires        String? // JSON string ex: {"lun":"08:00-18:00",...}
+  estDeGarde      Boolean       @default(false)
+  estOuvertManuel Boolean? // null: auto, true: forcé ouvert, false: forcé fermé
+  isActive        Boolean       @default(true)
+  isConfigured    Boolean       @default(false)
 
   // Token d'invitation envoyé par email
   inviteToken   String?   @unique
@@ -208,7 +208,7 @@ model Structure {
 
   // Patients ayant autorisé l'accès à leur dossier
   autorisationsPatients AutorisationStructure[] @relation("StructureAutorisations")
-  
+
   // Conversations avec les patients
   conversations Conversation[] @relation("ConversationStructure")
 
@@ -237,119 +237,119 @@ enum GroupeSanguin {
 }
 
 model ProfilMedical {
-  id             String         @id @default(uuid())
-  userId         String         @unique
-  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  groupeSanguin  GroupeSanguin  @default(INCONNU)
-  allergies      String?
-  pathologies    String?
-  traitements    String?  // Traitements en cours
-  taille         Float?         // en cm
-  poids          Float?         // en kg
-  dateNaissance  DateTime?
-  genre          String?        // "M" | "F" | "Autre"
-  contactNom       String?        // Nom du proche
-  contactTelephone String?        // Téléphone du proche
-  contactEmail     String?        // Email du proche
+  groupeSanguin    GroupeSanguin @default(INCONNU)
+  allergies        String?
+  pathologies      String?
+  traitements      String? // Traitements en cours
+  taille           Float? // en cm
+  poids            Float? // en kg
+  dateNaissance    DateTime?
+  genre            String? // "M" | "F" | "Autre"
+  contactNom       String? // Nom du proche
+  contactTelephone String? // Téléphone du proche
+  contactEmail     String? // Email du proche
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model Consultation {
-  id          String   @id @default(uuid())
-  patientId   String
-  patient     User     @relation("PatientConsultations", fields: [patientId], references: [id], onDelete: Cascade)
-  
-  medecinId   String?
-  medecin     User?     @relation("DoctorConsultations", fields: [medecinId], references: [id], onDelete: SetNull)
-  
+  id        String @id @default(uuid())
+  patientId String
+  patient   User   @relation("PatientConsultations", fields: [patientId], references: [id], onDelete: Cascade)
+
+  medecinId String?
+  medecin   User?   @relation("DoctorConsultations", fields: [medecinId], references: [id], onDelete: SetNull)
+
   structureId String?
   structure   Structure? @relation(fields: [structureId], references: [id], onDelete: SetNull)
 
-  medecinNom   String?   // Nom du médecin (peut être externe ou backup)
-  motif        String
-  diagnostic   String?
-  notes        String?
+  medecinNom       String? // Nom du médecin (peut être externe ou backup)
+  motif            String
+  diagnostic       String?
+  notes            String?
   dateConsultation DateTime @default(now())
 
   // Ordonnances liées
   ordonnances Ordonnance[]
 
-  deletedAt   DateTime?
+  deletedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model Ordonnance {
-  id            String   @id @default(uuid())
-  patientId     String
-  patient       User     @relation("PatientOrdonnances", fields: [patientId], references: [id], onDelete: Cascade)
-  
-  medecinId     String?
-  medecin       User?     @relation("DoctorOrdonnances", fields: [medecinId], references: [id], onDelete: SetNull)
-  
-  consultationId String?
-  consultation  Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+  id        String @id @default(uuid())
+  patientId String
+  patient   User   @relation("PatientOrdonnances", fields: [patientId], references: [id], onDelete: Cascade)
 
-  medecinNom    String?
-  medicaments   String   // JSON: [{nom, dosage, duree, instructions}]
-  notes         String?
-  dateEmission  DateTime @default(now())
+  medecinId String?
+  medecin   User?   @relation("DoctorOrdonnances", fields: [medecinId], references: [id], onDelete: SetNull)
+
+  consultationId String?
+  consultation   Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+
+  medecinNom     String?
+  medicaments    String // JSON: [{nom, dosage, duree, instructions}]
+  notes          String?
+  dateEmission   DateTime  @default(now())
   dateExpiration DateTime?
 
   // Ordonnance scannée (PDF/image) : fichier R2 du bucket PRIVÉ. Lecture via URL présignée.
   scanFileId String?     @unique
   scanFile   StoredFile? @relation("OrdonnanceScan", fields: [scanFileId], references: [id], onDelete: SetNull)
 
-  deletedAt   DateTime?
+  deletedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model ResultatAnalyse {
-  id          String   @id @default(uuid())
-  patientId   String
-  patient     User     @relation("PatientAnalyses", fields: [patientId], references: [id], onDelete: Cascade)
-  
-  medecinId   String?
-  medecin     User?     @relation("DoctorAnalyses", fields: [medecinId], references: [id], onDelete: SetNull)
+  id        String @id @default(uuid())
+  patientId String
+  patient   User   @relation("PatientAnalyses", fields: [patientId], references: [id], onDelete: Cascade)
 
-  typeAnalyse String   // "Bilan sanguin", "Radiographie", etc.
-  laboratoire String?
-  resultats   String   // JSON ou texte libre
-  fichierUrl  String?  // ⚠️ DÉPRÉCIÉ (URL brute sans contrôle d'accès), remplacé par documentFile. À retirer une fois le front migré.
+  medecinId String?
+  medecin   User?   @relation("DoctorAnalyses", fields: [medecinId], references: [id], onDelete: SetNull)
+
+  typeAnalyse    String // "Bilan sanguin", "Radiographie", etc.
+  laboratoire    String?
+  resultats      String // JSON ou texte libre
+  fichierUrl     String? // ⚠️ DÉPRÉCIÉ (URL brute sans contrôle d'accès), remplacé par documentFile. À retirer une fois le front migré.
   // Document d'analyse (PDF/image/DICOM) : fichier R2 du bucket PRIVÉ. Lecture via URL présignée.
   documentFileId String?     @unique
   documentFile   StoredFile? @relation("AnalyseDocument", fields: [documentFileId], references: [id], onDelete: SetNull)
-  dateAnalyse DateTime
-  notes       String?
+  dateAnalyse    DateTime
+  notes          String?
 
-  deletedAt   DateTime?
+  deletedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model Vaccination {
-  id          String   @id @default(uuid())
-  patientId   String
-  patient     User     @relation("PatientVaccinations", fields: [patientId], references: [id], onDelete: Cascade)
-  
-  medecinId   String?
-  medecin     User?     @relation("DoctorVaccinations", fields: [medecinId], references: [id], onDelete: SetNull)
+  id        String @id @default(uuid())
+  patientId String
+  patient   User   @relation("PatientVaccinations", fields: [patientId], references: [id], onDelete: Cascade)
 
-  vaccin       String
-  dateVaccin   DateTime
+  medecinId String?
+  medecin   User?   @relation("DoctorVaccinations", fields: [medecinId], references: [id], onDelete: SetNull)
+
+  vaccin         String
+  dateVaccin     DateTime
   prochainRappel DateTime?
-  lotNumero    String?
-  administrePar String?
-  notes        String?
+  lotNumero      String?
+  administrePar  String?
+  notes          String?
 
-  deletedAt   DateTime?
+  deletedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -358,17 +358,17 @@ model Vaccination {
 // ====== AUDIT TRAIL ==================
 
 model AuditLog {
-  id          String   @id @default(uuid())
-  userId      String?  // NULL si action système
-  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  id     String  @id @default(uuid())
+  userId String? // NULL si action système
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
-  action      String   // ex. "create", "update", "delete"
-  entityType  String   // ex. "Consultation", "Ordonnance", "Vaccination", "ResultatAnalyse"
-  entityId    String   // ID de l'entité modifiée
-  ip          String?  // adresse IP source
-  metadata    Json?    // données contextuelles supplémentaires (ex. ancienne/nouvelle valeur)
+  action     String // ex. "create", "update", "delete"
+  entityType String // ex. "Consultation", "Ordonnance", "Vaccination", "ResultatAnalyse"
+  entityId   String // ID de l'entité modifiée
+  ip         String? // adresse IP source
+  metadata   Json? // données contextuelles supplémentaires (ex. ancienne/nouvelle valeur)
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([userId])
   @@index([entityType, entityId])
@@ -381,40 +381,39 @@ enum AppointmentStatus {
   ANNULE
   TERMINE
   EN_ATTENTE // proposé (par l'accueil ou sur la structure), en attente de validation d'un médecin
-  REFUSE     // proposition refusée par le médecin
+  REFUSE // proposition refusée par le médecin
 }
 
 model RendezVous {
-  id          String   @id @default(uuid())
-  patientId   String
-  patient     User     @relation("PatientRendezVous", fields: [patientId], references: [id], onDelete: Cascade)
-  
+  id        String @id @default(uuid())
+  patientId String
+  patient   User   @relation("PatientRendezVous", fields: [patientId], references: [id], onDelete: Cascade)
+
   // Optionnel : un RDV « avec la structure » (pris par l'accueil) n'est pas encore
   // affecté à un médecin, un médecin de la structure le prend en charge ensuite.
-  medecinId   String?
-  medecin     User?    @relation("MedecinRendezVous", fields: [medecinId], references: [id], onDelete: SetNull)
+  medecinId String?
+  medecin   User?   @relation("MedecinRendezVous", fields: [medecinId], references: [id], onDelete: SetNull)
 
   structureId String?
   structure   Structure? @relation(fields: [structureId], references: [id], onDelete: SetNull)
 
-  date        DateTime
-  motif       String
-  notes       String?
-  status      AppointmentStatus @default(PROGRAMME)
+  date   DateTime
+  motif  String
+  notes  String?
+  status AppointmentStatus @default(PROGRAMME)
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
-
 model AutoDiagnostic {
-  id        String   @id @default(uuid())
+  id        String @id @default(uuid())
   patientId String
-  patient   User     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patient   User   @relation(fields: [patientId], references: [id], onDelete: Cascade)
 
-  symptomes       String   // texte libre saisi par l'utilisateur
-  analyseia       String?  // réponse de l'IA (JSON)
-  recommendation  String?  // "urgence" | "consultation" | "repos"
+  symptomes      String // texte libre saisi par l'utilisateur
+  analyseia      String? // réponse de l'IA (JSON)
+  recommendation String? // "urgence" | "consultation" | "repos"
 
   createdAt DateTime @default(now())
 }
@@ -422,13 +421,13 @@ model AutoDiagnostic {
 // ====== PHARMACIE / MEDICAMENTS ======
 
 model Medicament {
-  id          String   @id @default(uuid())
-  nom         String
-  nomGenerique String?
-  categorie   String   // "Antibiotique", "Antalgique", etc.
-  description String?
-  ordonnanceRequise Boolean @default(false)
-  formes      String[] @default([]) // "comprimé", "sirop", "injectable"
+  id                String   @id @default(uuid())
+  nom               String
+  nomGenerique      String?
+  categorie         String // "Antibiotique", "Antalgique", etc.
+  description       String?
+  ordonnanceRequise Boolean  @default(false)
+  formes            String[] @default([]) // "comprimé", "sirop", "injectable"
 
   stocks StockMedicament[]
 
@@ -437,17 +436,17 @@ model Medicament {
 }
 
 model StockMedicament {
-  id            String     @id @default(uuid())
-  medicamentId  String
-  medicament    Medicament @relation(fields: [medicamentId], references: [id], onDelete: Cascade)
-  structureId   String
-  structure     Structure  @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  id           String     @id @default(uuid())
+  medicamentId String
+  medicament   Medicament @relation(fields: [medicamentId], references: [id], onDelete: Cascade)
+  structureId  String
+  structure    Structure  @relation(fields: [structureId], references: [id], onDelete: Cascade)
 
-  quantite      Int        @default(0)
-  prixUnitaire  Int?       // en GNF, entier (lot 7, arrondi à la migration)
-  disponible    Boolean    @default(true)
+  quantite       Int       @default(0)
+  prixUnitaire   Int? // en GNF, entier (lot 7, arrondi à la migration)
+  disponible     Boolean   @default(true)
   dateExpiration DateTime?
-  notes         String?
+  notes          String?
 
   // Fiche produit étendue (tranche pharmacie 1, PB06, M3) : prixUnitaire = prix de la boîte (D409)
   uniteMinimale       UniteMinimale @default(UNITE)
@@ -830,6 +829,18 @@ model LotStock {
   auteurId             String? // nul = système, sans clé étrangère (D109)
   createdAt            DateTime        @default(now())
 
+  // Ligne de facture fournisseur, tous les champs facultatifs. Quantités en boîtes, montants en GNF entiers.
+  codeArticleFournisseur String?
+  codeBarres             String?
+  quantiteCommandee      Int?
+  prixPublicBoite        Int? // jamais recopié sur la fiche
+  codeTva                String?
+  tauxTvaPourMille       Int? // 180 = 18 %, 55 = 5,5 %
+  montantHTLigne         Int?
+  colisage               Int?
+  tableau                String?
+  bonPreparation         String?
+
   mouvements       MouvementStock[]
   agregat          AgregatStockLot?
   conditionnements ConditionnementOuvert[]
@@ -1115,6 +1126,16 @@ model Reception {
   auteurId       String // sans clé étrangère (D109)
   createdAt      DateTime     @default(now())
 
+  // Facture fournisseur, tous les champs facultatifs. Montants en GNF entiers (coûts d'achat : masqués sans marge:read).
+  numeroFacture     String?
+  referenceCommande String?
+  dateFacture       DateTime? @db.Date
+  nombrePages       Int?
+  montantHT         Int?
+  totalTva          Int?
+  montantTTC        Int?
+  netAPayer         Int?
+
   lots LotStock[]
 
   @@index([pointDeVenteId, recueLe])
@@ -1210,12 +1231,12 @@ model AllocationLot {
 
 // Niveau 1: Autorisation de partage de dossier avec une structure
 model AutorisationStructure {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   patientId   String
-  patient     User     @relation("PatientAutorisations", fields: [patientId], references: [id], onDelete: Cascade)
+  patient     User      @relation("PatientAutorisations", fields: [patientId], references: [id], onDelete: Cascade)
   structureId String
   structure   Structure @relation("StructureAutorisations", fields: [structureId], references: [id], onDelete: Cascade)
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
 
   @@unique([patientId, structureId])
 }
@@ -1223,46 +1244,47 @@ model AutorisationStructure {
 // ====== MESSAGERIE (CHAT) ======
 
 enum ConversationType {
-  PRIVE      // Patient - Médecin
-  STRUCTURE  // Patient - Structure
+  PRIVE // Patient - Médecin
+  STRUCTURE // Patient - Structure
 }
 
 model Conversation {
-  id          String   @id @default(uuid())
-  type        ConversationType
-  
+  id   String           @id @default(uuid())
+  type ConversationType
+
   // Si PRIVE (Patient - Médecin)
-  patientId   String?
-  patient     User?     @relation("ConversationPatient", fields: [patientId], references: [id], onDelete: Cascade)
-  medecinId   String?
-  medecin     User?     @relation("ConversationMedecin", fields: [medecinId], references: [id], onDelete: Cascade)
-  
+  patientId String?
+  patient   User?   @relation("ConversationPatient", fields: [patientId], references: [id], onDelete: Cascade)
+  medecinId String?
+  medecin   User?   @relation("ConversationMedecin", fields: [medecinId], references: [id], onDelete: Cascade)
+
   // Si STRUCTURE (Patient - Structure)
   structureId String?
   structure   Structure? @relation("ConversationStructure", fields: [structureId], references: [id], onDelete: Cascade)
 
-  messages    Message[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  messages  Message[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 }
 
 model Message {
   id             String       @id @default(uuid())
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  
-  senderId       String
-  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  
-  content        String
-  isLocation     Boolean      @default(false) // Pour le bouton 📍 Position
-  latitude       Float?
-  longitude      Float?
-  
-  lu             Boolean      @default(false)
-  
-  createdAt      DateTime     @default(now())
+
+  senderId String
+  sender   User   @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  content    String
+  isLocation Boolean @default(false) // Pour le bouton 📍 Position
+  latitude   Float?
+  longitude  Float?
+
+  lu Boolean @default(false)
+
+  createdAt DateTime @default(now())
 }
+
 enum MessageType {
   TEXTE
   IMAGE
@@ -1285,9 +1307,9 @@ enum SourcePositionUrgence {
 }
 
 model Urgence {
-  id        String   @id @default(uuid())
+  id        String @id @default(uuid())
   patientId String
-  patient   User     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patient   User   @relation(fields: [patientId], references: [id], onDelete: Cascade)
 
   latitude  Float?
   longitude Float?
@@ -1304,7 +1326,7 @@ model Urgence {
   cleIdempotence String?
   bilanDiffusion Json?
 
-  status    UrgenceStatus @default(LANCE)
+  status UrgenceStatus @default(LANCE)
 
   // Prise en charge : structure qui intervient (SetNull si elle est supprimée,
   // l'historique de l'alerte est conservé).
@@ -1320,10 +1342,10 @@ model Urgence {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Lecture de la dernière alerte d'un patient (anti-relance)
-  @@index([patientId, createdAt])
   // Un rejeu (même patient, même clé) retrouve l'alerte d'origine ; NULL n'est jamais en conflit.
   @@unique([patientId, cleIdempotence])
+  // Lecture de la dernière alerte d'un patient (anti-relance)
+  @@index([patientId, createdAt])
 }
 
 // ====== STOCKAGE OBJETS (Cloudflare R2) ======
@@ -1333,13 +1355,13 @@ model Urgence {
 // Cf. `src/storage/` (StorageModule), module isolé, migration des usages métier séparée.
 
 enum StoredFileBucket {
-  PUBLIC   // bucket public (cdn.medconnecte.com) : avatars, logos, images d'articles
-  PRIVATE  // bucket privé : documents médicaux, accès par URL présignée uniquement
+  PUBLIC // bucket public (cdn.medconnecte.com) : avatars, logos, images d'articles
+  PRIVATE // bucket privé : documents médicaux, accès par URL présignée uniquement
 }
 
 enum StoredFileStatus {
-  PENDING    // enregistrement créé lors de la demande d'URL présignée, upload non confirmé
-  CONFIRMED  // upload vérifié via HeadObject
+  PENDING // enregistrement créé lors de la demande d'URL présignée, upload non confirmé
+  CONFIRMED // upload vérifié via HeadObject
 }
 
 model StoredFile {
@@ -1347,8 +1369,8 @@ model StoredFile {
   key          String           @unique // clé R2 (jamais une URL présignée)
   bucket       StoredFileBucket
   mimeType     String
-  size         Int                      // taille en octets
-  originalName String                   // conservé pour l'affichage uniquement (jamais dans la clé)
+  size         Int // taille en octets
+  originalName String // conservé pour l'affichage uniquement (jamais dans la clé)
   ownerId      String
   owner        User             @relation("UserStoredFiles", fields: [ownerId], references: [id], onDelete: Cascade)
   status       StoredFileStatus @default(PENDING)
@@ -1381,17 +1403,17 @@ enum NotificationType {
 }
 
 model Notification {
-  id        String           @id @default(uuid())
-  userId    String
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  type      NotificationType
-  titre     String
-  message   String
-  lu        Boolean          @default(false)
-  lien      String?          // URL optionnelle vers laquelle naviguer
+  type    NotificationType
+  titre   String
+  message String
+  lu      Boolean          @default(false)
+  lien    String? // URL optionnelle vers laquelle naviguer
 
-  createdAt DateTime         @default(now())
+  createdAt DateTime @default(now())
 }
 
 // ====== SESSIONS PAR APPAREIL (TB3) ======

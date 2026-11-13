@@ -96,6 +96,9 @@ interface VenteRep {
     motif: string;
     le: Date;
     par: { id: string; nom: string };
+    posteId: string;
+    sessionCaisseId: string;
+    jourMetier: string;
   } | null;
   annuleeLe: string | Date | null;
   annuleeParId: string | null;
@@ -429,6 +432,8 @@ describe('Annulation par pièce inverse et jour métier, sur base de test (PB12)
     expect(data.annulation).toMatchObject({
       numero: 'A-' + origine.numero,
       motif: 'Erreur de quantité',
+      posteId: poste.id,
+      sessionCaisseId: origine.session.id,
       par: { id: VENDEUR },
     });
     expect(data.annulation?.le).toEqual(data.annuleeLe);
@@ -687,6 +692,13 @@ describe('Annulation par pièce inverse et jour métier, sur base de test (PB12)
     const pieces = await piecesDe(ancienne.data.id);
     expect(pieces).toHaveLength(1);
     expect(pieces[0].sessionCaisseId).toBe(sessionR);
+    // D745 : la réponse désigne la caisse et le poste de l'AUTEUR, pas ceux de l'origine.
+    expect(sessionR).not.toBe(ancienne.data.session.id);
+    expect(data.annulation).toMatchObject({
+      sessionCaisseId: sessionR,
+      posteId: pieces[0].posteId,
+      jourMetier: jour(0),
+    });
     expect(pieces[0].jour).toBe(jour(0));
     expect(await theorique(RESPONSABLE, sessionR, 'ESPECES')).toBe(
       thAvant - 1000,
