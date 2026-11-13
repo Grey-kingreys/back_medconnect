@@ -562,10 +562,78 @@ describe('Qualification d une fiche, sur base de test (PB13)', () => {
     expect((await lot(lotId)).coefficientReception).toBe(20);
   });
 
-  it('MULTIPLIER refusé si du stock est hors du lot technique', async () => {
+  it('MULTIPLIER : 230 boîtes reçues par une réception passent à 2 300 unités (10 par boîte), coût par unité divisé', async () => {
+    const { stockId } = await nouvelleFiche({ prixBoite: 1000 });
+    const lotId = await nouveauLot(stockId, { quantite: 230, cout: 5000 });
+
+    const r = await modifier(stockId, {
+      coefficientBoite: 10,
+      uniteMinimale: 'COMPRIME',
+      conversionStock: 'MULTIPLIER',
+    });
+
+    expect(r.data.coefficientBoite).toBe(10);
+    expect(r.data.conversion).toEqual({
+      mode: 'MULTIPLIER',
+      coefficientAvant: 1,
+      coefficientApres: 10,
+      quantiteAvant: 230,
+      quantiteApres: 2300,
+      lots: [{ lotId, quantiteAvant: 230, quantiteApres: 2300 }],
+    });
+    expect(await soldeLot(lotId)).toBe(2300);
+    expect(await soldeProduit(stockId)).toBe(2300);
+    expect(await lot(lotId)).toEqual({
+      coefficientReception: 10,
+      coutUnitaire: 500,
+    });
+    expect(await mouvementsQualification(stockId)).toEqual([
+      expect.objectContaining({
+        type: 'CORRECTION',
+        quantite: 2070,
+        lotId,
+        evenementId: `qualification:${lotId}`,
+      }),
+    ]);
+    const audit = await sql(
+      `SELECT "metadata" FROM "AuditLog" WHERE "action" = 'update' AND "entityType" = 'StockMedicament' AND "entityId" = $1 ORDER BY "createdAt" DESC LIMIT 1`,
+      [stockId],
+    );
+    expect(
+      (audit.rows[0].metadata as { conversion: unknown }).conversion,
+    ).toEqual(r.data.conversion);
+
+    const lecture = (await pharmacie.getStockPharmacie(
+      PHARMACIE,
+      RESPONSABLE,
+    )) as unknown as { data: { stocks: EntreeStock[] } };
+    const entree = lecture.data.stocks.find((x) => x.id === stockId);
+    expect(entree?.quantite).toBe(2300);
+    expect((entree?.quantite ?? 0) / 10).toBe(230);
+  });
+
+  it('CONSERVER : 230 unités reçues restent 230 unités, soit 23 boîtes de 10', async () => {
+    const { stockId } = await nouvelleFiche({ prixBoite: 1000 });
+    const lotId = await nouveauLot(stockId, { quantite: 230, cout: 5000 });
+
+    const r = await modifier(stockId, {
+      coefficientBoite: 10,
+      conversionStock: 'CONSERVER',
+    });
+    expect(r.data.conversion).toMatchObject({
+      mode: 'CONSERVER',
+      quantiteAvant: 230,
+      quantiteApres: 230,
+    });
+    expect(await soldeProduit(stockId)).toBe(230);
+    expect((await lot(lotId)).coefficientReception).toBe(1);
+    expect(230 / 10).toBe(23);
+  });
+
+  it('MULTIPLIER refusé si un lot est déjà converti (coefficient autre que 1)', async () => {
     const a = await nouvelleFiche();
     const technique = await lotTechnique(a.stockId, 12);
-    await nouveauLot(a.stockId, { quantite: 5 });
+    await nouveauLot(a.stockId, { quantite: 5, coef: 5 });
 
     const e = await refus(
       modifier(a.stockId, {

@@ -70,12 +70,30 @@ describe('planifierMultiplication', () => {
     }
   });
 
-  it('lot non technique en stock : refus', () => {
+  it('lot de réception à coefficient 1 : converti (230 boîtes, 10 par boîte, 2300 unités)', () => {
+    const plan = planifierMultiplication(
+      10,
+      [{ pointDeVenteId: 'pv1', quantite: 230 }],
+      [lot({ lotTechnique: false, solde: 230, coutUnitaire: 5000 })],
+    );
+    expect(plan).toMatchObject({
+      ok: true,
+      quantiteAvant: 230,
+      quantiteApres: 2300,
+    });
+    if (plan.ok)
+      expect(plan.lots[0]).toMatchObject({
+        correction: 2070,
+        coutUnitaireApres: 500,
+      });
+  });
+
+  it('lot de réception déjà converti (coefficient 20) : refus', () => {
     expect(
       planifierMultiplication(
-        20,
-        [{ pointDeVenteId: 'pv1', quantite: 5 }],
-        [lot({ lotTechnique: false, solde: 5 })],
+        10,
+        [{ pointDeVenteId: 'pv1', quantite: 240 }],
+        [lot({ lotTechnique: false, coefficientReception: 20, solde: 240 })],
       ),
     ).toEqual({ ok: false, code: 'STOCK_NON_CONVERTIBLE' });
   });
