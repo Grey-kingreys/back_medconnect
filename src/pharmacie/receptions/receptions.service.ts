@@ -40,7 +40,10 @@ import {
   jourVersDate,
   lireLotsCandidats,
 } from '../stock/lecture-stock';
-import { MouvementsStockService } from '../stock/mouvements-stock.service';
+import {
+  MouvementsStockService,
+  type ChampsFactureLot,
+} from '../stock/mouvements-stock.service';
 import {
   lireResolutionsDePiece,
   resoudreProvisoires,
@@ -101,6 +104,8 @@ export interface LigneReceptionAEnregistrer {
   nombreBoites: number | null;
   quantiteUnites: number | null;
   coutAchatBoite: number | null;
+  /** Champs facultatifs de la facture fournisseur. */
+  facture?: ChampsFactureLot;
   /** Mise à jour de la fiche demandée par l'import (prix de la boîte, notes) ; jamais par la route. */
   majFiche?: { prixUnitaire?: number; notes?: string };
 }
@@ -109,7 +114,19 @@ export interface ReceptionAEnregistrer {
   fournisseurId: string | null;
   reference: string | null;
   recueLe: Date;
+  /** Champs facultatifs de l'en-tête de la facture fournisseur. */
+  facture?: EnteteFacture;
   lignes: LigneReceptionAEnregistrer[];
+}
+export interface EnteteFacture {
+  numeroFacture?: string | null;
+  referenceCommande?: string | null;
+  dateFacture?: Date | null;
+  nombrePages?: number | null;
+  montantHT?: number | null;
+  totalTva?: number | null;
+  montantTTC?: number | null;
+  netAPayer?: number | null;
 }
 export interface AvertissementReception {
   code: 'FICHE_NON_QUALIFIEE';
@@ -201,6 +218,11 @@ type ClientLecture = Pick<
   Prisma.TransactionClient,
   'reception' | 'allocationLot' | 'mouvementStock'
 >;
+
+function texteOuNull(valeur: string | undefined): string | null {
+  const v = valeur?.trim();
+  return v ? v : null;
+}
 
 function elementLot(c: LotCandidat, jour: string): ElementLot {
   return {
@@ -471,6 +493,7 @@ export class ReceptionsService {
         reference: entree.reference,
         recueLe: entree.recueLe,
         auteurId: userId,
+        ...(entree.facture ?? {}),
       },
       select: { id: true },
     });
@@ -502,6 +525,7 @@ export class ReceptionsService {
           motif: null,
           evenementId: `reception:${reception.id}:${i}`,
           dateReception: entree.recueLe,
+          facture: ligne.facture,
         },
       );
       lignes.push({
@@ -568,11 +592,28 @@ export class ReceptionsService {
   ) {
     const acces = await this.accesPharmacie.verifier(structureId, userId);
     const peutVoirMarge = await this.peutVoirMarge(userId);
+    if (dto.dateFacture && !jourValide(dto.dateFacture)) {
+      throw new BadRequestException({
+        message: "La date de la facture n'existe pas : vérifiez-la.",
+        code: 'VALIDATION',
+        champs: [{ champ: 'dateFacture', contraintes: ['dateValide'] }],
+      });
+    }
     const entree: ReceptionAEnregistrer = {
       id: dto.id,
       fournisseurId: dto.fournisseurId ?? null,
       reference: dto.reference?.trim() ? dto.reference.trim() : null,
       recueLe: dto.recueLe ? new Date(dto.recueLe) : new Date(),
+      facture: {
+        numeroFacture: texteOuNull(dto.numeroFacture),
+        referenceCommande: texteOuNull(dto.referenceCommande),
+        dateFacture: dto.dateFacture ? jourVersDate(dto.dateFacture) : null,
+        nombrePages: dto.nombrePages ?? null,
+        montantHT: dto.montantHT ?? null,
+        totalTva: dto.totalTva ?? null,
+        montantTTC: dto.montantTTC ?? null,
+        netAPayer: dto.netAPayer ?? null,
+      },
       lignes: dto.lignes.map((l) => ({
         stockId: l.stockId,
         numeroLot: l.numeroLot?.trim() ? l.numeroLot.trim() : null,
@@ -581,6 +622,18 @@ export class ReceptionsService {
         nombreBoites: l.nombreBoites ?? null,
         quantiteUnites: l.quantiteUnites ?? null,
         coutAchatBoite: l.coutAchatBoite ?? null,
+        facture: {
+          codeArticleFournisseur: texteOuNull(l.codeArticleFournisseur),
+          codeBarres: texteOuNull(l.codeBarres),
+          quantiteCommandee: l.quantiteCommandee ?? null,
+          prixPublicBoite: l.prixPublicBoite ?? null,
+          codeTva: texteOuNull(l.codeTva),
+          tauxTvaPourMille: l.tauxTvaPourMille ?? null,
+          montantHTLigne: l.montantHTLigne ?? null,
+          colisage: l.colisage ?? null,
+          tableau: texteOuNull(l.tableau),
+          bonPreparation: texteOuNull(l.bonPreparation),
+        },
       })),
     };
 
@@ -644,9 +697,27 @@ export class ReceptionsService {
         recueLe: true,
         createdAt: true,
         auteurId: true,
+        numeroFacture: true,
+        referenceCommande: true,
+        dateFacture: true,
+        nombrePages: true,
+        montantHT: true,
+        totalTva: true,
+        montantTTC: true,
+        netAPayer: true,
         fournisseur: { select: { id: true, nom: true } },
         lots: {
           select: {
+            codeArticleFournisseur: true,
+            codeBarres: true,
+            quantiteCommandee: true,
+            prixPublicBoite: true,
+            codeTva: true,
+            tauxTvaPourMille: true,
+            montantHTLigne: true,
+            colisage: true,
+            tableau: true,
+            bonPreparation: true,
             id: true,
             stockMedicamentId: true,
             stockMedicament: {
@@ -674,6 +745,16 @@ export class ReceptionsService {
       solde: l.agregat?.quantite ?? 0,
       coutAchatBoite: l.coutAchatBoite,
       coutUnitaire: l.coutUnitaire,
+      codeArticleFournisseur: l.codeArticleFournisseur,
+      codeBarres: l.codeBarres,
+      quantiteCommandee: l.quantiteCommandee,
+      prixPublicBoite: l.prixPublicBoite,
+      codeTva: l.codeTva,
+      tauxTvaPourMille: l.tauxTvaPourMille,
+      montantHTLigne: l.montantHTLigne,
+      colisage: l.colisage,
+      tableau: l.tableau,
+      bonPreparation: l.bonPreparation,
     }));
     lots.sort((a, b) => {
       if (a.nom !== b.nom) return a.nom < b.nom ? -1 : 1;
@@ -696,6 +777,14 @@ export class ReceptionsService {
       recueLe: r.recueLe,
       createdAt: r.createdAt,
       auteurId: r.auteurId,
+      numeroFacture: r.numeroFacture,
+      referenceCommande: r.referenceCommande,
+      dateFacture: r.dateFacture ? dateVersJour(r.dateFacture) : null,
+      nombrePages: r.nombrePages,
+      montantHT: r.montantHT,
+      totalTva: r.totalTva,
+      montantTTC: r.montantTTC,
+      netAPayer: r.netAPayer,
       fournisseur: r.fournisseur,
       lots,
       resolutions,
@@ -704,6 +793,7 @@ export class ReceptionsService {
 
   async lister(structureId: string, userId: string, dto: ListerReceptionsDto) {
     await this.accesPharmacie.verifier(structureId, userId);
+    const peutVoirMarge = await this.peutVoirMarge(userId);
     const page = dto.page ?? 1;
     const pointDeVente = await this.prisma.pointDeVente.findUnique({
       where: { structureId_ordre: { structureId, ordre: 1 } },
@@ -715,6 +805,10 @@ export class ReceptionsService {
       recueLe: Date;
       createdAt: Date;
       auteurId: string;
+      numeroFacture: string | null;
+      dateFacture: string | null;
+      montantTTC: number | null;
+      netAPayer: number | null;
       fournisseur: { id: string; nom: string } | null;
       nombreLots: number;
       quantiteTotale: number;
@@ -733,6 +827,10 @@ export class ReceptionsService {
             recueLe: true,
             createdAt: true,
             auteurId: true,
+            numeroFacture: true,
+            dateFacture: true,
+            montantTTC: true,
+            netAPayer: true,
             fournisseur: { select: { id: true, nom: true } },
             lots: { select: { quantiteRecue: true } },
           },
@@ -748,13 +846,20 @@ export class ReceptionsService {
         recueLe: r.recueLe,
         createdAt: r.createdAt,
         auteurId: r.auteurId,
+        numeroFacture: r.numeroFacture,
+        dateFacture: r.dateFacture ? dateVersJour(r.dateFacture) : null,
+        montantTTC: r.montantTTC,
+        netAPayer: r.netAPayer,
         fournisseur: r.fournisseur,
         nombreLots: r.lots.length,
         quantiteTotale: r.lots.reduce((s, l) => s + l.quantiteRecue, 0),
       }));
     }
     return {
-      data: { receptions, page, parPage: PAR_PAGE, total },
+      data: masquerCouts(
+        { receptions, page, parPage: PAR_PAGE, total },
+        peutVoirMarge,
+      ),
       message: `${total} réception(s)`,
       success: true as const,
     };

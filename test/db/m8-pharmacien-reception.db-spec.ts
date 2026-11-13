@@ -120,7 +120,9 @@ describe('Migration M8, réception pour le rôle Pharmacien (D732)', () => {
   });
 
   it('M8 haut : les rôles Pharmacien des pharmacies reçoivent le droit, rien d autre ne change', async () => {
-    expect(await appliquerMigrations(client(), { apres: M7 })).toEqual([M8]);
+    expect(
+      await appliquerMigrations(client(), { apres: M7, jusqua: M8 }),
+    ).toEqual([M8]);
     const apres = await etatRoles(client());
     for (const id of PHARMACIENS) {
       expect(apres[id]).toEqual([...avant[id], DROIT].sort());
@@ -156,7 +158,9 @@ describe('Migration M8, réception pour le rôle Pharmacien (D732)', () => {
     // Le droit des titulaires, lui, est conservé
     for (const id of TITULAIRES) expect(avant[id]).toContain(DROIT);
 
-    expect(await appliquerMigrations(client(), { apres: M7 })).toEqual([M8]);
+    expect(
+      await appliquerMigrations(client(), { apres: M7, jusqua: M8 }),
+    ).toEqual([M8]);
     for (const id of PHARMACIENS) {
       expect(await codesDuRole(client(), id)).toContain(DROIT);
     }

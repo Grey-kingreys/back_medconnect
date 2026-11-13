@@ -5,6 +5,23 @@
  */
 export const MOTIF_CLE_COUT = /cout|marge/i;
 
+/**
+ * Montants de facture fournisseur : des coûts d'achat dont le nom ne contient
+ * ni « cout » ni « marge ». Masqués comme les autres (liste exacte, sensible à
+ * la casse) ; aucune autre clé ne doit porter ces noms.
+ */
+export const CLES_MONTANT_FACTURE: ReadonlySet<string> = new Set([
+  'montantHT',
+  'montantHTLigne',
+  'totalTva',
+  'montantTTC',
+  'netAPayer',
+]);
+
+function estCleCout(cle: string): boolean {
+  return MOTIF_CLE_COUT.test(cle) || CLES_MONTANT_FACTURE.has(cle);
+}
+
 function estObjetSimple(valeur: unknown): valeur is Record<string, unknown> {
   if (typeof valeur !== 'object' || valeur === null) return false;
   const proto = Object.getPrototypeOf(valeur) as unknown;
@@ -18,7 +35,7 @@ function masquer(valeur: unknown): unknown {
   if (estObjetSimple(valeur)) {
     const resultat: Record<string, unknown> = {};
     for (const cle of Object.keys(valeur)) {
-      if (MOTIF_CLE_COUT.test(cle)) continue;
+      if (estCleCout(cle)) continue;
       resultat[cle] = masquer(valeur[cle]);
     }
     return resultat;
@@ -42,7 +59,7 @@ function collecter(valeur: unknown, chemin: string, sortie: string[]): void {
   if (estObjetSimple(valeur)) {
     for (const cle of Object.keys(valeur)) {
       const sousChemin = chemin === '' ? cle : `${chemin}.${cle}`;
-      if (MOTIF_CLE_COUT.test(cle)) {
+      if (estCleCout(cle)) {
         sortie.push(sousChemin);
       } else {
         collecter(valeur[cle], sousChemin, sortie);

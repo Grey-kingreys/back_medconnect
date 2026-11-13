@@ -236,6 +236,116 @@ describe('Réceptions (HTTP)', () => {
     expect(service.enregistrer).not.toHaveBeenCalled();
   });
 
+  const enteteFacture = {
+    numeroFacture: 'FA-2026-0412',
+    referenceCommande: 'CMD-778',
+    dateFacture: '2026-11-05',
+    nombrePages: 3,
+    montantHT: 95630,
+    totalTva: 17213,
+    montantTTC: 112843,
+    netAPayer: 112843,
+  };
+  const ligneFacture = {
+    codeArticleFournisseur: 'UBI-00123',
+    codeBarres: '3400930000012',
+    quantiteCommandee: 12,
+    prixPublicBoite: 4500,
+    codeTva: 'A',
+    tauxTvaPourMille: 180,
+    montantHTLigne: 40000,
+    colisage: 10,
+    tableau: 'Liste I',
+    bonPreparation: 'BP-55',
+  };
+
+  it('une réception sans aucun champ de facture reste acceptée', async () => {
+    const res = await request(serveur())
+      .post('/pharmacie/s1/receptions')
+      .set('x-essai-user', 'titulaire')
+      .send({ lignes: [ligneValide] });
+    expect(res.status).toBe(200);
+    expect(service.enregistrer).toHaveBeenCalledTimes(1);
+  });
+
+  it('tous les champs de facture sont transmis au service', async () => {
+    const res = await request(serveur())
+      .post('/pharmacie/s1/receptions')
+      .set('x-essai-user', 'titulaire')
+      .send({
+        ...enteteFacture,
+        lignes: [{ ...ligneValide, ...ligneFacture }],
+      });
+    expect(res.status).toBe(200);
+    expect(service.enregistrer).toHaveBeenCalledWith(
+      's1',
+      'titulaire',
+      expect.objectContaining({
+        ...enteteFacture,
+        lignes: [expect.objectContaining(ligneFacture)],
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('valeurs négatives ou trop longues refusées sur les champs de facture', async () => {
+    const entiersEntete = [
+      'nombrePages',
+      'montantHT',
+      'totalTva',
+      'montantTTC',
+      'netAPayer',
+    ];
+    const entiersLigne = [
+      'quantiteCommandee',
+      'prixPublicBoite',
+      'tauxTvaPourMille',
+      'montantHTLigne',
+      'colisage',
+    ];
+    const cas: [Record<string, unknown>, string, string][] = [
+      ...entiersEntete.map((n): [Record<string, unknown>, string, string] => [
+        { [n]: -1, lignes: [ligneValide] },
+        n,
+        'min',
+      ]),
+      ...entiersLigne.map((n): [Record<string, unknown>, string, string] => [
+        { lignes: [{ ...ligneValide, [n]: -1 }] },
+        `lignes.0.${n}`,
+        'min',
+      ]),
+      [{ montantHT: 1.5, lignes: [ligneValide] }, 'montantHT', 'isInt'],
+      [
+        { numeroFacture: 'x'.repeat(65), lignes: [ligneValide] },
+        'numeroFacture',
+        'maxLength',
+      ],
+      [
+        { dateFacture: '05/11/2026', lignes: [ligneValide] },
+        'dateFacture',
+        'matches',
+      ],
+      [
+        { lignes: [{ ...ligneValide, tableau: 'x'.repeat(21) }] },
+        'lignes.0.tableau',
+        'maxLength',
+      ],
+    ];
+    for (const [corps, champ, contrainte] of cas) {
+      const res = await request(serveur())
+        .post('/pharmacie/s1/receptions')
+        .set('x-essai-user', 'titulaire')
+        .send(corps);
+      const body = res.body as CorpsErreur;
+      expect(res.status).toBe(400);
+      expect(body.champs).toContainEqual({
+        champ,
+        contraintes: expect.arrayContaining([contrainte]) as string[],
+      });
+    }
+    expect(service.enregistrer).not.toHaveBeenCalled();
+  });
+
   it('validation du fournisseur', async () => {
     const cas: [Record<string, unknown>, string, string][] = [
       [{ nom: 'A' }, 'nom', 'isLength'],
