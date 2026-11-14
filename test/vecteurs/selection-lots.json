@@ -1,0 +1,259 @@
+{
+  "version": 1,
+  "description": "Vecteurs de la sélection de lots (reliquat puis FEFO, D473). Source unique : back_medconnect/test/vecteurs/selection-lots.json, copiée à l'identique dans le front (PF01). Soldes et quantités en unités minimales ; dates de péremption AAAA-MM-JJ ; jour = jour courant à Conakry. attendu.allocations : lotId et quantite dans l'ordre de première prise ; attendu.lotsPerimesDisponibles : identifiants dans l'ordre FEFO.",
+  "cas": [
+    {
+      "nom": "V01 CA5 : ouverture d'une plaquette de 20 pour 6 unités",
+      "entree": {
+        "jour": "2026-11-01", "unite": "UNITE", "quantiteUm": 6,
+        "lots": [
+          { "id": "L1", "numeroLot": "A123", "dateExpiration": "2027-06-30", "dateReception": "2026-10-01T08:00:00.000Z", "solde": 40, "coefficientReception": 20, "coutUnitaire": 250, "lotTechnique": false }
+        ]
+      },
+      "attendu": { "allocations": [{ "lotId": "L1", "quantite": 6 }], "resteProvisoire": 0, "lotsPerimesDisponibles": [] }
+    },
+    {
+      "nom": "V02 CA7 : le reliquat du lot B sort avant le lot A qui périme plus tôt",
+      "entree": {
+        "jour": "2026-11-01", "unite": "UNITE", "quantiteUm": 4,
+        "lots": [
+          { "id": "A", "numeroLot": "A-01", "dateExpiration": "2027-03-31", "dateReception": "2026-10-01T08:00:00.000Z", "solde": 20, "coefficientReception": 20, "coutUnitaire": 280, "lotTechnique": false },
+          { "id": "B", "numeroLot": "B-02", "dateExpiration": "2027-09-30", "dateReception": "2026-09-01T08:00:00.000Z", "solde": 26, "coefficientReception": 20, "coutUnitaire": 300, "lotTechnique": false }
+        ]
+      },
+      "attendu": { "allocations": [{ "lotId": "B", "quantite": 4 }], "resteProvisoire": 0, "lotsPerimesDisponibles": [] }
+    },
+    {
+      "nom": "V03 CA7 : reliquat du lot B épuisé exactement",
+      "entree": {
+        "jour": "2026-11-01", "unite": "UNITE", "quantiteUm": 6,
+        "lots": [
+          { "id": "A", "numeroLot": "A-01", "dateExpiration": "2027-03-31", "dateReception": "2026-10-01T08:00:00.000Z", "solde": 20, "coefficientReception": 20, "coutUnitaire": 280, "lotTechnique": false },
+          { "id": "B", "numeroLot": "B-02", "dateExpiration": "2027-09-30", "dateReception": "2026-09-01T08:00:00.000Z", "solde": 26, "coefficientReception": 20, "coutUnitaire": 300, "lotTechnique": false }
+        ]
+      },
+      "attendu": { "allocations": [{ "lotId": "B", "quantite": 6 }], "resteProvisoire": 0, "lotsPerimesDisponibles": [] }
+    },
+    {
+      "nom": "V04 CA7 : le lot A prend la main à l'ouverture suivante",
+      "entree": {
+        "jour": "2026-11-01", "unite": "UNITE", "quantiteUm": 10,
+        "lots": [
+          { "id": "A", "numeroLot": "A-01", "dateExpiration": "2027-03-31", "dateReception": "2026-10-01T08:00:00.000Z", "solde": 20, "coefficientReception": 20, "coutUnitaire": 280, "lotTechnique": false },
+          { "id": "B", "numeroLot": "B-02", "dateExpiration": "2027-09-30", "dateReception": "2026-09-01T08:00:00.000Z", "solde": 26, "coefficientReception": 20, "coutUnitaire": 300, "lotTechnique": false }
+        ]
+      },
+      "attendu": { "allocations": [{ "lotId": "B", "quantite": 6 }, { "lotId": "A", "quantite": 4 }], "resteProvisoire": 0, "lotsPerimesDisponibles": [] }
+    },
+    {
+      "nom": "V05 CA9 : deux allocations, le lot à 30 jours vidé d'abord",
+      "entree": {
+        "jour": "2026-11-01", "unite": "UNITE", "quantiteUm": 30,
+        "lots": [
+          { "id": "L90", "numeroLot": "N-90", "dateExpiration": "2027-01-30", "dateReception": "2026-09-15T08:00:00.000Z", "solde": 50, "coefficientReception": 10, "coutUnitaire": 120, "lotTechnique": false },
+          { "id": "L30", "numeroLot": "N-30", "dateExpiration": "2026-12-01", "dateReception": "2026-10-15T08:00:00.000Z", "solde": 20, "coefficientReception": 10, "coutUnitaire": 100, "lotTechnique": false }
+        ]
+      },
+      "attendu": { "allocations": [{ "lotId": "L30", "quantite": 20 }, { "lotId": "L90", "quantite": 10 }], "resteProvisoire": 0, "lotsPerimesDisponibles": [] }
+    },
+    {
+      "nom": "V06 CA10 : un lot sans date sort avant un lot daté",
+      "entree": {
+        "jour": "2026-11-01", "unite": "UNITE", "quantiteUm": 5,
+        "lots": [
+          { "id": "DATE", "numeroLot": "D-15", "dateExpiration": "2026-11-15", "dateReception": "2026-09-01T08:00:00.000Z", "solde": 10, "coefficientReception": 1, "coutUnitaire": 90, "lotTechnique": false },
+          { "id": "TECH", "numeroLot": null, "dateExpiration": null, "dateReception": "2026-10-25T00:00:00.000Z", "solde": 10, "coefficientReception": 1, "coutUnitaire": 0, "lotTechnique": true }
+        ]
+      },
+      "attendu": { "allocations": [{ "lotId": "TECH", "quantite": 5 }], "resteProvisoire": 0, "lotsPerimesDisponibles": [] }
+    },
+    {
+      "nom": "V07 CA10 : le lot sans date est vidé puis le lot daté complète",
+      "entree": {
+        "jour": "2026-11-01", "unite": "UNITE", "quantiteUm": 12,
+        "lots": [
+          { "id": "DATE", "numeroLot": "D-15", "dateExpiration": "2026-11-15", "dateReception": "2026-09-01T08:00:00.000Z", "solde": 10, "coefficientReception": 1, "coutUnitaire": 90, "lotTechnique": false },
+          { "id": "TECH", "numeroLot": null, "dateExpiration": null, "dateReception": "2026-10-25T00:00:00.000Z", "solde": 10, "coefficientReception": 1, "coutUnitaire": 0, "lotTechnique": true }
+        ]
+      },
+      "attendu": { "allocations": [{ "lotId": "TECH", "quantite": 10 }, { "lotId": "DATE", "quantite": 2 }], "resteProvisoire": 0, "lotsPerimesDisponibles": [] }
+    },
+    {
+      "nom": "V08 Égalité de péremption : le lot reçu le plus tôt sort d'abord",
+      "entree": {
+        "jour": "2026-11-01", "unite": "UNITE", "quantiteUm": 3,
+        "lots": [
+          { "id": "R2", "numeroLot": "R-2", "dateExpiration": "2027-01-31", "dateReception": "2026-10-05T08:00:00.000Z", "solde": 10, "coefficientReception": 1, "coutUnitaire": 100, "lotTechnique": false },
+          { "id": "R1", "numeroLot": "R-1", "dateExpiration": "2027-01-31", "dateReception": "2026-09-05T08:00:00.000Z", "solde": 10, "coefficientReception": 1, "coutUnitaire": 110, "lotTechnique": false }
+        ]
+      },
+      "attendu": { "allocations": [{ "lotId": "R1", "quantite": 3 }], "resteProvisoire": 0, "lotsPerimesDisponibles": [] }
+    },
+    {
+      "nom": "V09 Égalité de péremption et de réception : le plus petit identifiant d'abord",
+      "entree": {
+        "jour": "2026-11-01", "unite": "UNITE", "quantiteUm": 3,
+        "lots": [
+          { "id": "L-B", "numeroLot": "X-B", "dateExpiration": "2027-01-31", "dateReception": "2026-09-05T08:00:00.000Z", "solde": 10, "coefficientReception": 1, "coutUnitaire": 100, "lotTechnique": false },
+          { "id": "L-A", "numeroLot": "X-A", "dateExpiration": "2027-01-31", "dateReception": "2026-09-05T08:00:00.000Z", "solde": 10, "coefficientReception": 1, "coutUnitaire": 100, "lotTechnique": false }
+        ]
+      },
+      "attendu": { "allocations": [{ "lotId": "L-A", "quantite": 3 }], "resteProvisoire": 0, "lotsPerimesDisponibles": [] }
+    },
+    {
+      "nom": "V10 CA13 : un lot périmé n'est jamais pris automatiquement",
+      "entree": {
+        "jour": "2026-11-01", "unite": "UNITE", "quantiteUm": 5,
+        "lots": [
+          { "id": "PER", "numeroLot": "P-31", "dateExpiration": "2026-10-31", "dateReception": "2026-05-01T08:00:00.000Z", "solde": 50, "coefficientReception": 1, "coutUnitaire": 80, "lotTechnique": false },
+          { "id": "OK", "numeroLot": "O-31", "dateExpiration": "2027-01-31", "dateReception": "2026-10-01T08:00:00.000Z", "solde": 10, "coefficientReception": 1, "coutUnitaire": 90, "lotTechnique": false }
+        ]
+      },
+      "attendu": { "allocations": [{ "lotId": "OK", "quantite": 5 }], "resteProvisoire": 0, "lotsPerimesDisponibles": [] }
+    },
+    {
+      "nom": "V11 Un lot qui périme aujourd'hui reste vendable",
+      "entree": {
+        "jour": "2026-11-01", "unite": "UNITE", "quantiteUm": 2,
+        "lots": [
+          { "id": "J", "numeroLot": "J-0", "dateExpiration": "2026-11-01", "dateReception": "2026-08-01T08:00:00.000Z", "solde": 5, "coefficientReception": 1, "coutUnitaire": 70, "lotTechnique": false }
+        ]
+      },
+      "attendu": { "allocations": [{ "lotId": "J", "quantite": 2 }], "resteProvisoire": 0, "lotsPerimesDisponibles": [] }
+    },
+    {
+      "nom": "V12 CA13 : seuls des lots périmés, reste provisoire et périmés listés",
+      "entree": {
+        "jour": "2026-11-01", "unite": "UNITE", "quantiteUm": 3,
+        "lots": [
+          { "id": "P1", "numeroLot": "P-15", "dateExpiration": "2026-10-15", "dateReception": "2026-04-01T08:00:00.000Z", "solde": 8, "coefficientReception": 1, "coutUnitaire": 70, "lotTechnique": false },
+          { "id": "P2", "numeroLot": "P-30", "dateExpiration": "2026-09-30", "dateReception": "2026-05-01T08:00:00.000Z", "solde": 4, "coefficientReception": 1, "coutUnitaire": 75, "lotTechnique": false }
+        ]
+      },
+      "attendu": { "allocations": [], "resteProvisoire": 3, "lotsPerimesDisponibles": ["P2", "P1"] }
+    },
+    {
+      "nom": "V13 Aucun lot : toute la quantité est provisoire",
+      "entree": { "jour": "2026-11-01", "unite": "UNITE", "quantiteUm": 4, "lots": [] },
+      "attendu": { "allocations": [], "resteProvisoire": 4, "lotsPerimesDisponibles": [] }
+    },
+    {
+      "nom": "V14 Stock insuffisant : lot vidé puis reste provisoire",
+      "entree": {
+        "jour": "2026-11-01", "unite": "UNITE", "quantiteUm": 5,
+        "lots": [
+          { "id": "S", "numeroLot": "S-1", "dateExpiration": "2027-02-28", "dateReception": "2026-10-01T08:00:00.000Z", "solde": 3, "coefficientReception": 1, "coutUnitaire": 95, "lotTechnique": false }
+        ]
+      },
+      "attendu": { "allocations": [{ "lotId": "S", "quantite": 3 }], "resteProvisoire": 2, "lotsPerimesDisponibles": [] }
+    },
+    {
+      "nom": "V15 Le reliquat d'un lot périmé est ignoré",
+      "entree": {
+        "jour": "2026-11-01", "unite": "UNITE", "quantiteUm": 3,
+        "lots": [
+          { "id": "PR", "numeroLot": "P-20", "dateExpiration": "2026-10-20", "dateReception": "2026-03-01T08:00:00.000Z", "solde": 15, "coefficientReception": 10, "coutUnitaire": 60, "lotTechnique": false },
+          { "id": "VA", "numeroLot": "V-28", "dateExpiration": "2027-02-28", "dateReception": "2026-10-01T08:00:00.000Z", "solde": 20, "coefficientReception": 10, "coutUnitaire": 65, "lotTechnique": false }
+        ]
+      },
+      "attendu": { "allocations": [{ "lotId": "VA", "quantite": 3 }], "resteProvisoire": 0, "lotsPerimesDisponibles": [] }
+    },
+    {
+      "nom": "V16 Plusieurs reliquats : sortis dans l'ordre FEFO avant toute ouverture",
+      "entree": {
+        "jour": "2026-11-01", "unite": "UNITE", "quantiteUm": 9,
+        "lots": [
+          { "id": "R1", "numeroLot": "R-05", "dateExpiration": "2027-05-31", "dateReception": "2026-08-01T08:00:00.000Z", "solde": 13, "coefficientReception": 10, "coutUnitaire": 50, "lotTechnique": false },
+          { "id": "R2", "numeroLot": "R-02", "dateExpiration": "2027-02-28", "dateReception": "2026-08-15T08:00:00.000Z", "solde": 24, "coefficientReception": 10, "coutUnitaire": 55, "lotTechnique": false },
+          { "id": "I", "numeroLot": "I-12", "dateExpiration": "2026-12-31", "dateReception": "2026-10-01T08:00:00.000Z", "solde": 10, "coefficientReception": 10, "coutUnitaire": 60, "lotTechnique": false }
+        ]
+      },
+      "attendu": { "allocations": [{ "lotId": "R2", "quantite": 4 }, { "lotId": "R1", "quantite": 3 }, { "lotId": "I", "quantite": 2 }], "resteProvisoire": 0, "lotsPerimesDisponibles": [] }
+    },
+    {
+      "nom": "V17 Un même lot pris au reliquat puis à l'ouverture : une seule allocation",
+      "entree": {
+        "jour": "2026-11-01", "unite": "UNITE", "quantiteUm": 15,
+        "lots": [
+          { "id": "B", "numeroLot": "B-02", "dateExpiration": "2027-09-30", "dateReception": "2026-09-01T08:00:00.000Z", "solde": 26, "coefficientReception": 20, "coutUnitaire": 300, "lotTechnique": false },
+          { "id": "A", "numeroLot": "A-01", "dateExpiration": "2027-03-31", "dateReception": "2026-10-01T08:00:00.000Z", "solde": 5, "coefficientReception": 1, "coutUnitaire": 280, "lotTechnique": false }
+        ]
+      },
+      "attendu": { "allocations": [{ "lotId": "B", "quantite": 10 }, { "lotId": "A", "quantite": 5 }], "resteProvisoire": 0, "lotsPerimesDisponibles": [] }
+    },
+    {
+      "nom": "V18 Un lot à solde nul est ignoré",
+      "entree": {
+        "jour": "2026-11-01", "unite": "UNITE", "quantiteUm": 2,
+        "lots": [
+          { "id": "Z", "numeroLot": "Z-0", "dateExpiration": "2026-11-10", "dateReception": "2026-07-01T08:00:00.000Z", "solde": 0, "coefficientReception": 1, "coutUnitaire": 80, "lotTechnique": false },
+          { "id": "L", "numeroLot": "L-1", "dateExpiration": "2027-01-01", "dateReception": "2026-10-01T08:00:00.000Z", "solde": 5, "coefficientReception": 1, "coutUnitaire": 85, "lotTechnique": false }
+        ]
+      },
+      "attendu": { "allocations": [{ "lotId": "L", "quantite": 2 }], "resteProvisoire": 0, "lotsPerimesDisponibles": [] }
+    },
+    {
+      "nom": "V19 Vente par boîte : boîte intacte du lot FEFO, le reliquat du lot B est laissé",
+      "entree": {
+        "jour": "2026-11-01", "unite": "BOITE", "quantiteUm": 20,
+        "lots": [
+          { "id": "A", "numeroLot": "A-01", "dateExpiration": "2027-03-31", "dateReception": "2026-10-01T08:00:00.000Z", "solde": 40, "coefficientReception": 20, "coutUnitaire": 280, "lotTechnique": false },
+          { "id": "B", "numeroLot": "B-02", "dateExpiration": "2027-09-30", "dateReception": "2026-09-01T08:00:00.000Z", "solde": 26, "coefficientReception": 20, "coutUnitaire": 300, "lotTechnique": false }
+        ]
+      },
+      "attendu": { "allocations": [{ "lotId": "A", "quantite": 20 }], "resteProvisoire": 0, "lotsPerimesDisponibles": [] }
+    },
+    {
+      "nom": "V20 Vente par boîte : prise sur les boîtes intactes sans entamer le reliquat",
+      "entree": {
+        "jour": "2026-11-01", "unite": "BOITE", "quantiteUm": 20,
+        "lots": [
+          { "id": "B", "numeroLot": "B-02", "dateExpiration": "2027-09-30", "dateReception": "2026-09-01T08:00:00.000Z", "solde": 46, "coefficientReception": 20, "coutUnitaire": 300, "lotTechnique": false }
+        ]
+      },
+      "attendu": { "allocations": [{ "lotId": "B", "quantite": 20 }], "resteProvisoire": 0, "lotsPerimesDisponibles": [] }
+    },
+    {
+      "nom": "V21 Vente par boîte : boîtes intactes insuffisantes, reliquats puis provisoire",
+      "entree": {
+        "jour": "2026-11-01", "unite": "BOITE", "quantiteUm": 40,
+        "lots": [
+          { "id": "B", "numeroLot": "B-02", "dateExpiration": "2027-09-30", "dateReception": "2026-09-01T08:00:00.000Z", "solde": 26, "coefficientReception": 20, "coutUnitaire": 300, "lotTechnique": false },
+          { "id": "C", "numeroLot": "C-01", "dateExpiration": "2027-01-31", "dateReception": "2026-09-20T08:00:00.000Z", "solde": 8, "coefficientReception": 20, "coutUnitaire": 310, "lotTechnique": false }
+        ]
+      },
+      "attendu": { "allocations": [{ "lotId": "B", "quantite": 26 }, { "lotId": "C", "quantite": 8 }], "resteProvisoire": 6, "lotsPerimesDisponibles": [] }
+    },
+    {
+      "nom": "V22 Vente par boîte sur plusieurs lots",
+      "entree": {
+        "jour": "2026-11-01", "unite": "BOITE", "quantiteUm": 30,
+        "lots": [
+          { "id": "B", "numeroLot": "B-06", "dateExpiration": "2027-06-30", "dateReception": "2026-10-10T08:00:00.000Z", "solde": 30, "coefficientReception": 10, "coutUnitaire": 105, "lotTechnique": false },
+          { "id": "A", "numeroLot": "A-12", "dateExpiration": "2026-12-31", "dateReception": "2026-10-01T08:00:00.000Z", "solde": 20, "coefficientReception": 10, "coutUnitaire": 100, "lotTechnique": false }
+        ]
+      },
+      "attendu": { "allocations": [{ "lotId": "A", "quantite": 20 }, { "lotId": "B", "quantite": 10 }], "resteProvisoire": 0, "lotsPerimesDisponibles": [] }
+    },
+    {
+      "nom": "V23 Vente par boîte : seul un lot périmé, reste provisoire",
+      "entree": {
+        "jour": "2026-11-01", "unite": "BOITE", "quantiteUm": 10,
+        "lots": [
+          { "id": "P", "numeroLot": "P-01", "dateExpiration": "2026-10-01", "dateReception": "2026-01-10T08:00:00.000Z", "solde": 20, "coefficientReception": 10, "coutUnitaire": 90, "lotTechnique": false }
+        ]
+      },
+      "attendu": { "allocations": [], "resteProvisoire": 10, "lotsPerimesDisponibles": ["P"] }
+    },
+    {
+      "nom": "V24 Lot technique repris à coefficient 1 vendu par boîte de la fiche",
+      "entree": {
+        "jour": "2026-11-01", "unite": "BOITE", "quantiteUm": 20,
+        "lots": [
+          { "id": "TECH", "numeroLot": null, "dateExpiration": null, "dateReception": "2026-10-25T00:00:00.000Z", "solde": 30, "coefficientReception": 1, "coutUnitaire": 0, "lotTechnique": true }
+        ]
+      },
+      "attendu": { "allocations": [{ "lotId": "TECH", "quantite": 20 }], "resteProvisoire": 0, "lotsPerimesDisponibles": [] }
+    }
+  ]
+}

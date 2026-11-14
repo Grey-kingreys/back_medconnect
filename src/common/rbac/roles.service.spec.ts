@@ -1,8 +1,21 @@
 import { RolesService } from './roles.service';
 import {
+  ALL_PERMISSION_CODES,
   DEFAULT_STRUCTURE_ROLES,
+  DELEGABLE_PERMISSION_CODES,
+  PERMISSION_CATALOG,
   PERMISSIONS_GARANTIES_ADMIN_PHARMACIE,
 } from './permissions.constants';
+
+const PERMISSIONS_T1 = [
+  'caisse:utiliser',
+  'caisse:superviser',
+  'cloture:gerer',
+  'inventaire:write',
+  'reception:write',
+  'marge:read',
+  'anomalie:gerer',
+];
 
 /**
  * Rôle « Administrateur de structure » d'une pharmacie : stock et ventes garantis,
@@ -43,11 +56,11 @@ describe('RolesService (administrateur de pharmacie)', () => {
     service = new RolesService(prisma as never, permissions as never);
   });
 
-  it('1. définitions : l’admin d’une pharmacie a stock:read, stock:write et les trois vente:*', () => {
+  it('1. définitions : l’admin d’une pharmacie a stock, ventes et les 7 permissions T1', () => {
     const admin = DEFAULT_STRUCTURE_ROLES.PHARMACIE.find(
       (def) => def.legacyRole === 'STRUCTURE_ADMIN',
     );
-    expect(PERMISSIONS_GARANTIES_ADMIN_PHARMACIE).toHaveLength(5);
+    expect(PERMISSIONS_GARANTIES_ADMIN_PHARMACIE).toHaveLength(14);
     for (const code of PERMISSIONS_GARANTIES_ADMIN_PHARMACIE) {
       expect(admin?.permissions).toContain(code);
     }
@@ -60,6 +73,7 @@ describe('RolesService (administrateur de pharmacie)', () => {
       'vente:read',
       'vente:write',
       'vente:annuler',
+      ...PERMISSIONS_T1,
     ];
     for (const type of ['HOPITAL', 'CLINIQUE']) {
       for (const role of DEFAULT_STRUCTURE_ROLES[type]) {
@@ -90,7 +104,7 @@ describe('RolesService (administrateur de pharmacie)', () => {
         skipDuplicates: boolean;
       };
       expect(appel.skipDuplicates).toBe(true);
-      expect(appel.data).toHaveLength(5);
+      expect(appel.data).toHaveLength(14);
       expect(appel.data.every((l) => l.appRoleId === id)).toBe(true);
     }
     expect(permissions.invalidateRole).toHaveBeenCalledTimes(1);
@@ -143,5 +157,34 @@ describe('RolesService (administrateur de pharmacie)', () => {
       }),
     );
     expect(permissions.invalidateRole).toHaveBeenCalledWith('r1');
+  });
+
+  it('7. définitions : le pharmacien a caisse:utiliser et reception:write (D732) et aucune autre permission T1', () => {
+    const pharmacien = DEFAULT_STRUCTURE_ROLES.PHARMACIE.find(
+      (def) => def.legacyRole === 'PHARMACIEN',
+    );
+    const codes = pharmacien?.permissions as string[];
+    expect(codes).toContain('caisse:utiliser');
+    expect(codes).toContain('reception:write');
+    for (const code of PERMISSIONS_T1.filter(
+      (c) => c !== 'caisse:utiliser' && c !== 'reception:write',
+    )) {
+      expect(codes).not.toContain(code);
+    }
+    for (const code of PERMISSIONS_T1) {
+      expect(PERMISSIONS_GARANTIES_ADMIN_PHARMACIE).toContain(code);
+    }
+  });
+
+  it('8. catalogue : les 7 permissions T1 existent, catégorie Pharmacie, délégables', () => {
+    for (const code of PERMISSIONS_T1) {
+      const entree = PERMISSION_CATALOG.find((p) => p.code === code);
+      expect(entree?.categorie).toBe('Pharmacie');
+      expect(entree?.libelle.length).toBeGreaterThan(0);
+      expect(DELEGABLE_PERMISSION_CODES as string[]).toContain(code);
+    }
+    expect(ALL_PERMISSION_CODES.indexOf('caisse:utiliser')).toBe(
+      ALL_PERMISSION_CODES.indexOf('vente:annuler') + 1,
+    );
   });
 });

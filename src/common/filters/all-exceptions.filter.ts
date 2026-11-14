@@ -23,6 +23,8 @@ export const MESSAGES = {
   referenceAbsente:
     "Cette opération fait référence à une information qui n'existe pas.",
   tropVolumineux: 'Le document envoyé est trop volumineux.',
+  formatNonPrisEnCharge:
+    "Le format de la demande n'est pas pris en charge. Mettez l'application à jour puis réessayez.",
   tropDeTentatives:
     'Trop de tentatives en peu de temps. Patientez une minute puis réessayez.',
   indisponible:
@@ -39,6 +41,7 @@ const LIBELLES: Record<number, string> = {
   404: 'Introuvable',
   409: 'Déjà existant',
   413: 'Document trop volumineux',
+  415: 'Format non pris en charge',
   426: 'Mise à jour requise',
   429: 'Trop de tentatives',
   500: 'Erreur interne',
@@ -55,7 +58,36 @@ const CODES_AVEC_DETAILS: ReadonlySet<CodeErreur> = new Set<CodeErreur>([
   'PRIX_MANQUANT',
   'ORDONNANCE_NON_CONFIRMEE',
   'STOCK_INTROUVABLE',
+  'VENTE_UNITE_INTERDITE',
+  'PRIX_UNITE_MANQUANT',
+  'SORTIE_MANUELLE_REQUISE',
+  'FICHE_MODIFIEE',
+  'DATE_PEREMPTION_REQUISE',
+  'DATE_PEREMPTION_PASSEE',
+  'LOT_REQUIS',
+  'CLOTURE_INCOMPLETE',
+  'CAISSES_A_FERMER',
 ]);
+
+// Clés chaînes recopiées pour les postes d'une clôture (CLOTURE_INCOMPLETE, CAISSES_A_FERMER).
+const CLES_POSTE_CLOTURE = [
+  'posteId',
+  'posteCode',
+  'libelle',
+  'type',
+  'raison',
+  'sessionId',
+  'utilisateurNom',
+  'dernierContactLe',
+  'message',
+] as const;
+
+interface LotDetail {
+  lotId: string;
+  numeroLot: string | null;
+  dateExpiration: string | null;
+  quantite: number;
+}
 
 // Messages anglais par défaut de Nest et d'Express (libellés HTTP standard).
 const MESSAGES_PAR_DEFAUT = new Set(
@@ -178,6 +210,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
     if ((exception as { status?: unknown } | null)?.status === 413) {
       return corps(HttpStatus.PAYLOAD_TOO_LARGE, MESSAGES.tropVolumineux);
     }
+    // Corps compressé (ou encodage inconnu) refusé par body-parser : seule la route de
+    // synchro du desktop accepte gzip (D663).
+    if ((exception as { status?: unknown } | null)?.status === 415) {
+      return corps(
+        HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+        MESSAGES.formatNonPrisEnCharge,
+      );
+    }
 
     return this.erreurInterne(exception, request);
   }
@@ -266,17 +306,46 @@ function assainirChamps(brut: unknown[]): ChampFautif[] {
 }
 
 // Garde au plus 50 lignes et, par ligne, seulement stockId, nom, disponible et demande (bon type).
-function assainirDetails(brut: unknown[]): Record<string, string | number>[] {
-  const resultat: Record<string, string | number>[] = [];
+function assainirDetails(
+  brut: unknown[],
+): Record<string, string | number | LotDetail[]>[] {
+  const resultat: Record<string, string | number | LotDetail[]>[] = [];
   for (const element of brut.slice(0, 50)) {
     if (typeof element !== 'object' || element === null) continue;
     const source = element as Record<string, unknown>;
-    const ligne: Record<string, string | number> = {};
+    const ligne: Record<string, string | number | LotDetail[]> = {};
     if (typeof source.stockId === 'string') ligne.stockId = source.stockId;
     if (typeof source.nom === 'string') ligne.nom = source.nom;
     if (typeof source.disponible === 'number')
       ligne.disponible = source.disponible;
     if (typeof source.demande === 'number') ligne.demande = source.demande;
+    if (typeof source.unite === 'string') ligne.unite = source.unite;
+    if (typeof source.disponibleUm === 'number')
+      ligne.disponibleUm = source.disponibleUm;
+    for (const cle of CLES_POSTE_CLOTURE) {
+      const valeur = source[cle];
+      if (typeof valeur === 'string') ligne[cle] = valeur;
+    }
+    if (Array.isArray(source.lots)) {
+      const lots: LotDetail[] = [];
+      for (const lot of (source.lots as unknown[]).slice(0, 50)) {
+        if (typeof lot !== 'object' || lot === null) continue;
+        const l = lot as Record<string, unknown>;
+        if (
+          typeof l.lotId !== 'string' ||
+          (typeof l.dateExpiration !== 'string' && l.dateExpiration !== null) ||
+          typeof l.quantite !== 'number'
+        )
+          continue;
+        lots.push({
+          lotId: l.lotId,
+          numeroLot: typeof l.numeroLot === 'string' ? l.numeroLot : null,
+          dateExpiration: l.dateExpiration,
+          quantite: l.quantite,
+        });
+      }
+      ligne.lots = lots;
+    }
     resultat.push(ligne);
   }
   return resultat;

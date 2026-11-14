@@ -1,26 +1,33 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Workbook } from 'exceljs';
-import { PharmacieService, MIME_XLSX } from './pharmacie.service';
+import {
+  PharmacieService,
+  MIME_XLSX,
+  MESSAGE_IMPORT_INVENTAIRE_INTERDIT,
+  MESSAGE_IMPORT_LIVRAISON_INTERDIT,
+} from './pharmacie.service';
+import type { InventairesService } from './inventaires/inventaires.service';
 import { FichierImport } from './dto/pharmacie.dto';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { NotificationsService } from 'src/notifications/notifications.service';
-
-/** Forme minimale d'un appel à stockMedicament.upsert observé par les tests. */
-type OperationUpsert = {
-  where: { medicamentId_structureId: { medicamentId: string } };
-  create: Record<string, unknown>;
-  update: Record<string, unknown>;
-};
+import { AccesPharmacieService } from './acces-pharmacie.service';
+import { MouvementsStockService } from './stock/mouvements-stock.service';
+import type { PermissionsService } from 'src/common/rbac/permissions.service';
+import type { ReceptionsService } from './receptions/receptions.service';
+import { jourConakry } from './jour-metier';
+import { cheminsCout } from './masquer-couts';
 
 type FonctionTransaction = (tx: unknown) => Promise<unknown>;
 
 /**
- * Tests de l'import Excel du stock (aperçu et import) : classeur construit en
- * mémoire avec exceljs, Prisma et les notifications simulés (aucune infra).
+ * Tests de l'import Excel du stock (aperçu et import en mode livraison) :
+ * classeur construit en mémoire avec exceljs, Prisma et les notifications
+ * simulés (aucune infra).
  */
 describe('PharmacieService, import Excel du stock', () => {
   const STRUCTURE_ID = 'structure-1';
   const USER_ID = 'pharmacien-1';
+  const DATE = '2027-12-31';
   const ENTETES = [
     'Médicament',
     'Quantité',
@@ -28,15 +35,35 @@ describe('PharmacieService, import Excel du stock', () => {
     "Date d'expiration (AAAA-MM-JJ)",
     'Notes',
   ];
+  const TITRES_MODELE = [
+    'Médicament',
+    'Quantité (boîtes)',
+    'Prix de la boîte (GNF)',
+    "Date d'expiration (AAAA-MM-JJ)",
+    'Lot',
+    "Coût d'achat de la boîte (GNF)",
+    'Notes',
+  ];
+  const ENTETES_INVENTAIRE = [
+    'Médicament',
+    'Quantité comptée (boîtes)',
+    'Unités en plus (boîte entamée)',
+    'Lot',
+    "Date d'expiration (AAAA-MM-JJ)",
+  ];
 
   let prisma: Record<string, unknown>;
-  let upsert: jest.Mock<Promise<{ quantite: number }>, [OperationUpsert]>;
   let findMany: jest.Mock;
+  let medicamentFindMany: jest.Mock;
   let transaction: jest.Mock<Promise<unknown>, [FonctionTransaction, unknown?]>;
-  /** Stock vu par l'écriture (upsert) et stock vu par la lecture (findMany). */
-  let stockSimule: Map<string, number>;
-  let stockLu: Map<string, number>;
+  let stockLu: Map<string, { quantite: number; coefficientBoite: number }>;
+  let permissionsDuTest: string[];
   let notifications: { createManyNotifications: jest.Mock };
+  let receptions: { enregistrerDansTransaction: jest.Mock };
+  let inventaires: {
+    simuler: jest.Mock;
+    enregistrerDansTransaction: jest.Mock;
+  };
   let service: PharmacieService;
 
   async function construireFichier(
@@ -58,41 +85,34 @@ describe('PharmacieService, import Excel du stock', () => {
     };
   }
 
-  /** Pose une quantité en stock, vue à la lecture comme à l'écriture. */
-  function poserStock(medicamentId: string, quantite: number) {
-    stockSimule.set(medicamentId, quantite);
-    stockLu.set(medicamentId, quantite);
-  }
-
   beforeEach(() => {
-    stockSimule = new Map();
     stockLu = new Map();
+    permissionsDuTest = ['reception:write', 'inventaire:write'];
     findMany = jest.fn(() =>
       Promise.resolve(
-        [...stockLu].map(([medicamentId, quantite]) => ({
+        [...stockLu].map(([medicamentId, { quantite, coefficientBoite }]) => ({
+          id: `stk-${medicamentId}`,
           medicamentId,
-          quantite,
+          coefficientBoite,
+          agregatsProduit: [{ quantite }],
         })),
       ),
     );
-    upsert = jest.fn((args: OperationUpsert) => {
-      const id = args.where.medicamentId_structureId.medicamentId;
-      const update = args.update.quantite;
-      let quantite: number;
-      if (!stockSimule.has(id)) {
-        quantite = args.create.quantite as number;
-      } else if (typeof update === 'number') {
-        quantite = update;
-      } else {
-        quantite =
-          (stockSimule.get(id) as number) +
-          (update as { increment: number }).increment;
-      }
-      stockSimule.set(id, quantite);
-      return Promise.resolve({ quantite });
-    });
-    const stockMedicament = { findMany, upsert };
+    const stockMedicament = { findMany };
     transaction = jest.fn((fn: FonctionTransaction) => fn({ stockMedicament }));
+    medicamentFindMany = jest.fn().mockResolvedValue([
+      {
+        id: 'med-para',
+        nom: 'Paracétamol 500 mg',
+        nomGenerique: 'Paracétamol',
+      },
+      { id: 'med-amox', nom: 'Amoxicilline 500 mg', nomGenerique: null },
+      {
+        id: 'med-coartem',
+        nom: 'Coartem 20mg/120mg',
+        nomGenerique: 'Artéméther/Luméfantrine',
+      },
+    ]);
     prisma = {
       user: {
         findUnique: jest.fn().mockResolvedValue({
@@ -103,46 +123,67 @@ describe('PharmacieService, import Excel du stock', () => {
         findMany: jest.fn().mockResolvedValue([{ id: USER_ID }]),
       },
       structure: {
-        findUnique: jest
-          .fn()
-          .mockResolvedValue({ id: STRUCTURE_ID, type: 'PHARMACIE' }),
+        findUnique: jest.fn().mockResolvedValue({
+          id: STRUCTURE_ID,
+          type: 'PHARMACIE',
+          adminId: null,
+          isActive: true,
+        }),
       },
       medicament: {
         findFirst: jest.fn().mockResolvedValue({ nom: 'Amoxicilline 500 mg' }),
-        findMany: jest.fn().mockResolvedValue([
-          {
-            id: 'med-para',
-            nom: 'Paracétamol 500 mg',
-            nomGenerique: 'Paracétamol',
-          },
-          { id: 'med-amox', nom: 'Amoxicilline 500 mg', nomGenerique: null },
-          {
-            id: 'med-coartem',
-            nom: 'Coartem 20mg/120mg',
-            nomGenerique: 'Artéméther/Luméfantrine',
-          },
-        ]),
+        findMany: medicamentFindMany,
       },
       stockMedicament,
       $transaction: transaction,
     };
     notifications = { createManyNotifications: jest.fn() };
+    receptions = { enregistrerDansTransaction: jest.fn() };
+    inventaires = {
+      // Par défaut, chaque ligne transmise est évaluée sans refus
+      simuler: jest.fn(
+        (_client: unknown, _structure: string, lignes: unknown[]) =>
+          Promise.resolve({
+            lignes: lignes.map((_, index) => ({
+              index,
+              stockId: 'stk',
+              lotId: 'lot-1',
+              nouveauLot: false,
+              soldeAvant: 0,
+              quantiteTheorique: 0,
+              quantiteComptee: 0,
+              ecart: 0,
+              sousTolerance: true,
+            })),
+            refusees: [],
+          }),
+      ),
+      enregistrerDansTransaction: jest.fn(),
+    };
     service = new PharmacieService(
       prisma as unknown as PrismaService,
       notifications as unknown as NotificationsService,
+      new AccesPharmacieService(prisma as unknown as PrismaService),
+      new MouvementsStockService(),
+      {
+        getUserPermissions: () => Promise.resolve(permissionsDuTest),
+      } as unknown as PermissionsService,
+      receptions as unknown as ReceptionsService,
+      inventaires as unknown as InventairesService,
     );
   });
 
   it('accepte une ligne valide et retrouve le médicament sans tenir compte des accents ni de la casse', async () => {
     const fichier = await construireFichier([
-      ['  PARACETAMOL   500 MG ', 40, 1500, '2027-12-31', 'Lot A'],
-      ['artemether/lumefantrine', 12],
+      ['  PARACETAMOL   500 MG ', 40, 1500, DATE, 'Lot A'],
+      ['artemether/lumefantrine', 12, null, DATE],
     ]);
 
     const { data, message } = await service.apercuImportStock(
       STRUCTURE_ID,
       USER_ID,
       fichier,
+      'livraison',
     );
 
     expect(data.totalLignes).toBe(2);
@@ -157,6 +198,10 @@ describe('PharmacieService, import Excel du stock', () => {
       prixUnitaire: 1500,
       dateExpiration: '2027-12-31T00:00:00.000Z',
       notes: 'Lot A',
+      sansPeremption: false,
+      unitesRecues: 40,
+      quantiteAvant: 0,
+      quantiteApres: 40,
     });
     expect(data.lignes[1]).toMatchObject({
       ligne: 3,
@@ -169,24 +214,34 @@ describe('PharmacieService, import Excel du stock', () => {
     expect(transaction).not.toHaveBeenCalled();
   });
 
-  it('reconnaît les titres courants des pharmacies et liste les colonnes ignorées', async () => {
+  it('reconnaît les titres courants des pharmacies, le lot et le coût d’achat', async () => {
+    permissionsDuTest = ['reception:write', 'marge:read'];
     const fichier = await construireFichier(
-      [['Paracétamol 500 mg', 'Sopharma', 30, 1200, '2027-06-30']],
-      ['Désignation', 'Fournisseur', 'Qté', 'P.U. (GNF)', 'Péremption'],
+      [['Paracétamol 500 mg', 'Sopharma', 30, 1200, '2027-06-30', 'B-77', 900]],
+      [
+        'Désignation',
+        'Fournisseur',
+        'Qté',
+        'P.U. (GNF)',
+        'Péremption',
+        'N° lot',
+        "Prix d'achat",
+      ],
     );
 
     const { data } = await service.apercuImportStock(
       STRUCTURE_ID,
       USER_ID,
       fichier,
+      'livraison',
     );
 
     expect(data.lignes[0]).toMatchObject({
       statut: 'acceptee',
-      medicamentId: 'med-para',
       quantite: 30,
       prixUnitaire: 1200,
-      dateExpiration: '2027-06-30T00:00:00.000Z',
+      numeroLot: 'B-77',
+      coutAchatBoite: 900,
     });
     expect(data.colonnes).toEqual({
       ligneTitres: 1,
@@ -195,6 +250,8 @@ describe('PharmacieService, import Excel du stock', () => {
         { titre: 'Qté', colonne: 'Quantité' },
         { titre: 'P.U. (GNF)', colonne: 'Prix' },
         { titre: 'Péremption', colonne: "Date d'expiration" },
+        { titre: 'N° lot', colonne: 'Lot' },
+        { titre: "Prix d'achat", colonne: "Coût d'achat" },
       ],
       ignorees: ['Fournisseur'],
     });
@@ -203,18 +260,23 @@ describe('PharmacieService, import Excel du stock', () => {
   it('trouve les titres sous un en-tête (nom de la pharmacie, ligne vide)', async () => {
     const workbook = new Workbook();
     const feuille = workbook.addWorksheet('Stock');
-    feuille.addRow(['Pharmacie de Kaloum, inventaire du 22/10/2026']);
+    feuille.addRow(['Pharmacie de Kaloum, livraison du 22/10/2026']);
     feuille.addRow([]);
-    feuille.addRow(['Produit', 'Quantité en stock']);
-    feuille.addRow(['Amoxicilline 500 mg', 15]);
+    feuille.addRow(['Produit', 'Quantité en stock', 'Date de péremption']);
+    feuille.addRow(['Amoxicilline 500 mg', 15, DATE]);
     const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
 
-    const { data } = await service.apercuImportStock(STRUCTURE_ID, USER_ID, {
-      buffer,
-      size: buffer.length,
-      mimetype: MIME_XLSX,
-      originalname: 'inventaire.xlsx',
-    });
+    const { data } = await service.apercuImportStock(
+      STRUCTURE_ID,
+      USER_ID,
+      {
+        buffer,
+        size: buffer.length,
+        mimetype: MIME_XLSX,
+        originalname: 'livraison.xlsx',
+      },
+      'livraison',
+    );
 
     expect(data.colonnes.ligneTitres).toBe(3);
     expect(data.totalLignes).toBe(1);
@@ -228,14 +290,15 @@ describe('PharmacieService, import Excel du stock', () => {
 
   it('ne prend pas un seuil d’alerte pour la quantité en stock', async () => {
     const fichier = await construireFichier(
-      [['Paracétamol 500 mg', 5, 40]],
-      ['Médicament', 'Quantité minimale', 'Stock'],
+      [['Paracétamol 500 mg', 5, 40, DATE]],
+      ['Médicament', 'Quantité minimale', 'Stock', 'Date'],
     );
 
     const { data } = await service.apercuImportStock(
       STRUCTURE_ID,
       USER_ID,
       fichier,
+      'livraison',
     );
 
     expect(data.lignes[0]).toMatchObject({ statut: 'acceptee', quantite: 40 });
@@ -243,52 +306,60 @@ describe('PharmacieService, import Excel du stock', () => {
   });
 
   it('rejette un médicament absent du catalogue', async () => {
-    const fichier = await construireFichier([['Doliprane inconnu', 10]]);
+    const fichier = await construireFichier([
+      ['Doliprane inconnu', 10, null, DATE],
+    ]);
 
     const { data } = await service.apercuImportStock(
       STRUCTURE_ID,
       USER_ID,
       fichier,
+      'livraison',
     );
 
     expect(data.lignes[0].statut).toBe('rejetee');
     expect(data.lignes[0].raison).toContain('Médicament absent du catalogue');
   });
 
-  it('rejette une quantité négative ou non numérique', async () => {
+  it('rejette une quantité négative, nulle ou non numérique', async () => {
     const fichier = await construireFichier([
-      ['Paracétamol 500 mg', -5],
-      ['Amoxicilline 500 mg', 'beaucoup'],
-      ['Coartem 20mg/120mg', 2.5],
+      ['Paracétamol 500 mg', -5, null, DATE],
+      ['Amoxicilline 500 mg', 0, null, DATE],
+      ['Coartem 20mg/120mg', 'beaucoup', null, DATE],
+      ['Paracétamol 500 mg', 2.5, null, DATE],
     ]);
 
     const { data, message } = await service.apercuImportStock(
       STRUCTURE_ID,
       USER_ID,
       fichier,
+      'livraison',
     );
 
-    expect(data.rejetees).toBe(3);
+    expect(data.rejetees).toBe(4);
     data.lignes.forEach((ligne) => {
       expect(ligne.statut).toBe('rejetee');
-      expect(ligne.raison).toContain('La quantité doit être un nombre entier');
+      expect(ligne.raison).toContain(
+        'La quantité reçue doit être un nombre entier de boîtes',
+      );
     });
     expect(message).toBe(
-      'Aucune ligne prête à être importée, 3 lignes à corriger.',
+      'Aucune ligne prête à être importée, 4 lignes à corriger.',
     );
   });
 
   it('rejette la deuxième occurrence d’un même médicament', async () => {
     const fichier = await construireFichier([
-      ['Paracétamol 500 mg', 10],
-      ['Amoxicilline 500 mg', 20],
-      ['paracetamol', 30],
+      ['Paracétamol 500 mg', 10, null, DATE],
+      ['Amoxicilline 500 mg', 20, null, DATE],
+      ['paracetamol', 30, null, DATE],
     ]);
 
     const { data } = await service.apercuImportStock(
       STRUCTURE_ID,
       USER_ID,
       fichier,
+      'livraison',
     );
 
     expect(data.lignes[0].statut).toBe('acceptee');
@@ -305,7 +376,12 @@ describe('PharmacieService, import Excel du stock', () => {
       ['Medicament', 'Notes'],
     );
 
-    const appel = service.apercuImportStock(STRUCTURE_ID, USER_ID, fichier);
+    const appel = service.apercuImportStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+      'livraison',
+    );
 
     await expect(appel).rejects.toThrow(BadRequestException);
     await expect(appel).rejects.toThrow('« Quantité »');
@@ -321,114 +397,132 @@ describe('PharmacieService, import Excel du stock', () => {
     };
 
     await expect(
-      service.apercuImportStock(STRUCTURE_ID, USER_ID, fichier),
+      service.apercuImportStock(STRUCTURE_ID, USER_ID, fichier, 'livraison'),
     ).rejects.toThrow('Le fichier doit être un classeur Excel (.xlsx).');
   });
 
   it('refuse l’envoi sans fichier', async () => {
     await expect(
-      service.apercuImportStock(STRUCTURE_ID, USER_ID, undefined),
+      service.apercuImportStock(STRUCTURE_ID, USER_ID, undefined, 'livraison'),
     ).rejects.toThrow('Choisissez un fichier Excel à importer.');
   });
 
-  it("n'écrit que les lignes acceptées, en une seule transaction, et envoie une seule alerte groupée", async () => {
+  it('date obligatoire sauf « sans péremption », date passée refusée', async () => {
     const fichier = await construireFichier([
-      ['Paracétamol 500 mg', 5],
-      ['Inconnu', 10],
-      ['Amoxicilline 500 mg', 0, 2000],
-      ['Coartem 20mg/120mg', -1],
-      ['Coartem 20mg/120mg', 50],
-    ]);
-
-    const { data, message } = await service.importerStock(
-      STRUCTURE_ID,
-      USER_ID,
-      fichier,
-    );
-
-    expect(transaction).toHaveBeenCalledTimes(1);
-    expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
-      maxWait: 10_000,
-      timeout: 60_000,
-    });
-    const operations = upsert.mock.calls.map(([args]) => args);
-    expect(operations).toHaveLength(2);
-    expect(
-      operations.map((op) => op.where.medicamentId_structureId.medicamentId),
-    ).toEqual(['med-para', 'med-amox']);
-    expect(operations[1]).toMatchObject({
-      create: {
-        medicamentId: 'med-amox',
-        structureId: STRUCTURE_ID,
-        quantite: 0,
-        prixUnitaire: 2000,
-        disponible: false,
-        dateExpiration: null,
-      },
-      update: { quantite: 0, disponible: false },
-    });
-    expect(operations[1].update.dateExpiration).toBeUndefined();
-
-    expect(data.mode).toBe('inventaire');
-    expect(data.importees).toBe(2);
-    expect(data.acceptees).toBe(2);
-    expect(data.rejetees).toBe(3);
-    expect(message).toBe(
-      '2 lignes importées dans votre stock, 3 lignes à corriger.',
-    );
-
-    expect(notifications.createManyNotifications).toHaveBeenCalledTimes(1);
-    expect(notifications.createManyNotifications).toHaveBeenCalledWith(
-      [USER_ID],
-      expect.objectContaining({
-        type: 'STOCK_ALERTE',
-        titre: 'Stock critique',
-        message: expect.stringContaining('2 médicaments') as string,
-      }),
-    );
-  });
-
-  it('conserve la date, le prix et les notes enregistrés quand les cases sont vides', async () => {
-    poserStock('med-para', 30);
-    const fichier = await construireFichier([['Paracétamol 500 mg', 40]]);
-
-    const { data } = await service.importerStock(
-      STRUCTURE_ID,
-      USER_ID,
-      fichier,
-    );
-
-    const { update } = upsert.mock.calls[0][0];
-    expect(update.quantite).toBe(40);
-    expect(update.dateExpiration).toBeUndefined();
-    expect(update.prixUnitaire).toBeUndefined();
-    expect(update.notes).toBeUndefined();
-    expect(data.lignes[0]).toMatchObject({
-      statut: 'acceptee',
-      quantiteAvant: 30,
-      quantiteApres: 40,
-    });
-  });
-
-  it("aperçu : le mode inventaire est le mode par défaut et n'écrit rien", async () => {
-    poserStock('med-para', 30);
-    const fichier = await construireFichier([
-      ['Paracétamol 500 mg', 40],
-      ['Amoxicilline 500 mg', 5],
+      ['Paracétamol 500 mg', 1],
+      ['Amoxicilline 500 mg', 1, null, 'Sans Péremption'],
+      ['Coartem 20mg/120mg', 1, null, '2020-01-01'],
     ]);
 
     const { data } = await service.apercuImportStock(
       STRUCTURE_ID,
       USER_ID,
       fichier,
+      'livraison',
     );
 
-    expect(data.mode).toBe('inventaire');
     expect(data.lignes[0]).toMatchObject({
-      quantiteAvant: 30,
-      quantiteApres: 40,
+      statut: 'rejetee',
+      raison:
+        "Indiquez la date de péremption (AAAA-MM-JJ), ou écrivez « sans péremption » si ce médicament n'en a pas.",
     });
     expect(data.lignes[1]).toMatchObject({
+      statut: 'acceptee',
+      sansPeremption: true,
+    });
+    expect(data.lignes[1].dateExpiration).toBeUndefined();
+    expect(data.lignes[2]).toMatchObject({
+      statut: 'rejetee',
+      raison:
+        'Cette date de péremption est déjà passée : vérifiez-la. Un médicament périmé ne doit pas entrer en stock.',
+    });
+
+    const aujourdhui = await construireFichier([
+      ['Paracétamol 500 mg', 1, null, jourConakry(new Date())],
+    ]);
+    const { data: dujour } = await service.apercuImportStock(
+      STRUCTURE_ID,
+      USER_ID,
+      aujourdhui,
+      'livraison',
+    );
+    expect(dujour.lignes[0].statut).toBe('acceptee');
+  });
+
+  it('lot et coût d’achat : lecture, arrondi et rejets', async () => {
+    permissionsDuTest = ['reception:write', 'marge:read'];
+    const entetes = [...ENTETES, 'Lot', "Coût d'achat"];
+    const fichier = await construireFichier(
+      [
+        ['Paracétamol 500 mg', 1, null, DATE, null, '  A123 ', 25000.4],
+        ['Amoxicilline 500 mg', 1, null, DATE, null, 4521, -3],
+        ['Coartem 20mg/120mg', 1, null, DATE, null, 'x'.repeat(65), 3000000000],
+      ],
+      entetes,
+    );
+
+    const { data } = await service.apercuImportStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+      'livraison',
+    );
+
+    expect(data.lignes[0]).toMatchObject({
+      statut: 'acceptee',
+      numeroLot: 'A123',
+      coutAchatBoite: 25000,
+    });
+    expect(data.lignes[1]).toMatchObject({
+      statut: 'rejetee',
+      raison:
+        "Le coût d'achat doit être un nombre, 0 ou plus, sans texte (exemple : 25000).",
+    });
+    expect(data.lignes[2].statut).toBe('rejetee');
+    expect(data.lignes[2].raison).toContain(
+      'Le numéro de lot est trop long (64 caractères au plus).',
+    );
+    expect(data.lignes[2].raison).toContain(
+      "Le coût d'achat est trop grand. Vérifiez le montant (exemple : 25000).",
+    );
+
+    const numerique = await construireFichier(
+      [['Amoxicilline 500 mg', 1, null, DATE, null, 4521]],
+      entetes,
+    );
+    const { data: lot } = await service.apercuImportStock(
+      STRUCTURE_ID,
+      USER_ID,
+      numerique,
+      'livraison',
+    );
+    expect(lot.lignes[0]).toMatchObject({
+      statut: 'acceptee',
+      numeroLot: '4521',
+    });
+  });
+
+  it('quantités en unités depuis le stock calculé', async () => {
+    stockLu.set('med-para', { quantite: 30, coefficientBoite: 10 });
+    const fichier = await construireFichier([
+      ['Paracétamol 500 mg', 4, null, DATE],
+      ['Amoxicilline 500 mg', 5, null, DATE],
+    ]);
+
+    const { data } = await service.apercuImportStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+      'livraison',
+    );
+
+    expect(data.lignes[0]).toMatchObject({
+      unitesRecues: 40,
+      quantiteAvant: 30,
+      quantiteApres: 70,
+    });
+    expect(data.lignes[1]).toMatchObject({
+      unitesRecues: 5,
       quantiteAvant: 0,
       quantiteApres: 5,
     });
@@ -437,115 +531,19 @@ describe('PharmacieService, import Excel du stock', () => {
         structureId: STRUCTURE_ID,
         medicamentId: { in: ['med-para', 'med-amox'] },
       },
-      select: { medicamentId: true, quantite: true },
+      select: {
+        medicamentId: true,
+        coefficientBoite: true,
+        agregatsProduit: { select: { quantite: true } },
+      },
     });
-    expect(transaction).not.toHaveBeenCalled();
-    expect(upsert).not.toHaveBeenCalled();
   });
 
-  it("aperçu en mode livraison : la quantité du fichier s'ajoute au stock", async () => {
-    poserStock('med-para', 30);
+  it('refuse une ligne dont le total dépasserait la borne entière', async () => {
+    stockLu.set('med-para', { quantite: 2147483600, coefficientBoite: 1 });
     const fichier = await construireFichier([
-      ['Paracétamol 500 mg', 40],
-      ['Amoxicilline 500 mg', 5],
+      ['Paracétamol 500 mg', 100, null, DATE],
     ]);
-
-    const { data } = await service.apercuImportStock(
-      STRUCTURE_ID,
-      USER_ID,
-      fichier,
-      'livraison',
-    );
-
-    expect(data.mode).toBe('livraison');
-    expect(data.lignes[0]).toMatchObject({
-      quantiteAvant: 30,
-      quantiteApres: 70,
-    });
-    expect(data.lignes[1]).toMatchObject({
-      quantiteAvant: 0,
-      quantiteApres: 5,
-    });
-  });
-
-  it('import en mode livraison : incrément, création des absents, une seule alerte', async () => {
-    poserStock('med-para', 30);
-    const fichier = await construireFichier([
-      ['Paracétamol 500 mg', 40],
-      ['Amoxicilline 500 mg', 5],
-    ]);
-
-    const { data } = await service.importerStock(
-      STRUCTURE_ID,
-      USER_ID,
-      fichier,
-      'livraison',
-    );
-
-    const [premier, second] = upsert.mock.calls.map(([args]) => args);
-    expect(premier.update.quantite).toEqual({ increment: 40 });
-    expect(premier.update.disponible).toBe(true);
-    expect(second.create.quantite).toBe(5);
-    expect(data.lignes[0]).toMatchObject({
-      quantiteAvant: 30,
-      quantiteApres: 70,
-    });
-    expect(data.lignes[1]).toMatchObject({
-      quantiteAvant: 0,
-      quantiteApres: 5,
-    });
-    expect(notifications.createManyNotifications).toHaveBeenCalledTimes(1);
-    expect(notifications.createManyNotifications).toHaveBeenCalledWith(
-      [USER_ID],
-      expect.objectContaining({
-        message: expect.stringContaining('1 médicament') as string,
-      }),
-    );
-  });
-
-  it("livraison de 0 : le stock ne bouge pas et la disponibilité n'est pas touchée", async () => {
-    poserStock('med-para', 30);
-    const fichier = await construireFichier([['Paracétamol 500 mg', 0]]);
-
-    const { data } = await service.importerStock(
-      STRUCTURE_ID,
-      USER_ID,
-      fichier,
-      'livraison',
-    );
-
-    const { update } = upsert.mock.calls[0][0];
-    expect(update.quantite).toEqual({ increment: 0 });
-    expect(update).not.toHaveProperty('disponible');
-    expect(data.lignes[0]).toMatchObject({
-      quantiteAvant: 30,
-      quantiteApres: 30,
-    });
-  });
-
-  it("livraison : l'incrément résiste à un import simultané", async () => {
-    poserStock('med-para', 30);
-    // Un autre import a déjà ajouté 20 entre la lecture et l'écriture
-    stockSimule.set('med-para', 50);
-    const fichier = await construireFichier([['Paracétamol 500 mg', 40]]);
-
-    const { data } = await service.importerStock(
-      STRUCTURE_ID,
-      USER_ID,
-      fichier,
-      'livraison',
-    );
-
-    expect(upsert.mock.calls[0][0].update.quantite).toEqual({ increment: 40 });
-    expect(data.lignes[0]).toMatchObject({
-      quantiteAvant: 50,
-      quantiteApres: 90,
-    });
-  });
-
-  it('livraison : refuse une ligne dont le total dépasserait la borne entière', async () => {
-    poserStock('med-para', 2147483600);
-    const fichier = await construireFichier([['Paracétamol 500 mg', 100]]);
     const raison =
       'Avec cette livraison, la quantité en stock deviendrait trop grande. Vérifiez la quantité.';
 
@@ -564,58 +562,22 @@ describe('PharmacieService, import Excel du stock', () => {
       'livraison',
     );
     expect(data.lignes[0]).toMatchObject({ statut: 'rejetee', raison });
-    expect(upsert).not.toHaveBeenCalled();
     expect(data.importees).toBe(0);
-
-    const { data: inventaire } = await service.apercuImportStock(
-      STRUCTURE_ID,
-      USER_ID,
-      fichier,
-      'inventaire',
-    );
-    expect(inventaire.lignes[0]).toMatchObject({
-      statut: 'acceptee',
-      quantiteApres: 100,
-    });
+    expect(data.receptionId).toBeNull();
+    expect(receptions.enregistrerDansTransaction).not.toHaveBeenCalled();
   });
 
-  it("l'alerte de stock bas se calcule sur la quantité après l'import", async () => {
-    poserStock('med-para', 5);
-    const fichier = await construireFichier([['Paracétamol 500 mg', 10]]);
-
-    await service.importerStock(STRUCTURE_ID, USER_ID, fichier, 'livraison');
-    expect(notifications.createManyNotifications).not.toHaveBeenCalled();
-
-    await service.importerStock(STRUCTURE_ID, USER_ID, fichier, 'inventaire');
-    expect(notifications.createManyNotifications).not.toHaveBeenCalled();
-
-    poserStock('med-amox', 2);
-    const fichierAmox = await construireFichier([['Amoxicilline 500 mg', 3]]);
-    await service.importerStock(
-      STRUCTURE_ID,
-      USER_ID,
-      fichierAmox,
-      'livraison',
-    );
-    expect(notifications.createManyNotifications).toHaveBeenCalledTimes(1);
-    expect(notifications.createManyNotifications).toHaveBeenCalledWith(
-      [USER_ID],
-      expect.objectContaining({
-        message: expect.stringContaining('1 médicament') as string,
-      }),
-    );
-  });
-
-  it('arrondit un prix décimal à l entier et rejette un prix trop grand', async () => {
+  it('arrondit un prix décimal à l’entier et rejette un prix trop grand', async () => {
     const fichier = await construireFichier([
-      ['Paracétamol 500 mg', 10, 1500.6],
-      ['Amoxicilline 500 mg', 10, 3000000000],
+      ['Paracétamol 500 mg', 10, 1500.6, DATE],
+      ['Amoxicilline 500 mg', 10, 3000000000, DATE],
     ]);
 
     const { data } = await service.apercuImportStock(
       STRUCTURE_ID,
       USER_ID,
       fichier,
+      'livraison',
     );
 
     expect(data.lignes[0]).toMatchObject({
@@ -628,22 +590,329 @@ describe('PharmacieService, import Excel du stock', () => {
     );
   });
 
-  it("le modèle téléchargeable explique l'inventaire et la livraison", async () => {
+  it('inventaire sans inventaire:write refusé avant toute lecture du fichier', async () => {
+    permissionsDuTest = ['reception:write'];
+    const fichier = await construireFichier([
+      ['Paracétamol 500 mg', 10, null, DATE],
+    ]);
+
+    const appels = [
+      service.apercuImportStock(STRUCTURE_ID, USER_ID, fichier, 'inventaire'),
+      service.apercuImportStock(STRUCTURE_ID, USER_ID, fichier),
+      service.importerStock(STRUCTURE_ID, USER_ID, fichier, 'inventaire'),
+    ];
+    for (const appel of appels) {
+      await expect(appel).rejects.toThrow(ForbiddenException);
+      await expect(appel).rejects.toThrow(MESSAGE_IMPORT_INVENTAIRE_INTERDIT);
+    }
+    expect(medicamentFindMany).not.toHaveBeenCalled();
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('livraison sans reception:write refusée', async () => {
+    permissionsDuTest = [];
+    const fichier = await construireFichier([
+      ['Paracétamol 500 mg', 10, null, DATE],
+    ]);
+
+    for (const appel of [
+      service.apercuImportStock(STRUCTURE_ID, USER_ID, fichier, 'livraison'),
+      service.importerStock(STRUCTURE_ID, USER_ID, fichier, 'livraison'),
+    ]) {
+      await expect(appel).rejects.toThrow(ForbiddenException);
+      await expect(appel).rejects.toThrow(MESSAGE_IMPORT_LIVRAISON_INTERDIT);
+    }
+    expect(medicamentFindMany).not.toHaveBeenCalled();
+  });
+
+  it('coût d’achat retiré sans marge:read', async () => {
+    const fichier = await construireFichier(
+      [['Paracétamol 500 mg', 1, null, DATE, null, 'L1', 25000]],
+      [...ENTETES, 'Lot', "Coût d'achat"],
+    );
+
+    permissionsDuTest = ['reception:write'];
+    const { data: sans } = await service.apercuImportStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+      'livraison',
+    );
+    expect(cheminsCout(sans)).toEqual([]);
+
+    permissionsDuTest = ['reception:write', 'marge:read'];
+    const { data: avec } = await service.apercuImportStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+      'livraison',
+    );
+    expect(avec.lignes[0].coutAchatBoite).toBe(25000);
+  });
+
+  it('le modèle téléchargeable décrit la livraison et ses colonnes', async () => {
     const buffer = await service.getModeleImportStock(STRUCTURE_ID, USER_ID);
     const classeur = new Workbook();
     await classeur.xlsx.load(buffer as unknown as ArrayBuffer);
+
+    const stock = classeur.getWorksheet('Stock');
+    if (!stock) throw new Error('Feuille « Stock » absente');
+    const titres = TITRES_MODELE.map(
+      (_, i) => stock.getRow(1).getCell(i + 1).text,
+    );
+    expect(titres).toEqual(TITRES_MODELE);
+
     const aide = classeur.getWorksheet("Mode d'emploi");
     if (!aide) throw new Error("Feuille « Mode d'emploi » absente");
-
     const textes: string[] = [];
     aide.eachRow((ligne) => textes.push(ligne.getCell(1).text));
-    expect(textes).toHaveLength(9);
-    expect(textes.some((t) => t.startsWith('Inventaire :'))).toBe(true);
-    expect(textes.some((t) => t.startsWith('Livraison :'))).toBe(true);
+    expect(textes).toEqual([
+      'Remplissez la feuille « Stock » : une ligne par médicament reçu, à partir de la ligne 2. Ne modifiez pas les titres de la ligne 1.',
+      "Écrivez le nom du médicament tel qu'il apparaît dans le catalogue MedConnecte (les majuscules et les accents ne comptent pas).",
+      'La quantité est le nombre de boîtes reçues : un nombre entier, 1 ou plus.',
+      "Au moment d'envoyer le fichier, choisissez « Livraison » : la quantité du fichier s'ajoute à votre stock. Exemple : 20 en stock et 50 dans le fichier, il y aura 70. Un médicament qui n'est pas encore dans votre stock y est ajouté.",
+      "La date d'expiration est obligatoire, au format AAAA-MM-JJ (par exemple 2027-12-31). Pour un produit qui n'en a pas, écrivez « sans péremption ».",
+      "Le lot (numéro inscrit sur la boîte) et le coût d'achat d'une boîte (en GNF) sont facultatifs. Sans coût d'achat, la marge de ces boîtes ne pourra pas être calculée.",
+      "Le prix de la boîte (en GNF) et les notes sont facultatifs. Une case laissée vide ne change pas ce qui est déjà enregistré. Avant d'enregistrer, l'aperçu affiche pour chaque médicament la quantité avant et après.",
+      "Un même fichier peut contenir jusqu'à 1000 médicaments. Remplacez la ligne d'exemple par vos propres médicaments.",
+    ]);
+  });
+
+  it('inventaire : boîtes comptées 0 permises, unités en plus, date passée acceptée', async () => {
+    stockLu.set('med-para', { quantite: 10, coefficientBoite: 10 });
+    stockLu.set('med-amox', { quantite: 10, coefficientBoite: 10 });
+    const fichier = await construireFichier(
+      [
+        ['Paracétamol 500 mg', 0, null, 'A1', '2020-01-01'],
+        ['Amoxicilline 500 mg', 3, 7, null, null],
+      ],
+      ENTETES_INVENTAIRE,
+    );
+
+    const { data } = await service.apercuImportStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+      'inventaire',
+    );
+
+    expect(data.acceptees).toBe(2);
+    expect(data.lignes[0]).toMatchObject({
+      statut: 'acceptee',
+      quantite: 0,
+      unitesEnPlus: 0,
+      numeroLot: 'A1',
+      dateExpiration: '2020-01-01T00:00:00.000Z',
+    });
+    expect(data.lignes[1]).toMatchObject({
+      statut: 'acceptee',
+      quantite: 3,
+      unitesEnPlus: 7,
+    });
+    expect(inventaires.simuler).toHaveBeenCalledWith(
+      prisma,
+      STRUCTURE_ID,
+      [
+        expect.objectContaining({
+          nombreBoites: 0,
+          unitesEnPlus: 0,
+          numeroLot: 'A1',
+          dateExpiration: '2020-01-01',
+        }),
+        expect.objectContaining({
+          nombreBoites: 3,
+          unitesEnPlus: 7,
+          numeroLot: null,
+          dateExpiration: null,
+        }),
+      ],
+      expect.any(String),
+    );
+    expect(data.colonnes.reconnues).toContainEqual({
+      titre: 'Unités en plus (boîte entamée)',
+      colonne: 'Unités en plus',
+    });
+  });
+
+  it('inventaire : rejets de saisie', async () => {
+    const fichier = await construireFichier(
+      [
+        ['Paracétamol 500 mg', -1],
+        ['Amoxicilline 500 mg', 2.5],
+        ['Coartem 20mg/120mg', 1, -3],
+      ],
+      ENTETES_INVENTAIRE,
+    );
+
+    const { data } = await service.apercuImportStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+      'inventaire',
+    );
+
+    const quantite =
+      'Le nombre de boîtes comptées doit être un nombre entier, 0 ou plus (exemple : 12).';
+    expect(data.lignes[0]).toMatchObject({
+      statut: 'rejetee',
+      raison: quantite,
+    });
+    expect(data.lignes[1]).toMatchObject({
+      statut: 'rejetee',
+      raison: quantite,
+    });
+    expect(data.lignes[2]).toMatchObject({
+      statut: 'rejetee',
+      raison:
+        "Les unités en plus doivent être un nombre entier, 0 ou plus (exemple : 7 comprimés d'une boîte entamée).",
+    });
+  });
+
+  it('inventaire : doublons par lot', async () => {
+    stockLu.set('med-para', { quantite: 10, coefficientBoite: 10 });
+    const fichier = await construireFichier(
+      [
+        ['Paracétamol 500 mg', 1, null, 'A1'],
+        ['Paracétamol 500 mg', 1, null, 'a 1'],
+        ['Paracétamol 500 mg', 1],
+        ['Paracétamol 500 mg', 1],
+        ['Paracétamol 500 mg', 1, null, 'B2'],
+      ],
+      ENTETES_INVENTAIRE,
+    );
+
+    const { data } = await service.apercuImportStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+      'inventaire',
+    );
+
+    expect(data.lignes[0].statut).toBe('acceptee');
+    expect(data.lignes[1]).toMatchObject({
+      statut: 'rejetee',
+      raison: 'Ce lot de ce médicament est déjà compté à la ligne 2.',
+    });
+    expect(data.lignes[2].statut).toBe('acceptee');
+    expect(data.lignes[3]).toMatchObject({
+      statut: 'rejetee',
+      raison: 'Médicament déjà présent à la ligne 4.',
+    });
+    expect(data.lignes[4].statut).toBe('acceptee');
+  });
+
+  it('inventaire : refus du cœur traduits en raisons', async () => {
+    stockLu.set('med-para', { quantite: 10, coefficientBoite: 10 });
+    inventaires.simuler.mockResolvedValue({
+      lignes: [],
+      refusees: [
+        {
+          index: 0,
+          code: 'LOT_REQUIS',
+          lots: [
+            {
+              lotId: 'l1',
+              numeroLot: 'A1',
+              dateExpiration: '2027-01-31',
+              quantite: 5,
+            },
+            { lotId: 'l2', numeroLot: null, dateExpiration: null, quantite: 2 },
+          ],
+        },
+      ],
+    });
+    const fichier = await construireFichier(
+      [['Paracétamol 500 mg', 1]],
+      ENTETES_INVENTAIRE,
+    );
+
+    const { data } = await service.apercuImportStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+      'inventaire',
+    );
+
+    expect(data.lignes[0]).toMatchObject({
+      statut: 'rejetee',
+      raison:
+        'Ce médicament a plusieurs lots en stock (A1 (péremption 2027-01-31), sans numéro (sans péremption)) : indiquez le lot ou la date de péremption, une ligne par lot.',
+    });
+  });
+
+  it('inventaire : médicament absent du stock', async () => {
+    const fichier = await construireFichier(
+      [
+        ['Paracétamol 500 mg', 0, null, null, DATE],
+        ['Amoxicilline 500 mg', 2],
+        ['Coartem 20mg/120mg', 2, null, null, DATE],
+      ],
+      ENTETES_INVENTAIRE,
+    );
+
+    const { data } = await service.apercuImportStock(
+      STRUCTURE_ID,
+      USER_ID,
+      fichier,
+      'inventaire',
+    );
+
+    expect(data.lignes[0]).toMatchObject({
+      statut: 'rejetee',
+      raison:
+        "Ce médicament n'est pas dans votre stock et la quantité comptée est 0 : rien à enregistrer. Retirez la ligne.",
+    });
+    expect(data.lignes[1]).toMatchObject({
+      statut: 'rejetee',
+      raison:
+        'Ces boîtes ne correspondent à aucun lot en stock : indiquez leur date de péremption (AAAA-MM-JJ) ou « sans péremption ».',
+    });
+    expect(data.lignes[2]).toMatchObject({
+      statut: 'acceptee',
+      nouveauLot: true,
+      quantiteComptee: 2,
+      ecart: 2,
+      sousTolerance: false,
+    });
+  });
+
+  it("le modèle d'inventaire", async () => {
+    const buffer = await service.getModeleImportStock(
+      STRUCTURE_ID,
+      USER_ID,
+      'inventaire',
+    );
+    const classeur = new Workbook();
+    await classeur.xlsx.load(buffer as unknown as ArrayBuffer);
+
+    const stock = classeur.getWorksheet('Stock');
+    if (!stock) throw new Error('Feuille « Stock » absente');
     expect(
-      textes[7].endsWith(
-        'Une case laissée vide ne change pas ce qui est déjà enregistré.',
-      ),
-    ).toBe(true);
+      ENTETES_INVENTAIRE.map((_, i) => stock.getRow(1).getCell(i + 1).text),
+    ).toEqual(ENTETES_INVENTAIRE);
+
+    const aide = classeur.getWorksheet("Mode d'emploi");
+    if (!aide) throw new Error("Feuille « Mode d'emploi » absente");
+    const textes: string[] = [];
+    aide.eachRow((ligne) => textes.push(ligne.getCell(1).text));
+    expect(textes).toEqual([
+      'Remplissez la feuille « Stock » : une ligne par lot compté, à partir de la ligne 2. Ne modifiez pas les titres de la ligne 1.',
+      "Écrivez le nom du médicament tel qu'il apparaît dans le catalogue MedConnecte (les majuscules et les accents ne comptent pas).",
+      "Quantité comptée : le nombre de boîtes entières trouvées en rayon (0 si aucune). Unités en plus : les comprimés, sachets ou ampoules d'une boîte entamée (case vide : 0).",
+      "Au moment d'envoyer le fichier, choisissez « Inventaire » : la quantité comptée remplace le stock enregistré du lot. L'écart est enregistré ; au-delà de la tolérance du médicament, il est signalé au titulaire.",
+      'Si un médicament a plusieurs lots en stock, faites une ligne par lot et indiquez le numéro de lot ou la date de péremption inscrite sur la boîte.',
+      "Des boîtes d'un lot qui n'est pas encore enregistré sont ajoutées au stock : indiquez alors leur date de péremption (AAAA-MM-JJ), ou « sans péremption ».",
+      'Saisissez le comptage sans vendre entre-temps les médicaments comptés : une vente faite après le comptage apparaîtrait comme un écart.',
+      "Un même fichier peut contenir jusqu'à 1000 lignes. Remplacez la ligne d'exemple par vos propres comptages.",
+    ]);
+
+    const livraison = await service.getModeleImportStock(STRUCTURE_ID, USER_ID);
+    const classeurLivraison = new Workbook();
+    await classeurLivraison.xlsx.load(livraison as unknown as ArrayBuffer);
+    const feuille = classeurLivraison.getWorksheet('Stock');
+    if (!feuille) throw new Error('Feuille « Stock » absente');
+    expect(
+      TITRES_MODELE.map((_, i) => feuille.getRow(1).getCell(i + 1).text),
+    ).toEqual(TITRES_MODELE);
   });
 });

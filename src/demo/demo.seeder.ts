@@ -28,6 +28,21 @@ import {
   URGENCES_DEMO,
   VACCINATIONS_DEMO,
 } from './demo.donnees';
+import { jourConakry, joursAvant } from 'src/pharmacie/jour-metier';
+import { jourVersDate } from 'src/pharmacie/stock/lecture-stock';
+import {
+  assurerPointDeVente,
+  supprimerConfigurationPharmacies,
+} from 'src/pharmacie/point-de-vente';
+import {
+  reculerDebutsCaisseDemo,
+  ScenarioDemoPharmacieService,
+  type BilanScenarioPharmacie,
+  type ContexteScenarioPharmacie,
+  type PharmacieDemo,
+} from 'src/pharmacie/demo/scenario-demo-pharmacie.service';
+import { purgerStockPharmacies } from 'src/pharmacie/stock/purge-stock';
+import { purgerPiecesPharmacies } from 'src/pharmacie/caisse/purge-pieces';
 
 const MINUTE = 60_000;
 
@@ -72,6 +87,7 @@ export class DemoSeeder implements OnApplicationBootstrap {
     private readonly encryption: EncryptionService,
     private readonly rolesService: RolesService,
     private readonly permissionsService: PermissionsService,
+    private readonly scenarioPharmacie: ScenarioDemoPharmacieService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -85,11 +101,12 @@ export class DemoSeeder implements OnApplicationBootstrap {
     }
 
     this.avertir();
+    let cree = false;
     try {
       if (estResetDemoDemande()) {
-        await this.reinitialiserJeuDeDonnees();
+        cree = (await this.reinitialiserJeuDeDonnees()) !== null;
       } else {
-        await this.creerJeuDeDonnees();
+        cree = await this.creerJeuDeDonnees();
       }
       await this.rattacherRoles();
     } catch (e) {
@@ -99,7 +116,76 @@ export class DemoSeeder implements OnApplicationBootstrap {
         message: 'Création des données de démonstration impossible',
         raison: e instanceof Error ? e.message : 'inconnue',
       });
+      if (cree) {
+        // Création réussie mais rôles non rattachés : la phase 2 est sautée.
+        this.logger.warn({
+          evenement: 'demo.scenario_pharmacie_saute',
+          message:
+            'Scénario pharmacie de démonstration non joué : les rôles des comptes démo n’ont pas pu être rattachés. Relancez avec DEMO_RESET=true.',
+        });
+      }
+      return;
     }
+    // Scénario de pharmacie : seulement juste après une création ou une remise à zéro.
+    if (!cree) return;
+    try {
+      const bilan = await this.jouerScenarioPharmacie();
+      this.logger.log(
+        `Scénario pharmacie de démonstration joué : ${bilan.receptions} réceptions, ${bilan.evenementsAppliques} opérations du poste, ${bilan.clotures} clôtures, ${bilan.ventesWeb} ventes web.`,
+      );
+    } catch (e) {
+      this.logger.error({
+        evenement: 'demo.scenario_pharmacie_echoue',
+        message:
+          'Scénario pharmacie de démonstration incomplet : relancez avec DEMO_RESET=true.',
+        raison: e instanceof Error ? e.message : 'inconnue',
+      });
+    }
+  }
+
+  /**
+   * Joue le scénario de pharmacie (phase 2, D670) sur les pharmacies démo déjà
+   * créées : titulaire = administrateur de la structure, vendeur = pharmacien du
+   * compte démo. Les erreurs des services sont relancées.
+   */
+  async jouerScenarioPharmacie(): Promise<BilanScenarioPharmacie> {
+    const pharmacie = async (
+      cleStructure: CleStructure,
+      cleVendeur: string,
+    ): Promise<PharmacieDemo> => {
+      const definition = STRUCTURES_DEMO.find((s) => s.cle === cleStructure);
+      const compteVendeur = COMPTES_DEMO.find((c) => c.cle === cleVendeur);
+      if (!definition || !compteVendeur) {
+        throw new Error(
+          `Jeu de démonstration incomplet : ${cleStructure} ou ${cleVendeur} inconnu.`,
+        );
+      }
+      const [structure, vendeur] = await Promise.all([
+        this.prisma.structure.findFirst({
+          where: { email: definition.email },
+          select: { id: true, adminId: true },
+        }),
+        this.prisma.user.findFirst({
+          where: { email: compteVendeur.email },
+          select: { id: true },
+        }),
+      ]);
+      if (!structure?.adminId || !vendeur) {
+        throw new Error(
+          `Pharmacie de démonstration introuvable : ${cleStructure}.`,
+        );
+      }
+      return {
+        structureId: structure.id,
+        titulaireId: structure.adminId,
+        vendeurId: vendeur.id,
+      };
+    };
+    const contexte: ContexteScenarioPharmacie = {
+      kaloum: await pharmacie('pharmaKaloum', 'pharmaKeita'),
+      niger: await pharmacie('pharmaNiger', 'pharmaKourouma'),
+    };
+    return this.scenarioPharmacie.jouer(contexte);
   }
 
   private avertir(): void {
@@ -171,13 +257,17 @@ export class DemoSeeder implements OnApplicationBootstrap {
    *
    * Périmètre : comptes et structures dont l'email est en `@demo.medconnecte.gn`.
    * Les journaux d'audit de ces comptes sont supprimés explicitement (leur clé
-   * étrangère est en SET NULL) ; tout le reste suit les `onDelete: Cascade` du
+   * étrangère est en SET NULL), de même que les pièces de caisse et de vente (D523),
+   * le journal de stock (lots, mouvements, agrégats, conditionnements, réceptions,
+   * D503) et la configuration de caisse des
+   * pharmacies (points de vente, postes, compteurs, plages, paramètres,
+   * fournisseurs, anomalies : clés étrangères en Restrict) ; tout le reste suit les `onDelete: Cascade` du
    * schéma : profil, carnet (consultations, ordonnances, analyses, vaccinations),
    * rendez-vous, auto-diagnostics, urgences, notifications, conversations et
    * messages, autorisations, fichiers, stocks et rôles propres aux structures.
    * Le catalogue de médicaments, partagé, n'est jamais touché.
    */
-  private async purger(tx: Prisma.TransactionClient): Promise<BilanPurgeDemo> {
+  async purger(tx: Prisma.TransactionClient): Promise<BilanPurgeDemo> {
     const filtre = { email: { endsWith: SUFFIXE_EMAIL_DEMO } };
     const comptes = await tx.user.findMany({
       where: filtre,
@@ -190,6 +280,25 @@ export class DemoSeeder implements OnApplicationBootstrap {
     }
     // Comptes d'abord : `Structure.adminId` passe à null, puis les structures partent.
     const comptesSupprimes = await tx.user.deleteMany({ where: filtre });
+    // Configuration de caisse des pharmacies démo (clés étrangères en Restrict, D479).
+    const structuresDemo = await tx.structure.findMany({
+      where: filtre,
+      select: { id: true },
+    });
+    // Pièces de caisse et de vente des pharmacies démo (immuables, clés étrangères en Restrict, D523).
+    await purgerPiecesPharmacies(
+      tx,
+      structuresDemo.map((s) => s.id),
+    );
+    // Journal de stock des pharmacies démo (lots en Restrict vers les points de vente, D503).
+    await purgerStockPharmacies(
+      tx,
+      structuresDemo.map((s) => s.id),
+    );
+    await supprimerConfigurationPharmacies(
+      tx,
+      structuresDemo.map((s) => s.id),
+    );
     const structuresSupprimees = await tx.structure.deleteMany({
       where: filtre,
     });
@@ -331,6 +440,17 @@ export class DemoSeeder implements OnApplicationBootstrap {
       })),
     });
 
+    // 1 bis. Point de vente, poste de reprise, compteur et paramètres des pharmacies (D478)
+    const debutDemo = jourVersDate(joursAvant(jourConakry(maintenant), 30));
+    for (const s of STRUCTURES_DEMO.filter((x) => x.type === 'PHARMACIE')) {
+      await assurerPointDeVente(tx, {
+        id: structureId(s.cle),
+        nom: s.nom,
+      });
+      // Journées passées clôturables : début de la caisse et de la fiabilité de la marge reculés de 30 jours.
+      await reculerDebutsCaisseDemo(tx, structureId(s.cle), debutDemo);
+    }
+
     // 2. Comptes : professionnels d'abord (cibles de `medecinTraitantId`), puis patients
     const versUtilisateur = (c: CompteDemoDef, i: number) => ({
       id: compteId(c.cle),
@@ -414,14 +534,19 @@ export class DemoSeeder implements OnApplicationBootstrap {
       await tx.medicament.create({ data: { id, ...m } });
       idsMedicaments.set(m.nom, id);
     }
+    // Fiches à quantité nulle, sans date de péremption : le stock et les lots viennent
+    // du scénario pharmacie, joué par les services après la création (D670).
     await tx.stockMedicament.createMany({
       data: STOCKS_DEMO.map((s) => ({
         medicamentId: trouver(idsMedicaments, s.medicament),
         structureId: structureId(s.pharmacie),
-        quantite: s.quantite,
         prixUnitaire: s.prixUnitaire,
-        disponible: s.quantite > 0,
-        dateExpiration: jour(s.expirationJours, 0, 0),
+        prixUnite: s.prixUnite,
+        uniteMinimale: s.uniteMinimale,
+        coefficientBoite: s.coefficientBoite,
+        deconditionnable: s.deconditionnable,
+        toleranceInventaire: s.toleranceInventaire,
+        qualifie: s.qualifie,
         notes: s.notes ?? null,
       })),
     });

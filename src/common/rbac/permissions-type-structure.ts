@@ -6,7 +6,7 @@
  * présente mais devient inopérante au calcul des permissions effectives.
  *
  * Liste blanche : toute nouvelle permission du catalogue est refusée aux pharmacies
- * tant qu'on ne l'ajoute pas ici. Inversement, les permissions de vente sont retirées
+ * tant qu'on ne l'ajoute pas ici. Inversement, les permissions de vente et de caisse (ventes, caisse, clôture, inventaire, réception, marge, anomalies) sont retirées
  * à tout autre type de structure.
  */
 import type { StructureType } from 'generated/prisma/enums';
@@ -21,6 +21,15 @@ export const PERMISSIONS_AUTORISEES_PHARMACIE: readonly PermissionCode[] = [
   PERMISSIONS.VENTE_READ,
   PERMISSIONS.VENTE_WRITE,
   PERMISSIONS.VENTE_ANNULER,
+  PERMISSIONS.CAISSE_UTILISER,
+  PERMISSIONS.CAISSE_SUPERVISER,
+  PERMISSIONS.CLOTURE_GERER,
+  PERMISSIONS.INVENTAIRE_WRITE,
+  PERMISSIONS.RECEPTION_WRITE,
+  PERMISSIONS.MARGE_READ,
+  PERMISSIONS.ANOMALIE_GERER,
+  PERMISSIONS.CREDIT_READ,
+  PERMISSIONS.CREDIT_WRITE,
   PERMISSIONS.STRUCTURE_READ,
   PERMISSIONS.STRUCTURE_WRITE,
   PERMISSIONS.MEMBRE_READ,
@@ -34,6 +43,15 @@ export const PERMISSIONS_RESERVEES_PHARMACIE: readonly PermissionCode[] = [
   PERMISSIONS.VENTE_READ,
   PERMISSIONS.VENTE_WRITE,
   PERMISSIONS.VENTE_ANNULER,
+  PERMISSIONS.CAISSE_UTILISER,
+  PERMISSIONS.CAISSE_SUPERVISER,
+  PERMISSIONS.CLOTURE_GERER,
+  PERMISSIONS.INVENTAIRE_WRITE,
+  PERMISSIONS.RECEPTION_WRITE,
+  PERMISSIONS.MARGE_READ,
+  PERMISSIONS.ANOMALIE_GERER,
+  PERMISSIONS.CREDIT_READ,
+  PERMISSIONS.CREDIT_WRITE,
 ];
 
 const autorisees = new Set<string>(PERMISSIONS_AUTORISEES_PHARMACIE);

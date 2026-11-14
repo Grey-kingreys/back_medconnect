@@ -1,0 +1,116 @@
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Ip,
+  Param,
+  Post,
+  Query,
+  Req,
+  StreamableFile,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiProduces,
+  ApiTags,
+} from '@nestjs/swagger';
+import type { RequestWithUser } from 'src/auth/jwt.strategy';
+import { AuthGuard } from 'src/common/guards/auth.guard';
+import { PermissionsGuard } from 'src/common/rbac/permissions.guard';
+import { RequirePermissions } from 'src/common/rbac/require-permissions.decorator';
+import { PERMISSIONS } from 'src/common/rbac/permissions.constants';
+import { ClotureService } from './clotures.service';
+import {
+  CloturerJourneeDto,
+  ListerCloturesQueryDto,
+} from '../dto/clotures.dto';
+
+@ApiTags('Pharmacie : clôture')
+@ApiBearerAuth()
+@Controller('pharmacie')
+@UseGuards(AuthGuard, PermissionsGuard)
+export class ClotureController {
+  constructor(private readonly clotures: ClotureService) {}
+
+  @Get(':structureId/caisse/clotures/:jour/preparation')
+  @RequirePermissions(PERMISSIONS.CLOTURE_GERER)
+  @ApiOperation({
+    summary: "Préparation de la clôture d'une journée",
+    description:
+      "Permission : cloture:gerer. Succès : 200. Préparation de la clôture d'une journée : sessions, caisses encore ouvertes, postes attendus nommés (session ouverte, ventes à envoyer, synchro incomplète, D616), totaux par mode des caisses fermées, peutCloturer, peutForcer ; pour une journée clôturée, la clôture. 400 VALIDATION (dateValide, jourFutur), 400 JOUR_AVANT_DEBUT_CAISSE.",
+  })
+  @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
+  @ApiParam({ name: 'jour', description: 'Jour métier, AAAA-MM-JJ' })
+  preparer(
+    @Req() req: RequestWithUser,
+    @Param('structureId') structureId: string,
+    @Param('jour') jour: string,
+  ) {
+    return this.clotures.preparer(structureId, req.user.userId, jour);
+  }
+
+  @Get(':structureId/caisse/clotures/:jour/export')
+  @RequirePermissions(PERMISSIONS.CLOTURE_GERER)
+  @ApiProduces('text/csv')
+  @ApiOperation({
+    summary: "Export CSV d'une journée clôturée",
+    description:
+      "Permission : cloture:gerer. Succès : 200, fichier cloture-AAAA-MM-JJ.csv. Export CSV (séparateur point-virgule, UTF-8 avec BOM pour Excel) d'une journée clôturée : une ligne par pièce, par paiement et par mouvement de caisse (montant signé), sans coût, sans client, sans médicament. 409 JOURNEE_NON_CLOTUREE, 400 VALIDATION, 400 JOUR_AVANT_DEBUT_CAISSE.",
+  })
+  @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
+  @ApiParam({ name: 'jour', description: 'Jour métier, AAAA-MM-JJ' })
+  async exporter(
+    @Req() req: RequestWithUser,
+    @Param('structureId') structureId: string,
+    @Param('jour') jour: string,
+  ): Promise<StreamableFile> {
+    const { nomFichier, contenu } = await this.clotures.exporter(
+      structureId,
+      req.user.userId,
+      jour,
+    );
+    return new StreamableFile(contenu, {
+      type: 'text/csv; charset=utf-8',
+      disposition: `attachment; filename="${nomFichier}"`,
+    });
+  }
+
+  @Post(':structureId/caisse/clotures')
+  @RequirePermissions(PERMISSIONS.CLOTURE_GERER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Clôturer une journée',
+    description:
+      'Permission : cloture:gerer. Succès : 200. Clôture la journée : caisses fermées incluses, totaux par mode figés. 409 CLOTURE_INCOMPLETE (details : postes attendus) sans forcer ; forcer avec motif (400 MOTIF_REQUIS) seulement si tous les postes attendus sont des postes desktop, sinon 409 CAISSES_A_FERMER ; 409 JOURNEE_DEJA_CLOTUREE.',
+  })
+  @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
+  cloturer(
+    @Req() req: RequestWithUser,
+    @Param('structureId') structureId: string,
+    @Body() dto: CloturerJourneeDto,
+    @Ip() ip: string,
+  ) {
+    return this.clotures.cloturer(structureId, req.user.userId, dto, ip);
+  }
+
+  @Get(':structureId/caisse/clotures')
+  @RequirePermissions(PERMISSIONS.CLOTURE_GERER)
+  @ApiOperation({
+    summary: 'Clôtures du mois',
+    description:
+      'Permission : cloture:gerer. Succès : 200. Clôtures du mois (AAAA-MM, défaut mois en cours). 400 VALIDATION si le mois est mal formé.',
+  })
+  @ApiParam({ name: 'structureId', description: 'Identifiant de la pharmacie' })
+  lister(
+    @Req() req: RequestWithUser,
+    @Param('structureId') structureId: string,
+    @Query() query: ListerCloturesQueryDto,
+  ) {
+    return this.clotures.lister(structureId, req.user.userId, query);
+  }
+}

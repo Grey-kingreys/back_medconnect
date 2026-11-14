@@ -3,148 +3,142 @@ import { PrismaClient } from '../generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 
-const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-});
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+/**
+ * Catalogue global des médicaments du jeu de démonstration (liste recopiée de
+ * `src/demo/demo.donnees.ts`). Aucun stock, aucun lot, aucune structure : un stock
+ * ne naît que par le journal (réception ou inventaire).
+ */
+const MEDICAMENTS = [
+  {
+    nom: 'Doliprane 1000mg',
+    nomGenerique: 'Paracétamol',
+    categorie: 'Antalgique',
+    description: 'Soulage la douleur et fait baisser la fièvre.',
+    ordonnanceRequise: false,
+    formes: ['Comprimé'],
+  },
+  {
+    nom: 'Augmentin 1g/125mg',
+    nomGenerique: 'Amoxicilline et acide clavulanique',
+    categorie: 'Antibiotique',
+    description: 'Antibiotique pour les infections bactériennes courantes.',
+    ordonnanceRequise: true,
+    formes: ['Comprimé'],
+  },
+  {
+    nom: 'Coartem 20/120',
+    nomGenerique: 'Artéméther et luméfantrine',
+    categorie: 'Antipaludéen',
+    description: 'Traitement du paludisme simple.',
+    ordonnanceRequise: true,
+    formes: ['Comprimé'],
+  },
+  {
+    nom: 'Ventoline 100 µg',
+    nomGenerique: 'Salbutamol',
+    categorie: 'Bronchodilatateur',
+    description: "Soulage rapidement la crise d'asthme.",
+    ordonnanceRequise: true,
+    formes: ['Inhalation'],
+  },
+  {
+    nom: 'Amlor 5mg',
+    nomGenerique: 'Amlodipine',
+    categorie: 'Antihypertenseur',
+    description: "Traitement de l'hypertension artérielle.",
+    ordonnanceRequise: true,
+    formes: ['Gélule'],
+  },
+  {
+    nom: 'Glucophage 850mg',
+    nomGenerique: 'Metformine',
+    categorie: 'Antidiabétique',
+    description: 'Traitement du diabète de type 2.',
+    ordonnanceRequise: true,
+    formes: ['Comprimé'],
+  },
+  {
+    nom: 'Spasfon',
+    nomGenerique: 'Phloroglucinol',
+    categorie: 'Antispasmodique',
+    description: 'Soulage les douleurs abdominales.',
+    ordonnanceRequise: false,
+    formes: ['Comprimé'],
+  },
+  {
+    nom: 'Gaviscon Pro',
+    nomGenerique: 'Alginate de sodium et bicarbonate de potassium',
+    categorie: 'Anti-acide',
+    description: "Soulage les brûlures d'estomac.",
+    ordonnanceRequise: false,
+    formes: ['Suspension buvable'],
+  },
+  {
+    nom: 'Flagyl 500mg',
+    nomGenerique: 'Métronidazole',
+    categorie: 'Antiparasitaire',
+    description: 'Traitement des amibiases et de certaines infections.',
+    ordonnanceRequise: true,
+    formes: ['Comprimé'],
+  },
+  {
+    nom: 'SRO',
+    nomGenerique: 'Sels de réhydratation orale',
+    categorie: 'Réhydratation',
+    description: 'Compense les pertes en eau et en sels en cas de diarrhée.',
+    ordonnanceRequise: false,
+    formes: ['Sachet'],
+  },
+  {
+    nom: 'Amoxicilline 500mg',
+    nomGenerique: 'Amoxicilline',
+    categorie: 'Antibiotique',
+    description: 'Antibiotique de la famille des pénicillines.',
+    ordonnanceRequise: true,
+    formes: ['Gélule'],
+  },
+  {
+    nom: 'Ibuprofène 400mg',
+    nomGenerique: 'Ibuprofène',
+    categorie: 'Anti-inflammatoire',
+    description: "Soulage la douleur et l'inflammation.",
+    ordonnanceRequise: false,
+    formes: ['Comprimé'],
+  },
+];
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
 
 async function main() {
-    console.log('💊 Seed des médicaments...');
-
-    const medicines = [
-        {
-            nom: 'Doliprane 1000mg',
-            nomGenerique: 'Paracétamol',
-            categorie: 'Antalgique',
-            description: 'Utilisé pour soulager la douleur et réduire la fièvre. Comprimés sécables.',
-            ordonnanceRequise: false,
-            formes: ['Comprimé', 'Gélule', 'Suppositoire']
-        },
-        {
-            nom: 'Augmentin 1g/125mg',
-            nomGenerique: 'Amoxicilline / Acide clavulanique',
-            categorie: 'Antibiotique',
-            description: 'Antibiotique de la famille des pénicillines. Traitement des infections bactériennes.',
-            ordonnanceRequise: true,
-            formes: ['Comprimé', 'Poudre pour suspension buvable']
-        },
-        {
-            nom: 'Coartem 20/120',
-            nomGenerique: 'Artéméther / Luméfantrine',
-            categorie: 'Antipaludéen',
-            description: 'Traitement du paludisme non compliqué à Plasmodium falciparum.',
-            ordonnanceRequise: true,
-            formes: ['Comprimé']
-        },
-        {
-            nom: 'Spasfon',
-            nomGenerique: 'Phloroglucinol',
-            categorie: 'Antispasmodique',
-            description: 'Traitement des douleurs spasmodiques des intestins, des voies biliaires, de la vessie et de l\'utérus.',
-            ordonnanceRequise: false,
-            formes: ['Comprimé', 'Suppositoire', 'Solution injectable']
-        },
-        {
-            nom: 'Ventoline 100 µg',
-            nomGenerique: 'Salbutamol',
-            categorie: 'Bronchodilatateur',
-            description: 'Traitement de la crise d\'asthme et de la bronchite chronique obstructive.',
-            ordonnanceRequise: true,
-            formes: ['Inhalation', 'Solution pour nébulisation']
-        },
-        {
-            nom: 'Gaviscon Pro',
-            nomGenerique: 'Alginate de sodium / Bicarbonate de potassium',
-            categorie: 'Anti-acide',
-            description: 'Traitement des brûlures d\'estomac et des remontées acides.',
-            ordonnanceRequise: false,
-            formes: ['Suspension buvable', 'Comprimé à croquer']
-        },
-        {
-            nom: 'Glucophage 850mg',
-            nomGenerique: 'Metformine',
-            categorie: 'Antidiabétique',
-            description: 'Traitement du diabète de type 2, en particulier chez les patients en surpoids.',
-            ordonnanceRequise: true,
-            formes: ['Comprimé']
-        },
-        {
-            nom: 'Amlor 5mg',
-            nomGenerique: 'Amlodipine',
-            categorie: 'Antihypertenseur',
-            description: 'Traitement de l\'hypertension artérielle et de l\'angine de poitrine.',
-            ordonnanceRequise: true,
-            formes: ['Gélule']
-        }
-    ];
-
-    for (const med of medicines) {
-        await prisma.medicament.upsert({
-            where: { id: 'dummy' }, // Use a dummy ID to force upsert by other fields if needed, or just use findFirst
-            update: med,
-            create: med,
-        }).catch(async () => {
-            // Since we don't have a unique constraint on 'nom' yet (except if I added it), 
-            // we should probably check by name first.
-            const existing = await prisma.medicament.findFirst({
-                where: { nom: med.nom }
-            });
-            if (!existing) {
-                await prisma.medicament.create({ data: med });
-            } else {
-                await prisma.medicament.update({
-                    where: { id: existing.id },
-                    data: med
-                });
-            }
-        });
-    }
-
-    // Ajouter du stock dans quelques pharmacies
-    const pharmacies = await prisma.structure.findMany({
-        where: { type: 'PHARMACIE' },
-        take: 5
+  let ajoutes = 0;
+  let presents = 0;
+  for (const medicament of MEDICAMENTS) {
+    const existant = await prisma.medicament.findFirst({
+      where: { nom: medicament.nom },
+      select: { id: true },
     });
-
-    const allMeds = await prisma.medicament.findMany();
-
-    for (const p of pharmacies) {
-        for (const m of allMeds) {
-            if (Math.random() > 0.3) { // 70% de chance d'avoir le médicament en stock
-                await prisma.stockMedicament.upsert({
-                    where: {
-                        medicamentId_structureId: {
-                            medicamentId: m.id,
-                            structureId: p.id
-                        }
-                    },
-                    update: {
-                        quantite: Math.floor(Math.random() * 100) + 10,
-                        prixUnitaire: Math.floor(Math.random() * 50000) + 5000,
-                        disponible: true
-                    },
-                    create: {
-                        medicamentId: m.id,
-                        structureId: p.id,
-                        quantite: Math.floor(Math.random() * 100) + 10,
-                        prixUnitaire: Math.floor(Math.random() * 50000) + 5000,
-                        disponible: true
-                    }
-                });
-            }
-        }
+    if (existant) {
+      presents++;
+      continue;
     }
-
-    console.log('✅ Seed des médicaments terminé !');
+    await prisma.medicament.create({ data: medicament });
+    ajoutes++;
+  }
+  console.log(
+    `Catalogue : ${ajoutes} médicament(s) ajouté(s), ${presents} déjà présent(s).`,
+  );
 }
 
 main()
-    .catch((e) => {
-        console.error('❌ Erreur :', e);
-        process.exit(1);
-    })
-    .finally(async () => {
-        await prisma.$disconnect();
-        await pool.end();
-    });
+  .catch((e: unknown) => {
+    console.error(
+      'Échec du seed du catalogue :',
+      e instanceof Error ? e.message : 'erreur inconnue',
+    );
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+    await pool.end();
+  });

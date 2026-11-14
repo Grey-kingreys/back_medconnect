@@ -1,0 +1,2 @@
+# Migrations volontairement fautives du harnais (PB01), jamais appliquées hors base de test.
+provider = "postgresql"

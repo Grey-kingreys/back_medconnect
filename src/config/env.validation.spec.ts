@@ -59,6 +59,33 @@ describe('validateEnv', () => {
     });
   });
 
+  describe('DESKTOP_ORIGINS', () => {
+    it('accepte la variable absente', () => {
+      expect(() => validateEnv(configMinimale())).not.toThrow();
+    });
+
+    it('accepte une liste valide', () => {
+      expect(() =>
+        validateEnv({
+          ...configMinimale(),
+          DESKTOP_ORIGINS: 'http://127.0.0.1:47613, http://localhost:47614',
+        }),
+      ).not.toThrow();
+    });
+
+    it('rejette une liste invalide sans afficher la valeur', () => {
+      const valeur = 'http://192.168.1.2:47613';
+      let message = '';
+      try {
+        validateEnv({ ...configMinimale(), DESKTOP_ORIGINS: valeur });
+      } catch (e) {
+        message = e instanceof Error ? e.message : '';
+      }
+      expect(message).toMatch(/DESKTOP_ORIGINS/);
+      expect(message).not.toContain(valeur);
+    });
+  });
+
   describe('DEMO_MODE', () => {
     const valeurInitiale = process.env.DEMO_MODE;
     afterEach(() => {

@@ -10,6 +10,7 @@ import {
 import type { OnModuleInit } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { ChatService } from './chat.service';
+import { originesCors } from '../config/origines-cors';
 import { JwtService } from '@nestjs/jwt';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
@@ -23,10 +24,10 @@ import {
 
 const ACCES_REFUSE = "Vous n'avez pas accès à cette conversation.";
 
-// CORS aligné sur celui de l'API HTTP (src/main.ts) : seule l'origine du front est autorisée.
+// CORS aligné sur celui de l'API HTTP (src/main.ts) : origines du front et du poste desktop, comme l'API HTTP.
 @WebSocketGateway({
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: originesCors(process.env),
     credentials: true,
   },
 })

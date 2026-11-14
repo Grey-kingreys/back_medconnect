@@ -7,6 +7,7 @@ import {
   COMPTES_DEMO,
   CONSULTATIONS_DEMO,
   RENDEZ_VOUS_DEMO,
+  STOCKS_DEMO,
   STRUCTURES_DEMO,
   URGENCES_DEMO,
 } from './demo.donnees';
@@ -18,8 +19,22 @@ jest.mock('bcrypt', () => ({
 
 const FORMAT_CHIFFRE = /^[0-9a-f]{24}:[0-9a-f]{32}:[0-9a-f]*$/i;
 
+const BILAN_SCENARIO = {
+  receptions: 3,
+  lotsRepris: 1,
+  inventaires: 1,
+  evenementsAppliques: 19,
+  clotures: 2,
+  ventesWeb: 2,
+  annulations: 1,
+  anomaliesTraitees: 1,
+};
+
 type Modele = Record<string, jest.Mock>;
-type PrismaSimule = Record<string, Modele> & { $transaction: jest.Mock };
+type PrismaSimule = Record<string, Modele> & {
+  $transaction: jest.Mock;
+  $queryRaw: jest.Mock;
+};
 
 /**
  * Doublure Prisma : chaque modèle est créé à la demande, chaque méthode est un
@@ -41,6 +56,7 @@ function creerPrisma(): PrismaSimule {
     get(_cible, cle: string | symbol) {
       if (ignore(cle)) return undefined;
       if (cle === '$transaction') return transaction;
+      if (cle === '$queryRaw') return requeteBrute;
       modeles[cle] ??= new Proxy({} as Modele, {
         get(m, nom: string | symbol) {
           if (ignore(nom)) return undefined;
@@ -51,6 +67,7 @@ function creerPrisma(): PrismaSimule {
       return modeles[cle];
     },
   });
+  const requeteBrute = jest.fn().mockResolvedValue([]);
   const transaction = jest.fn((fn: (tx: unknown) => Promise<unknown>) =>
     fn(prisma),
   );
@@ -70,6 +87,7 @@ describe('DemoSeeder', () => {
     seedStructureDefaultRoles: jest.Mock;
   };
   let permissionsService: { invalidateUser: jest.Mock };
+  let scenario: { jouer: jest.Mock };
   let seeder: DemoSeeder;
 
   beforeEach(() => {
@@ -84,11 +102,19 @@ describe('DemoSeeder', () => {
     permissionsService = {
       invalidateUser: jest.fn().mockResolvedValue(undefined),
     };
+    scenario = { jouer: jest.fn().mockResolvedValue(BILAN_SCENARIO) };
+    // Pharmacies et pharmaciens que le scénario retrouve par email.
+    prisma.structure.findFirst.mockResolvedValue({
+      id: 'structure-pharmacie',
+      adminId: 'titulaire',
+    });
+    prisma.user.findFirst.mockResolvedValue({ id: 'vendeur' });
     seeder = new DemoSeeder(
       prisma as never,
       encryption,
       rolesService as never,
       permissionsService as never,
+      scenario as never,
     );
   });
 
@@ -130,6 +156,19 @@ describe('DemoSeeder', () => {
 
       expect(await seeder.creerJeuDeDonnees()).toBe(false);
       expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('création : un point de vente par pharmacie démo, avec son nom', async () => {
+      expect(await seeder.creerJeuDeDonnees()).toBe(true);
+
+      const pharmacies = STRUCTURES_DEMO.filter((s) => s.type === 'PHARMACIE');
+      expect(prisma.pointDeVente.upsert).toHaveBeenCalledTimes(
+        pharmacies.length,
+      );
+      const noms = (
+        prisma.pointDeVente.upsert.mock.calls as [{ create: { nom: string } }][]
+      ).map(([appel]) => appel.create.nom);
+      expect(noms.sort()).toEqual(pharmacies.map((s) => s.nom).sort());
     });
 
     it('crée tout le jeu de données dans une seule transaction', async () => {
@@ -289,12 +328,66 @@ describe('DemoSeeder', () => {
         new Set(['LANCE', 'PRIS_EN_CHARGE', 'TERMINE']),
       );
 
-      // Stocks : au moins une rupture et un stock faible
-      const stocks = donnees<{ quantite: number; disponible: boolean }[]>(
+      // Stocks : fiches à quantité nulle, stock porté par les lots du scénario
+      const stocks = donnees<Record<string, unknown>[]>(
         prisma.stockMedicament.createMany,
       );
-      expect(stocks.some((s) => s.quantite === 0 && !s.disponible)).toBe(true);
-      expect(stocks.some((s) => s.quantite > 0 && s.quantite < 10)).toBe(true);
+      expect(stocks).toHaveLength(STOCKS_DEMO.length);
+      expect(
+        stocks.every((s) => !('quantite' in s) && !('disponible' in s)),
+      ).toBe(true);
+    });
+
+    it('création : fiches qualifiées à quantité nulle, aucun lot ni mouvement', async () => {
+      await seeder.creerJeuDeDonnees();
+
+      const fiches = donnees<
+        {
+          prixUnitaire: number;
+          prixUnite: number | null;
+          uniteMinimale: string;
+          coefficientBoite: number;
+          deconditionnable: boolean;
+          toleranceInventaire: number | null;
+          qualifie: boolean;
+          dateExpiration?: unknown;
+        }[]
+      >(prisma.stockMedicament.createMany);
+      expect(fiches).toHaveLength(16);
+      fiches.forEach((f, i) => {
+        const def = STOCKS_DEMO[i];
+        expect(f.prixUnitaire).toBe(def.prixUnitaire);
+        expect(f.prixUnite).toBe(def.prixUnite);
+        expect(f.uniteMinimale).toBe(def.uniteMinimale);
+        expect(f.coefficientBoite).toBe(def.coefficientBoite);
+        expect(f.deconditionnable).toBe(def.deconditionnable);
+        expect(f.toleranceInventaire).toBe(def.toleranceInventaire);
+        expect(f.qualifie).toBe(def.qualifie);
+        expect('dateExpiration' in f).toBe(false);
+      });
+      expect(fiches.filter((f) => !f.qualifie)).toHaveLength(1);
+      expect(prisma.lotStock.createMany).not.toHaveBeenCalled();
+      expect(prisma.mouvementStock.createMany).not.toHaveBeenCalled();
+    });
+
+    it('création : debutCaisse et debutFiabiliteMarge reculés de 30 jours pour chaque pharmacie', async () => {
+      await seeder.creerJeuDeDonnees();
+
+      const pharmacies = STRUCTURES_DEMO.filter((s) => s.type === 'PHARMACIE');
+      expect(prisma.parametresPharmacie.update).toHaveBeenCalledTimes(
+        pharmacies.length,
+      );
+      const maintenant = Date.now();
+      const minuitUtc = (d: Date) =>
+        Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+      const attendu = minuitUtc(new Date(maintenant)) - 30 * 86_400_000;
+      const appels = prisma.parametresPharmacie.update.mock.calls as [
+        { data: { debutCaisse: Date; debutFiabiliteMarge: Date } },
+      ][];
+      for (const [appel] of appels) {
+        expect(appel.data.debutCaisse.getTime()).toBe(attendu);
+        expect(appel.data.debutFiabiliteMarge.getTime()).toBe(attendu);
+      }
     });
 
     it('réutilise un médicament déjà présent au catalogue', async () => {
@@ -353,6 +446,90 @@ describe('DemoSeeder', () => {
       prisma.$transaction.mockRejectedValue(new Error('base indisponible'));
 
       await expect(seeder.onApplicationBootstrap()).resolves.toBeUndefined();
+      expect(scenario.jouer).not.toHaveBeenCalled();
+    });
+
+    it('le scénario pharmacie est joué après la création et après rattacherRoles', async () => {
+      prisma.permission.count.mockResolvedValue(30);
+      prisma.structure.findMany.mockResolvedValue([
+        { id: 's1', type: 'HOPITAL' },
+      ]);
+
+      await seeder.onApplicationBootstrap();
+
+      expect(scenario.jouer).toHaveBeenCalledTimes(1);
+      const [jouer] = scenario.jouer.mock.invocationCallOrder;
+      expect(
+        prisma.structure.createMany.mock.invocationCallOrder[0],
+      ).toBeLessThan(jouer);
+      expect(
+        rolesService.seedStructureDefaultRoles.mock.invocationCallOrder[0],
+      ).toBeLessThan(jouer);
+      expect(scenario.jouer).toHaveBeenCalledWith({
+        kaloum: {
+          structureId: 'structure-pharmacie',
+          titulaireId: 'titulaire',
+          vendeurId: 'vendeur',
+        },
+        niger: {
+          structureId: 'structure-pharmacie',
+          titulaireId: 'titulaire',
+          vendeurId: 'vendeur',
+        },
+      });
+    });
+
+    it("données déjà présentes : le scénario n'est pas joué", async () => {
+      prisma.user.count.mockResolvedValue(3);
+
+      await seeder.onApplicationBootstrap();
+
+      expect(scenario.jouer).not.toHaveBeenCalled();
+    });
+
+    it("mode inactif : rien n'est créé ni joué", async () => {
+      process.env.DEMO_MODE = 'false';
+
+      await seeder.onApplicationBootstrap();
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(scenario.jouer).not.toHaveBeenCalled();
+    });
+
+    it('un échec du scénario est journalisé sans empêcher le démarrage', async () => {
+      const erreur = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      scenario.jouer.mockRejectedValue(new Error('réception refusée'));
+
+      await expect(seeder.onApplicationBootstrap()).resolves.toBeUndefined();
+
+      expect(erreur).toHaveBeenCalledWith(
+        expect.objectContaining({
+          evenement: 'demo.scenario_pharmacie_echoue',
+          raison: 'réception refusée',
+        }),
+      );
+      erreur.mockRestore();
+    });
+
+    it('rôles non rattachés après une création : le saut du scénario est journalisé', async () => {
+      const erreur = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      const avertissement = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation();
+      prisma.permission.count.mockRejectedValue(new Error('base indisponible'));
+
+      await expect(seeder.onApplicationBootstrap()).resolves.toBeUndefined();
+
+      expect(prisma.structure.createMany).toHaveBeenCalled();
+      expect(scenario.jouer).not.toHaveBeenCalled();
+      expect(erreur).toHaveBeenCalledWith(
+        expect.objectContaining({ evenement: 'demo.seed_echoue' }),
+      );
+      expect(avertissement).toHaveBeenCalledWith(
+        expect.objectContaining({ evenement: 'demo.scenario_pharmacie_saute' }),
+      );
+      erreur.mockRestore();
+      avertissement.mockRestore();
     });
   });
 
@@ -432,6 +609,77 @@ describe('DemoSeeder', () => {
         expect.stringContaining(
           'Données de démonstration supprimées puis recréées',
         ),
+      );
+    });
+
+    it('purge : la configuration de caisse des structures démo part avant les structures', async () => {
+      process.env.DEMO_MODE = 'true';
+      prisma.structure.findMany.mockResolvedValue([{ id: 's-pharma' }]);
+      prisma.user.deleteMany.mockResolvedValue({ count: 0 });
+      prisma.structure.deleteMany.mockResolvedValue({ count: 0 });
+
+      await seeder.reinitialiserJeuDeDonnees();
+
+      expect(prisma.pointDeVente.deleteMany).toHaveBeenCalledWith({
+        where: { structureId: { in: ['s-pharma'] } },
+      });
+      expect(prisma.parametresPharmacie.deleteMany).toHaveBeenCalled();
+      expect(prisma.anomalie.deleteMany).toHaveBeenCalled();
+      expect(prisma.mouvementStock.deleteMany).toHaveBeenCalledWith({
+        where: { pointDeVente: { structureId: { in: ['s-pharma'] } } },
+      });
+      expect(
+        prisma.lotStock.deleteMany.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        prisma.pointDeVente.deleteMany.mock.invocationCallOrder[0],
+      );
+      expect(
+        prisma.pointDeVente.deleteMany.mock.invocationCallOrder[0],
+      ).toBeLessThan(prisma.structure.deleteMany.mock.invocationCallOrder[0]);
+    });
+
+    it('purge : pièces de caisse et de vente avant le journal de stock, réceptions après les lots', async () => {
+      process.env.DEMO_MODE = 'true';
+      prisma.structure.findMany.mockResolvedValue([{ id: 's-pharma' }]);
+      prisma.user.deleteMany.mockResolvedValue({ count: 0 });
+      prisma.structure.deleteMany.mockResolvedValue({ count: 0 });
+
+      await seeder.reinitialiserJeuDeDonnees();
+
+      expect(prisma.vente.deleteMany).toHaveBeenCalledWith({
+        where: {
+          structureId: { in: ['s-pharma'] },
+          venteOrigineId: { not: null },
+        },
+      });
+      expect(prisma.vente.deleteMany).toHaveBeenCalledWith({
+        where: { structureId: { in: ['s-pharma'] } },
+      });
+      const ordre = [
+        prisma.vente.deleteMany.mock.invocationCallOrder[0],
+        prisma.sessionCaisse.deleteMany.mock.invocationCallOrder[0],
+        prisma.lotStock.deleteMany.mock.invocationCallOrder[0],
+        prisma.reception.deleteMany.mock.invocationCallOrder[0],
+        prisma.pointDeVente.deleteMany.mock.invocationCallOrder[0],
+      ];
+      expect(ordre).toEqual([...ordre].sort((a, b) => a - b));
+      expect(new Set(ordre).size).toBe(ordre.length);
+    });
+
+    it('le scénario pharmacie est joué après une remise à zéro', async () => {
+      process.env.DEMO_MODE = 'true';
+      prisma.user.count.mockResolvedValue(20);
+      prisma.user.deleteMany.mockResolvedValue({ count: 20 });
+      prisma.structure.deleteMany.mockResolvedValue({ count: 5 });
+
+      await seeder.onApplicationBootstrap();
+
+      expect(scenario.jouer).toHaveBeenCalledTimes(1);
+      expect(
+        prisma.structure.createMany.mock.invocationCallOrder[0],
+      ).toBeLessThan(scenario.jouer.mock.invocationCallOrder[0]);
+      expect(journal).toHaveBeenCalledWith(
+        expect.stringContaining('Scénario pharmacie de démonstration joué'),
       );
     });
 

@@ -1,6 +1,6 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider        = "prisma-client"
+  output          = "../generated/prisma"
   previewFeatures = ["partialIndexes"]
 }
 
@@ -37,8 +37,8 @@ enum StructureType {
 model Permission {
   id        String           @id @default(uuid())
   code      String           @unique // ex. "carnet:write"
-  libelle   String                   // ex. "Modifier le carnet de santé"
-  categorie String                   // ex. "Carnet de santé"
+  libelle   String // ex. "Modifier le carnet de santé"
+  categorie String // ex. "Carnet de santé"
   roles     RolePermission[]
   createdAt DateTime         @default(now())
 }
@@ -48,7 +48,7 @@ model AppRole {
   nom         String
   description String?
   isSystem    Boolean          @default(false) // non éditable / non supprimable
-  structureId String?                           // null = rôle système global
+  structureId String? // null = rôle système global
   structure   Structure?       @relation("StructureRoles", fields: [structureId], references: [id], onDelete: Cascade)
   permissions RolePermission[]
   users       User[]           @relation("UserAppRole")
@@ -68,21 +68,21 @@ model RolePermission {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String
-  nom       String
-  prenom    String
-  telephone String?
+  id                 String    @id @default(uuid())
+  email              String    @unique
+  password           String
+  nom                String
+  prenom             String
+  telephone          String?
   // Forme E.164 de `telephone`, calculée par le trigger PostgreSQL
   // "user_telephone_normalise" (TB17). Ne jamais l'écrire depuis l'application.
   telephoneNormalise String?
-  dateNaissance DateTime?
-  taille    Int?     // Taille en cm
-  poids     Float?   // Poids en kg
-  role      Role     @default(PATIENT)
-  isActive  Boolean  @default(true)
-  specialite String?  // Spécialité médicale (pour MEDECIN)
+  dateNaissance      DateTime?
+  taille             Int? // Taille en cm
+  poids              Float? // Poids en kg
+  role               Role      @default(PATIENT)
+  isActive           Boolean   @default(true)
+  specialite         String? // Spécialité médicale (pour MEDECIN)
 
   resetPasswordToken   String?   @unique
   resetPasswordExpires DateTime?
@@ -107,20 +107,20 @@ model User {
   appRole   AppRole? @relation("UserAppRole", fields: [appRoleId], references: [id])
 
   // Carnet de santé (Patient side)
-  profilMedical  ProfilMedical?
-  consultations  Consultation[] @relation("PatientConsultations")
-  ordonnances    Ordonnance[]   @relation("PatientOrdonnances")
-  analyses       ResultatAnalyse[] @relation("PatientAnalyses")
-  vaccinations   Vaccination[]   @relation("PatientVaccinations")
-  
+  profilMedical ProfilMedical?
+  consultations Consultation[]    @relation("PatientConsultations")
+  ordonnances   Ordonnance[]      @relation("PatientOrdonnances")
+  analyses      ResultatAnalyse[] @relation("PatientAnalyses")
+  vaccinations  Vaccination[]     @relation("PatientVaccinations")
+
   // Medical records created by this user (Doctor side)
-  consultationsCreees Consultation[] @relation("DoctorConsultations")
-  ordonnancesCreees   Ordonnance[]   @relation("DoctorOrdonnances")
+  consultationsCreees Consultation[]    @relation("DoctorConsultations")
+  ordonnancesCreees   Ordonnance[]      @relation("DoctorOrdonnances")
   analysesCreees      ResultatAnalyse[] @relation("DoctorAnalyses")
-  vaccinationsCreees  Vaccination[]   @relation("DoctorVaccinations")
-  autoDiagnostics AutoDiagnostic[]
-  urgences       Urgence[]
-  notifications  Notification[]
+  vaccinationsCreees  Vaccination[]     @relation("DoctorVaccinations")
+  autoDiagnostics     AutoDiagnostic[]
+  urgences            Urgence[]
+  notifications       Notification[]
 
   // Autorisations données aux structures (Niveau 1)
   autorisationsStructures AutorisationStructure[] @relation("PatientAutorisations")
@@ -149,29 +149,29 @@ model User {
   avatarFileId String?     @unique
   avatarFile   StoredFile? @relation("UserAvatar", fields: [avatarFileId], references: [id], onDelete: SetNull)
 
-  // Un numéro par compte (TB17) ; les comptes sans numéro restent possibles.
-  @@unique([telephoneNormalise], where: raw("\"telephoneNormalise\" IS NOT NULL"))
-
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Un numéro par compte (TB17) ; les comptes sans numéro restent possibles.
+  @@unique([telephoneNormalise], where: raw("\"telephoneNormalise\" IS NOT NULL"))
 }
 
 model Structure {
-  id          String        @id @default(uuid())
-  nom         String
-  type        StructureType
-  email       String        @unique
-  telephone   String?
-  adresse     String?
-  ville       String?
-  latitude    Float?
-  longitude   Float?
-  description String?
-  horaires    String?       // JSON string ex: {"lun":"08:00-18:00",...}
-  estDeGarde  Boolean       @default(false)
-  estOuvertManuel Boolean?    // null: auto, true: forcé ouvert, false: forcé fermé
-  isActive    Boolean       @default(true)
-  isConfigured Boolean      @default(false)
+  id              String        @id @default(uuid())
+  nom             String
+  type            StructureType
+  email           String        @unique
+  telephone       String?
+  adresse         String?
+  ville           String?
+  latitude        Float?
+  longitude       Float?
+  description     String?
+  horaires        String? // JSON string ex: {"lun":"08:00-18:00",...}
+  estDeGarde      Boolean       @default(false)
+  estOuvertManuel Boolean? // null: auto, true: forcé ouvert, false: forcé fermé
+  isActive        Boolean       @default(true)
+  isConfigured    Boolean       @default(false)
 
   // Token d'invitation envoyé par email
   inviteToken   String?   @unique
@@ -197,13 +197,19 @@ model Structure {
   // Ventes au comptoir et compteur de numérotation (pharmacies)
   ventes         Vente[]
   compteursVente CompteurVente[]
+  clientsCredit  ClientCredit[]
+
+  // Tranche pharmacie 1 : points de vente, paramètres et fournisseurs (PB05)
+  pointsDeVente       PointDeVente[]
+  parametresPharmacie ParametresPharmacie?
+  fournisseurs        Fournisseur[]
 
   // Consultations effectuées dans cette structure
   consultations Consultation[]
 
   // Patients ayant autorisé l'accès à leur dossier
   autorisationsPatients AutorisationStructure[] @relation("StructureAutorisations")
-  
+
   // Conversations avec les patients
   conversations Conversation[] @relation("ConversationStructure")
 
@@ -232,119 +238,119 @@ enum GroupeSanguin {
 }
 
 model ProfilMedical {
-  id             String         @id @default(uuid())
-  userId         String         @unique
-  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  groupeSanguin  GroupeSanguin  @default(INCONNU)
-  allergies      String?
-  pathologies    String?
-  traitements    String?  // Traitements en cours
-  taille         Float?         // en cm
-  poids          Float?         // en kg
-  dateNaissance  DateTime?
-  genre          String?        // "M" | "F" | "Autre"
-  contactNom       String?        // Nom du proche
-  contactTelephone String?        // Téléphone du proche
-  contactEmail     String?        // Email du proche
+  groupeSanguin    GroupeSanguin @default(INCONNU)
+  allergies        String?
+  pathologies      String?
+  traitements      String? // Traitements en cours
+  taille           Float? // en cm
+  poids            Float? // en kg
+  dateNaissance    DateTime?
+  genre            String? // "M" | "F" | "Autre"
+  contactNom       String? // Nom du proche
+  contactTelephone String? // Téléphone du proche
+  contactEmail     String? // Email du proche
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model Consultation {
-  id          String   @id @default(uuid())
-  patientId   String
-  patient     User     @relation("PatientConsultations", fields: [patientId], references: [id], onDelete: Cascade)
-  
-  medecinId   String?
-  medecin     User?     @relation("DoctorConsultations", fields: [medecinId], references: [id], onDelete: SetNull)
-  
+  id        String @id @default(uuid())
+  patientId String
+  patient   User   @relation("PatientConsultations", fields: [patientId], references: [id], onDelete: Cascade)
+
+  medecinId String?
+  medecin   User?   @relation("DoctorConsultations", fields: [medecinId], references: [id], onDelete: SetNull)
+
   structureId String?
   structure   Structure? @relation(fields: [structureId], references: [id], onDelete: SetNull)
 
-  medecinNom   String?   // Nom du médecin (peut être externe ou backup)
-  motif        String
-  diagnostic   String?
-  notes        String?
+  medecinNom       String? // Nom du médecin (peut être externe ou backup)
+  motif            String
+  diagnostic       String?
+  notes            String?
   dateConsultation DateTime @default(now())
 
   // Ordonnances liées
   ordonnances Ordonnance[]
 
-  deletedAt   DateTime?
+  deletedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model Ordonnance {
-  id            String   @id @default(uuid())
-  patientId     String
-  patient       User     @relation("PatientOrdonnances", fields: [patientId], references: [id], onDelete: Cascade)
-  
-  medecinId     String?
-  medecin       User?     @relation("DoctorOrdonnances", fields: [medecinId], references: [id], onDelete: SetNull)
-  
-  consultationId String?
-  consultation  Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+  id        String @id @default(uuid())
+  patientId String
+  patient   User   @relation("PatientOrdonnances", fields: [patientId], references: [id], onDelete: Cascade)
 
-  medecinNom    String?
-  medicaments   String   // JSON: [{nom, dosage, duree, instructions}]
-  notes         String?
-  dateEmission  DateTime @default(now())
+  medecinId String?
+  medecin   User?   @relation("DoctorOrdonnances", fields: [medecinId], references: [id], onDelete: SetNull)
+
+  consultationId String?
+  consultation   Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+
+  medecinNom     String?
+  medicaments    String // JSON: [{nom, dosage, duree, instructions}]
+  notes          String?
+  dateEmission   DateTime  @default(now())
   dateExpiration DateTime?
 
   // Ordonnance scannée (PDF/image) : fichier R2 du bucket PRIVÉ. Lecture via URL présignée.
   scanFileId String?     @unique
   scanFile   StoredFile? @relation("OrdonnanceScan", fields: [scanFileId], references: [id], onDelete: SetNull)
 
-  deletedAt   DateTime?
+  deletedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model ResultatAnalyse {
-  id          String   @id @default(uuid())
-  patientId   String
-  patient     User     @relation("PatientAnalyses", fields: [patientId], references: [id], onDelete: Cascade)
-  
-  medecinId   String?
-  medecin     User?     @relation("DoctorAnalyses", fields: [medecinId], references: [id], onDelete: SetNull)
+  id        String @id @default(uuid())
+  patientId String
+  patient   User   @relation("PatientAnalyses", fields: [patientId], references: [id], onDelete: Cascade)
 
-  typeAnalyse String   // "Bilan sanguin", "Radiographie", etc.
-  laboratoire String?
-  resultats   String   // JSON ou texte libre
-  fichierUrl  String?  // ⚠️ DÉPRÉCIÉ (URL brute sans contrôle d'accès), remplacé par documentFile. À retirer une fois le front migré.
+  medecinId String?
+  medecin   User?   @relation("DoctorAnalyses", fields: [medecinId], references: [id], onDelete: SetNull)
+
+  typeAnalyse    String // "Bilan sanguin", "Radiographie", etc.
+  laboratoire    String?
+  resultats      String // JSON ou texte libre
+  fichierUrl     String? // ⚠️ DÉPRÉCIÉ (URL brute sans contrôle d'accès), remplacé par documentFile. À retirer une fois le front migré.
   // Document d'analyse (PDF/image/DICOM) : fichier R2 du bucket PRIVÉ. Lecture via URL présignée.
   documentFileId String?     @unique
   documentFile   StoredFile? @relation("AnalyseDocument", fields: [documentFileId], references: [id], onDelete: SetNull)
-  dateAnalyse DateTime
-  notes       String?
+  dateAnalyse    DateTime
+  notes          String?
 
-  deletedAt   DateTime?
+  deletedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model Vaccination {
-  id          String   @id @default(uuid())
-  patientId   String
-  patient     User     @relation("PatientVaccinations", fields: [patientId], references: [id], onDelete: Cascade)
-  
-  medecinId   String?
-  medecin     User?     @relation("DoctorVaccinations", fields: [medecinId], references: [id], onDelete: SetNull)
+  id        String @id @default(uuid())
+  patientId String
+  patient   User   @relation("PatientVaccinations", fields: [patientId], references: [id], onDelete: Cascade)
 
-  vaccin       String
-  dateVaccin   DateTime
+  medecinId String?
+  medecin   User?   @relation("DoctorVaccinations", fields: [medecinId], references: [id], onDelete: SetNull)
+
+  vaccin         String
+  dateVaccin     DateTime
   prochainRappel DateTime?
-  lotNumero    String?
-  administrePar String?
-  notes        String?
+  lotNumero      String?
+  administrePar  String?
+  notes          String?
 
-  deletedAt   DateTime?
+  deletedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -353,17 +359,17 @@ model Vaccination {
 // ====== AUDIT TRAIL ==================
 
 model AuditLog {
-  id          String   @id @default(uuid())
-  userId      String?  // NULL si action système
-  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  id     String  @id @default(uuid())
+  userId String? // NULL si action système
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
-  action      String   // ex. "create", "update", "delete"
-  entityType  String   // ex. "Consultation", "Ordonnance", "Vaccination", "ResultatAnalyse"
-  entityId    String   // ID de l'entité modifiée
-  ip          String?  // adresse IP source
-  metadata    Json?    // données contextuelles supplémentaires (ex. ancienne/nouvelle valeur)
+  action     String // ex. "create", "update", "delete"
+  entityType String // ex. "Consultation", "Ordonnance", "Vaccination", "ResultatAnalyse"
+  entityId   String // ID de l'entité modifiée
+  ip         String? // adresse IP source
+  metadata   Json? // données contextuelles supplémentaires (ex. ancienne/nouvelle valeur)
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([userId])
   @@index([entityType, entityId])
@@ -376,40 +382,39 @@ enum AppointmentStatus {
   ANNULE
   TERMINE
   EN_ATTENTE // proposé (par l'accueil ou sur la structure), en attente de validation d'un médecin
-  REFUSE     // proposition refusée par le médecin
+  REFUSE // proposition refusée par le médecin
 }
 
 model RendezVous {
-  id          String   @id @default(uuid())
-  patientId   String
-  patient     User     @relation("PatientRendezVous", fields: [patientId], references: [id], onDelete: Cascade)
-  
+  id        String @id @default(uuid())
+  patientId String
+  patient   User   @relation("PatientRendezVous", fields: [patientId], references: [id], onDelete: Cascade)
+
   // Optionnel : un RDV « avec la structure » (pris par l'accueil) n'est pas encore
   // affecté à un médecin, un médecin de la structure le prend en charge ensuite.
-  medecinId   String?
-  medecin     User?    @relation("MedecinRendezVous", fields: [medecinId], references: [id], onDelete: SetNull)
+  medecinId String?
+  medecin   User?   @relation("MedecinRendezVous", fields: [medecinId], references: [id], onDelete: SetNull)
 
   structureId String?
   structure   Structure? @relation(fields: [structureId], references: [id], onDelete: SetNull)
 
-  date        DateTime
-  motif       String
-  notes       String?
-  status      AppointmentStatus @default(PROGRAMME)
+  date   DateTime
+  motif  String
+  notes  String?
+  status AppointmentStatus @default(PROGRAMME)
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
-
 model AutoDiagnostic {
-  id        String   @id @default(uuid())
+  id        String @id @default(uuid())
   patientId String
-  patient   User     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patient   User   @relation(fields: [patientId], references: [id], onDelete: Cascade)
 
-  symptomes       String   // texte libre saisi par l'utilisateur
-  analyseia       String?  // réponse de l'IA (JSON)
-  recommendation  String?  // "urgence" | "consultation" | "repos"
+  symptomes      String // texte libre saisi par l'utilisateur
+  analyseia      String? // réponse de l'IA (JSON)
+  recommendation String? // "urgence" | "consultation" | "repos"
 
   createdAt DateTime @default(now())
 }
@@ -417,13 +422,13 @@ model AutoDiagnostic {
 // ====== PHARMACIE / MEDICAMENTS ======
 
 model Medicament {
-  id          String   @id @default(uuid())
-  nom         String
-  nomGenerique String?
-  categorie   String   // "Antibiotique", "Antalgique", etc.
-  description String?
-  ordonnanceRequise Boolean @default(false)
-  formes      String[] @default([]) // "comprimé", "sirop", "injectable"
+  id                String   @id @default(uuid())
+  nom               String
+  nomGenerique      String?
+  categorie         String // "Antibiotique", "Antalgique", etc.
+  description       String?
+  ordonnanceRequise Boolean  @default(false)
+  formes            String[] @default([]) // "comprimé", "sirop", "injectable"
 
   stocks StockMedicament[]
 
@@ -432,21 +437,53 @@ model Medicament {
 }
 
 model StockMedicament {
-  id            String     @id @default(uuid())
-  medicamentId  String
-  medicament    Medicament @relation(fields: [medicamentId], references: [id], onDelete: Cascade)
-  structureId   String
-  structure     Structure  @relation(fields: [structureId], references: [id], onDelete: Cascade)
+  id           String     @id @default(uuid())
+  medicamentId String
+  medicament   Medicament @relation(fields: [medicamentId], references: [id], onDelete: Cascade)
+  structureId  String
+  structure    Structure  @relation(fields: [structureId], references: [id], onDelete: Cascade)
 
-  quantite      Int        @default(0)
-  prixUnitaire  Int?       // en GNF, entier (lot 7, arrondi à la migration)
-  disponible    Boolean    @default(true)
+  quantite       Int       @default(0)
+  prixUnitaire   Int? // en GNF, entier (lot 7, arrondi à la migration)
+  disponible     Boolean   @default(true)
   dateExpiration DateTime?
-  notes         String?
+  notes          String?
+
+  // Fiche produit étendue (tranche pharmacie 1, PB06, M3) : prixUnitaire = prix de la boîte (D409)
+  uniteMinimale       UniteMinimale @default(UNITE)
+  coefficientBoite    Int           @default(1)
+  prixUnite           Int?
+  deconditionnable    Boolean       @default(false)
+  toleranceInventaire Int?
+  qualifie            Boolean       @default(false)
+  archiveLe           DateTime?
+  createdAt           DateTime      @default(now())
 
   updatedAt DateTime @updatedAt
 
+  // Journal de stock (PB07, M4) : quantite et disponible sont gelées par trigger
+  lots                    LotStock[]
+  mouvements              MouvementStock[]
+  agregatsLot             AgregatStockLot[]
+  agregatsProduit         AgregatStockProduit[]
+  conditionnementsOuverts ConditionnementOuvert[]
+
+  // Inventaires (PB09, M5)
+  lignesInventaire LigneInventaire[]
+
   @@unique([medicamentId, structureId])
+}
+
+// Unité minimale de vente d'une fiche produit (PB06, D410)
+enum UniteMinimale {
+  COMPRIME
+  GELULE
+  ML
+  SACHET
+  GRAMME
+  AMPOULE
+  PLAQUETTE
+  UNITE
 }
 
 enum StatutVente {
@@ -454,43 +491,86 @@ enum StatutVente {
   ANNULEE
 }
 
-// Vente au comptoir d'une pharmacie (lot 7). Jamais supprimée, seulement annulée.
-// vendeurId, annuleeParId et les identifiants des lignes sont sans clé étrangère (D109) :
-// un membre, un stock ou un médicament supprimé ne bloque rien et le reçu reste lisible.
+// Nature d'une pièce de vente (PB09, M6) : vente, annulation (O5) ou régularisation après clôture.
+enum TypePieceVente {
+  VENTE
+  ANNULATION
+  REGULARISATION
+}
+
+// Unité saisie sur une ligne de vente (PB09, M6).
+enum UniteVente {
+  BOITE
+  UNITE
+}
+
+// Vente au comptoir d'une pharmacie (lot 7) : pièce comptable immuable depuis M6 (trigger, D431).
+// Une annulation est une pièce ANNULATION qui pointe l'origine (O5, D419) ; statut, annuleeLe,
+// annuleeParId et motifAnnulation de l'origine sont gelés et dérivés en lecture (PB12).
+// vendeurId, annuleeParId et les identifiants des lignes sont sans clé étrangère (D109).
 model Vente {
-  id                 String      @id @default(uuid())
-  structureId        String
-  structure          Structure   @relation(fields: [structureId], references: [id], onDelete: Cascade)
-  numero             String      // V-AAAA-NNNNNN, séquence par pharmacie et par année
-  vendeurId          String
-  vendeurNom         String      // copie « Prénom Nom » au moment de la vente
-  clientNom          String?
-  clientTelephone    String?
-  ordonnanceVerifiee Boolean     @default(false)
-  total              Int         // GNF, entier
-  statut             StatutVente @default(VALIDEE)
-  annuleeLe          DateTime?
-  annuleeParId       String?
-  motifAnnulation    String?
-  cleIdempotence     String?     // jamais renvoyée au client
-  lignes             LigneVente[]
-  createdAt          DateTime    @default(now())
+  id                    String         @id @default(uuid())
+  structureId           String
+  structure             Structure      @relation(fields: [structureId], references: [id], onDelete: Restrict)
+  pointDeVenteId        String
+  pointDeVente          PointDeVente   @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  posteId               String // ventes historiques : poste technique REPRISE (D421)
+  poste                 Poste          @relation(fields: [posteId], references: [id], onDelete: Restrict)
+  sessionCaisseId       String // ventes historiques : session technique de reprise (D421)
+  sessionCaisse         SessionCaisse  @relation(fields: [sessionCaisseId], references: [id], onDelete: Restrict)
+  typePiece             TypePieceVente @default(VENTE)
+  venteOrigineId        String?        @unique // l'unicité interdit une seconde pièce sur la même origine
+  venteOrigine          Vente?         @relation("PieceLiee", fields: [venteOrigineId], references: [id], onDelete: Restrict)
+  pieceLiee             Vente?         @relation("PieceLiee")
+  numero                String // V-AAAA-NNNNNN (historique), T<ordre>-NNNNNNN, S<ordre>-<poste>-<n>, A-<numero>
+  numeroTicket          Int? // numéro pris dans le compteur ou la plage du point de vente
+  jourMetier            DateTime       @db.Date // jour de rattachement (Conakry, O10) ; historique : jour de createdAt
+  jourMetierOrigine     DateTime?      @db.Date // jour réel si la pièce est rattachée à un autre jour
+  horodatageLocal       DateTime?
+  sequencePoste         Int?
+  vendeurId             String
+  vendeurNom            String // copie « Prénom Nom » au moment de la vente
+  clientNom             String?
+  clientTelephone       String?
+  ordonnanceVerifiee    Boolean        @default(false)
+  telephonePrescripteur String? // facultatif : numéro lu sur l'ordonnance papier
+  clientCreditId        String? // prise à crédit (mode CREDIT) : client du cahier de crédit, posé à la création seulement (pièce immuable)
+  clientCredit          ClientCredit?  @relation(fields: [clientCreditId], references: [id], onDelete: Restrict)
+  total                 Int // GNF, entier ; négatif pour une annulation
+  statut                StatutVente    @default(VALIDEE) // gelé : plus écrit après M6
+  annuleeLe             DateTime? // gelé
+  annuleeParId          String? // gelé
+  motifAnnulation       String? // gelé sur l'origine ; motif de l'annulation sur une pièce ANNULATION
+  cleIdempotence        String? // jamais renvoyée au client
+  lignes                LigneVente[]
+  paiements             Paiement[]
+  createdAt             DateTime       @default(now())
 
   @@unique([structureId, numero])
   @@unique([structureId, cleIdempotence])
+  @@unique([pointDeVenteId, numeroTicket])
   @@index([structureId, createdAt])
+  @@index([pointDeVenteId, jourMetier])
+  @@index([sessionCaisseId])
+  @@index([clientCreditId])
 }
 
+// Ligne de vente, immuable depuis M6. quantite en UM, toujours égale à nombreAffiche x
+// coefficientApplique (CHECK) ; sousTotal = montant de ligne, seule référence des totaux (D409, D470).
 model LigneVente {
-  id                String @id @default(uuid())
-  venteId           String
-  vente             Vente  @relation(fields: [venteId], references: [id], onDelete: Cascade)
-  medicamentId      String
-  stockMedicamentId String
-  nomMedicament     String // copie du nom au moment de la vente
-  prixUnitaire      Int    // copie du prix du stock, GNF
-  quantite          Int
-  sousTotal         Int
+  id                  String          @id @default(uuid())
+  venteId             String
+  vente               Vente           @relation(fields: [venteId], references: [id], onDelete: Restrict)
+  medicamentId        String
+  stockMedicamentId   String
+  nomMedicament       String // copie du nom au moment de la vente
+  prixUnitaire        Int // prix appliqué par UM, GNF (affichage et contrôle)
+  quantite            Int // en UM
+  sousTotal           Int // montant de la ligne
+  uniteAffichee       UniteVente      @default(BOITE)
+  nombreAffiche       Int // nombre de boîtes ou d'UM saisi ; historique = quantite
+  coefficientApplique Int             @default(1) // coefficient de la fiche pour BOITE, 1 pour UNITE
+  allocations         AllocationLot[]
 
   @@index([venteId])
 }
@@ -505,16 +585,663 @@ model CompteurVente {
   @@id([structureId, annee])
 }
 
+// ====== Tranche pharmacie 1 : points de vente, postes et référentiels (PB05, M2) ======
+
+enum TypePoste {
+  WEB
+  DESKTOP
+  TECHNIQUE
+}
+
+enum TypeCoupure {
+  BILLET
+  PIECE
+}
+
+enum TypeAnomalie {
+  STOCK_NEGATIF
+  ECART_INVENTAIRE
+  CONDITIONNEMENT_CONCURRENT
+  REMONTEE_APRES_CLOTURE
+  ECART_CAISSE
+  FOND_NON_COMPTE
+  PLAGE_EPUISEE
+  PRIX_DIVERGENT
+  ORDONNANCE_NON_CONFIRMEE
+  VENTE_UNITE_INTERDITE
+  PRODUIT_ARCHIVE
+  EVENEMENT_REJETE
+  SEQUENCE_MANQUANTE
+}
+
+enum StatutAnomalie {
+  OUVERTE
+  TRAITEE
+}
+
+// Point de vente d'une pharmacie (un seul en T1, ordre 1). Clés étrangères en Restrict (O12).
+model PointDeVente {
+  id          String    @id @default(uuid())
+  structureId String
+  structure   Structure @relation(fields: [structureId], references: [id], onDelete: Restrict)
+  ordre       Int // numéro d'ordre dans la pharmacie, préfixe des tickets T<ordre>-
+  nom         String // copie du nom de la pharmacie à la création
+  actif       Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  postes         Poste[]
+  compteurTicket CompteurTicket?
+  plagesTicket   PlageTicket[]
+  anomalies      Anomalie[]
+
+  // Journal de stock (PB07, M4)
+  lots                    LotStock[]
+  mouvementsStock         MouvementStock[]
+  agregatsLot             AgregatStockLot[]
+  agregatsProduit         AgregatStockProduit[]
+  conditionnementsOuverts ConditionnementOuvert[]
+
+  // Caisse, pièces, réceptions et inventaires (PB09, M5 et M6)
+  sessionsCaisse   SessionCaisse[]
+  mouvementsCaisse MouvementCaisse[]
+  clotures         ClotureJournaliere[]
+  receptions       Reception[]
+  inventaires      Inventaire[]
+  ventes           Vente[]
+
+  @@unique([structureId, ordre])
+  @@index([structureId])
+}
+
+// Poste de caisse : navigateur (WEB), installation (DESKTOP) ou poste technique REPRISE.
+model Poste {
+  id                        String       @id @default(uuid())
+  pointDeVenteId            String
+  pointDeVente              PointDeVente @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  code                      String // W1, D1, REPRISE : unique par point de vente
+  libelle                   String
+  type                      TypePoste
+  appareilId                String? // installation desktop, ou navigateur et utilisateur (web)
+  actif                     Boolean      @default(true)
+  derniereSequenceAppliquee Int          @default(0)
+  dernierContactLe          DateTime?
+  dernierEtat               Json? // { fileVide, sessionOuverte, versionApp } déclaré à la dernière synchro
+  enregistreParId           String? // sans clé étrangère (D109)
+  createdAt                 DateTime     @default(now())
+
+  plagesTicket    PlageTicket[]
+  mouvementsStock MouvementStock[]
+
+  // Caisse et synchronisation (PB09, M5 et M6)
+  sessionsCaisse    SessionCaisse[]
+  ventes            Vente[]
+  evenementsSynchro EvenementSynchro[]
+
+  @@unique([pointDeVenteId, code])
+  @@unique([pointDeVenteId, appareilId])
+}
+
+// Seule source des numéros de ticket d'un point de vente.
+model CompteurTicket {
+  pointDeVenteId String       @id
+  pointDeVente   PointDeVente @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  prochainNumero Int          @default(1)
+}
+
+// Plage de numéros de ticket d'un poste desktop. CHECK (fin >= debut) posé par la migration.
+model PlageTicket {
+  id             String       @id @default(uuid())
+  posteId        String
+  poste          Poste        @relation(fields: [posteId], references: [id], onDelete: Restrict)
+  pointDeVenteId String
+  pointDeVente   PointDeVente @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  debut          Int
+  fin            Int // inclus
+  attribueeLe    DateTime     @default(now())
+  attribueeParId String? // sans clé étrangère
+
+  @@index([posteId])
+}
+
+// Paramètres d'une pharmacie (O9), créés avec les défauts.
+model ParametresPharmacie {
+  structureId               String    @id
+  structure                 Structure @relation(fields: [structureId], references: [id], onDelete: Restrict)
+  horizonsPeremptionJours   Int[]     @default([90, 30, 7])
+  seuilEcartCaisse          Int       @default(5000) // GNF
+  seuilAvertissementPrixPct Int       @default(25)
+  seuilStockBas             Int       @default(10) // en boîtes (A4)
+  taillePlageTickets        Int       @default(1000)
+  seuilRechargementPlagePct Int       @default(20)
+  debutFiabiliteMarge       DateTime  @default(now())
+  debutCaisse               DateTime  @default(now()) // jours antérieurs non clôturables
+  updatedAt                 DateTime  @default(now()) @updatedAt
+  misAJourParId             String? // sans clé étrangère
+}
+
+// Modes de paiement (O7), globaux : un nouveau mode = un INSERT, sans migration.
+model ModePaiement {
+  id                 String  @id @default(uuid())
+  code               String  @unique // ESPECES, ORANGE_MONEY, MTN_MOMO
+  libelle            String
+  comptagePhysique   Boolean
+  referenceAutorisee Boolean
+  ordre              Int
+  actif              Boolean @default(true)
+
+  // Caisse (PB09, M5)
+  paiements        Paiement[]
+  relevesComptage  ReleveModePaiement[]
+  mouvementsCaisse MouvementCaisse[]
+  resultatsSession ResultatSessionMode[]
+  totauxCloture    TotalClotureMode[]
+}
+
+// Coupures comptées en caisse (O8 et correction du porteur : billets de 20 000 à 500 GNF).
+model CoupureMonnaie {
+  id            String      @id @default(uuid())
+  devise        String      @default("GNF")
+  valeurFaciale Int
+  type          TypeCoupure
+  ordre         Int
+  actif         Boolean     @default(true)
+
+  @@unique([devise, valeurFaciale])
+}
+
+// Fournisseur d'une pharmacie (minimal : nom et téléphone).
+model Fournisseur {
+  id          String    @id @default(uuid())
+  structureId String
+  structure   Structure @relation(fields: [structureId], references: [id], onDelete: Restrict)
+  nom         String
+  telephone   String?
+  actif       Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  lots       LotStock[]
+  receptions Reception[]
+
+  @@unique([structureId, nom])
+}
+
+// File d'anomalies du titulaire : seul objet du domaine dont le statut change.
+model Anomalie {
+  id                    String         @id @default(uuid())
+  pointDeVenteId        String
+  pointDeVente          PointDeVente   @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  type                  TypeAnomalie
+  statut                StatutAnomalie @default(OUVERTE)
+  attribueeAId          String? // sans clé étrangère, nominatif
+  pieceType             String
+  pieceId               String?
+  details               Json // liste blanche de champs, jamais de donnée de santé
+  creeLe                DateTime       @default(now())
+  traiteeLe             DateTime?
+  traiteeParId          String?
+  commentaireTraitement String?
+
+  lignesInventaire LigneInventaire[]
+
+  @@index([pointDeVenteId, statut, creeLe])
+}
+
+// ====== Tranche pharmacie 1 : lots, journal de stock et agrégats (PB07, M4) ======
+
+enum TypeMouvementStock {
+  RECEPTION
+  VENTE
+  RETOUR
+  INVENTAIRE
+  PERTE
+  PEREMPTION
+  TRANSFERT
+  CORRECTION
+}
+
+enum TypePiece {
+  MIGRATION
+  VENTE
+  ANNULATION
+  RECEPTION
+  INVENTAIRE
+  SORTIE_MANUELLE
+  RESOLUTION
+  QUALIFICATION
+  AJUSTEMENT
+}
+
+// Lot d'une fiche dans un point de vente. Figé après insertion par trigger, sauf dateExpiration
+// (correction auditée) et, pour un lot technique seulement, coefficientReception et coutUnitaire (PB13).
+model LotStock {
+  id                   String          @id @default(uuid())
+  stockMedicamentId    String
+  stockMedicament      StockMedicament @relation(fields: [stockMedicamentId], references: [id], onDelete: Restrict)
+  pointDeVenteId       String
+  pointDeVente         PointDeVente    @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  numeroLot            String? // nul pour le lot technique de reprise
+  dateExpiration       DateTime?       @db.Date
+  quantiteRecue        Int // en UM
+  coutUnitaire         Int // GNF par UM, figé ; 0 = inconnu, non valorisable
+  coutAchatBoite       Int? // saisi à la réception, traçabilité
+  coefficientReception Int // UM par boîte à la réception, base du reliquat
+  fournisseurId        String?
+  fournisseur          Fournisseur?    @relation(fields: [fournisseurId], references: [id], onDelete: Restrict)
+  receptionId          String?
+  reception            Reception?      @relation(fields: [receptionId], references: [id], onDelete: Restrict)
+  dateReception        DateTime
+  lotTechnique         Boolean         @default(false)
+  auteurId             String? // nul = système, sans clé étrangère (D109)
+  createdAt            DateTime        @default(now())
+
+  // Ligne de facture fournisseur, tous les champs facultatifs. Quantités en boîtes, montants en GNF entiers.
+  codeArticleFournisseur String?
+  codeBarres             String?
+  quantiteCommandee      Int?
+  prixPublicBoite        Int? // jamais recopié sur la fiche
+  codeTva                String?
+  tauxTvaPourMille       Int? // 180 = 18 %, 55 = 5,5 %
+  montantHTLigne         Int?
+  colisage               Int?
+  tableau                String?
+  bonPreparation         String?
+
+  mouvements       MouvementStock[]
+  agregat          AgregatStockLot?
+  conditionnements ConditionnementOuvert[]
+  lignesInventaire LigneInventaire[]
+
+  @@index([stockMedicamentId, pointDeVenteId, dateExpiration, dateReception])
+  @@index([pointDeVenteId, dateExpiration])
+}
+
+// Journal de stock, append-only : jamais modifié ni supprimé (trigger), sauf purge démo et harnais.
+model MouvementStock {
+  id                String             @id @default(uuid())
+  evenementId       String             @unique // stable : UUID client, UUID serveur, ou migration:<stockId>
+  pointDeVenteId    String
+  pointDeVente      PointDeVente       @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  stockMedicamentId String
+  stockMedicament   StockMedicament    @relation(fields: [stockMedicamentId], references: [id], onDelete: Restrict)
+  lotId             String? // nul seulement pour une sortie provisoire sans lot (O11)
+  lot               LotStock?          @relation(fields: [lotId], references: [id], onDelete: Restrict)
+  type              TypeMouvementStock
+  quantite          Int // signée, en UM
+  pieceOrigineType  TypePiece
+  pieceOrigineId    String?
+  motif             String?
+  auteurId          String? // nul = système, sans clé étrangère (D109)
+  horodatageServeur DateTime           @default(now())
+  horodatageLocal   DateTime?
+  posteId           String?
+  poste             Poste?             @relation(fields: [posteId], references: [id], onDelete: Restrict)
+  sequencePoste     Int?
+
+  @@index([stockMedicamentId, pointDeVenteId])
+  @@index([lotId])
+  @@index([pieceOrigineType, pieceOrigineId])
+}
+
+// Agrégat de lecture reconstructible : solde d'un lot, tenu par trigger, jamais négatif.
+model AgregatStockLot {
+  lotId             String          @id
+  lot               LotStock        @relation(fields: [lotId], references: [id], onDelete: Restrict)
+  stockMedicamentId String
+  stockMedicament   StockMedicament @relation(fields: [stockMedicamentId], references: [id], onDelete: Restrict)
+  pointDeVenteId    String
+  pointDeVente      PointDeVente    @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  quantite          Int
+  misAJourLe        DateTime        @default(now())
+
+  @@index([stockMedicamentId, pointDeVenteId])
+}
+
+// Agrégat de lecture reconstructible : solde d'une fiche dans un point de vente, peut être négatif (O11).
+model AgregatStockProduit {
+  stockMedicamentId String
+  stockMedicament   StockMedicament @relation(fields: [stockMedicamentId], references: [id], onDelete: Restrict)
+  pointDeVenteId    String
+  pointDeVente      PointDeVente    @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  quantite          Int
+  misAJourLe        DateTime        @default(now())
+
+  @@id([stockMedicamentId, pointDeVenteId])
+  @@index([pointDeVenteId, quantite])
+}
+
+// Conditionnement entamé (état dérivé matérialisé) : au plus un ouvert par fiche, lot et point de vente.
+model ConditionnementOuvert {
+  id                       String          @id @default(uuid())
+  stockMedicamentId        String
+  stockMedicament          StockMedicament @relation(fields: [stockMedicamentId], references: [id], onDelete: Restrict)
+  lotId                    String
+  lot                      LotStock        @relation(fields: [lotId], references: [id], onDelete: Restrict)
+  pointDeVenteId           String
+  pointDeVente             PointDeVente    @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  unitesParConditionnement Int // coefficientReception du lot
+  ouvertLe                 DateTime        @default(now())
+  ouvertParId              String? // sans clé étrangère (D109)
+  ouvertParPieceId         String?
+  fermeLe                  DateTime?
+
+  @@unique([stockMedicamentId, lotId, pointDeVenteId], where: raw("\"fermeLe\" IS NULL"))
+  @@index([lotId])
+}
+
+// ====== Tranche pharmacie 1 : caisse, réceptions, inventaires et synchronisation (PB09, M5) ======
+
+enum StatutSession {
+  OUVERTE
+  FERMEE
+  INCLUSE_DANS_CLOTURE
+}
+
+enum MomentComptage {
+  OUVERTURE
+  FERMETURE
+}
+
+enum TypeMouvementCaisse {
+  PRELEVEMENT
+  APPORT
+  REMBOURSEMENT
+}
+
+enum StatutEvenementSynchro {
+  APPLIQUE
+  EN_ATTENTE
+  REJETE
+}
+
+// Session de caisse d'un poste : une seule OUVERTE par poste (index partiel). Transitions permises
+// par trigger : OUVERTE vers FERMEE, FERMEE vers INCLUSE_DANS_CLOTURE. La session technique de
+// reprise (une par point de vente, poste REPRISE, D421) porte les ventes historiques et ne change
+// jamais. Le fond de caisse est dérivé du comptage d'ouverture, jamais stocké.
+model SessionCaisse {
+  id                   String              @id @default(uuid()) // UUID client accepté (D427)
+  pointDeVenteId       String
+  pointDeVente         PointDeVente        @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  posteId              String
+  poste                Poste               @relation(fields: [posteId], references: [id], onDelete: Restrict)
+  utilisateurId        String? // sans clé étrangère (D109) ; nul seulement pour la session technique
+  utilisateurNom       String // copie « Prénom Nom » à l'ouverture
+  statut               StatutSession       @default(OUVERTE)
+  technique            Boolean             @default(false)
+  jourMetier           DateTime            @db.Date // jour d'ouverture (Conakry), jour de toutes ses ventes (D435)
+  jourMetierOrigine    DateTime?           @db.Date
+  ouverteLe            DateTime            @default(now())
+  ouverteLeLocal       DateTime?
+  fermeeLe             DateTime?
+  fermeeLeLocal        DateTime?
+  evenementOuvertureId String              @unique
+  evenementFermetureId String?             @unique
+  commentaireEcart     String?
+  commentaireParId     String? // sans clé étrangère
+  clotureJournaliereId String?
+  clotureJournaliere   ClotureJournaliere? @relation(fields: [clotureJournaliereId], references: [id], onDelete: Restrict)
+
+  comptages        ComptageCaisse[]
+  mouvementsCaisse MouvementCaisse[]
+  paiements        Paiement[]
+  resultats        ResultatSessionMode[]
+  ventes           Vente[]
+
+  @@unique([posteId], map: "SessionCaisse_posteId_ouverte_key", where: raw("\"statut\" = 'OUVERTE'"))
+  @@index([pointDeVenteId, jourMetier])
+  @@index([clotureJournaliereId])
+}
+
+// Comptage des espèces à l'ouverture ou à la fermeture d'une session, immuable. Par coupure
+// seulement (LigneComptage), aucun champ « pièces et autres » (CORRECTIONS-PORTEUR.md, point 1).
+model ComptageCaisse {
+  id              String         @id @default(uuid()) // UUID client accepté (D427)
+  sessionCaisseId String
+  sessionCaisse   SessionCaisse  @relation(fields: [sessionCaisseId], references: [id], onDelete: Restrict)
+  moment          MomentComptage
+  totalEspeces    Int // somme des lignes (valeurFaciale x nombre), calculée et vérifiée par le service
+  auteurId        String // sans clé étrangère (D109)
+  evenementId     String         @unique
+  horodatageLocal DateTime?
+  createdAt       DateTime       @default(now())
+
+  lignes  LigneComptage[]
+  releves ReleveModePaiement[]
+
+  @@unique([sessionCaisseId, moment])
+}
+
+// Ligne d'un comptage : nombre de billets d'une coupure (copie de la valeur faciale), immuable.
+model LigneComptage {
+  id            String         @id @default(uuid())
+  comptageId    String
+  comptage      ComptageCaisse @relation(fields: [comptageId], references: [id], onDelete: Restrict)
+  valeurFaciale Int
+  nombre        Int
+
+  @@unique([comptageId, valeurFaciale])
+}
+
+// Total d'un mode de paiement mobile relevé sur le compte marchand à la fermeture, immuable.
+model ReleveModePaiement {
+  id             String         @id @default(uuid())
+  comptageId     String
+  comptage       ComptageCaisse @relation(fields: [comptageId], references: [id], onDelete: Restrict)
+  modePaiementId String
+  modePaiement   ModePaiement   @relation(fields: [modePaiementId], references: [id], onDelete: Restrict)
+  montantDeclare Int
+
+  @@unique([comptageId, modePaiementId])
+}
+
+// Prélèvement, apport ou remboursement dans une session, motivé et attribué, immuable.
+model MouvementCaisse {
+  id                String              @id @default(uuid()) // UUID client accepté (D427)
+  sessionCaisseId   String
+  sessionCaisse     SessionCaisse       @relation(fields: [sessionCaisseId], references: [id], onDelete: Restrict)
+  pointDeVenteId    String
+  pointDeVente      PointDeVente        @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  type              TypeMouvementCaisse
+  modePaiementId    String
+  modePaiement      ModePaiement        @relation(fields: [modePaiementId], references: [id], onDelete: Restrict)
+  montant           Int // GNF, strictement positif
+  motif             String
+  auteurId          String // sans clé étrangère (D109)
+  horodatageServeur DateTime            @default(now())
+  horodatageLocal   DateTime?
+  evenementId       String              @unique
+
+  @@index([sessionCaisseId])
+}
+
+// Paiement d'une pièce de vente, immuable ; montant signé (négatif pour une annulation).
+// Invariant tenu par le service : somme des paiements d'une vente = Vente.total.
+model Paiement {
+  id               String        @id @default(uuid())
+  venteId          String
+  vente            Vente         @relation(fields: [venteId], references: [id], onDelete: Restrict)
+  sessionCaisseId  String
+  sessionCaisse    SessionCaisse @relation(fields: [sessionCaisseId], references: [id], onDelete: Restrict)
+  modePaiementId   String
+  modePaiement     ModePaiement  @relation(fields: [modePaiementId], references: [id], onDelete: Restrict)
+  montant          Int
+  referenceExterne String?
+  montantRecu      Int? // espèces remises par le client, pour le rendu du ticket
+  createdAt        DateTime      @default(now())
+
+  @@index([venteId])
+  @@index([sessionCaisseId, modePaiementId])
+}
+
+// Photographie du théorique, du compté et de l'écart d'un mode à la fermeture d'une session, immuable.
+model ResultatSessionMode {
+  id              String        @id @default(uuid())
+  sessionCaisseId String
+  sessionCaisse   SessionCaisse @relation(fields: [sessionCaisseId], references: [id], onDelete: Restrict)
+  modePaiementId  String
+  modePaiement    ModePaiement  @relation(fields: [modePaiementId], references: [id], onDelete: Restrict)
+  theorique       Int
+  compte          Int? // nul : non rapproché
+  ecart           Int? // compte - theorique, signé, jamais corrigé
+  createdAt       DateTime      @default(now())
+
+  @@unique([sessionCaisseId, modePaiementId])
+}
+
+// Clôture d'une journée métier d'un point de vente : son existence est le verrou, immuable.
+model ClotureJournaliere {
+  id              String       @id @default(uuid())
+  pointDeVenteId  String
+  pointDeVente    PointDeVente @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  jourMetier      DateTime     @db.Date
+  clotureParId    String // sans clé étrangère (D109)
+  clotureeLe      DateTime     @default(now())
+  forcee          Boolean      @default(false)
+  motifForcage    String?
+  postesManquants Json         @default("[]") // [{ posteId, code, libelle }]
+
+  sessions SessionCaisse[]
+  totaux   TotalClotureMode[]
+
+  @@unique([pointDeVenteId, jourMetier])
+}
+
+// Totaux par mode d'une clôture, immuables.
+model TotalClotureMode {
+  id             String             @id @default(uuid())
+  clotureId      String
+  cloture        ClotureJournaliere @relation(fields: [clotureId], references: [id], onDelete: Restrict)
+  modePaiementId String
+  modePaiement   ModePaiement       @relation(fields: [modePaiementId], references: [id], onDelete: Restrict)
+  theorique      Int
+  compte         Int?
+  ecart          Int?
+
+  @@unique([clotureId, modePaiementId])
+}
+
+// Réception d'une livraison, immuable ; ses lignes sont les lots créés (LotStock.receptionId).
+model Reception {
+  id             String       @id @default(uuid())
+  pointDeVenteId String
+  pointDeVente   PointDeVente @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  fournisseurId  String?
+  fournisseur    Fournisseur? @relation(fields: [fournisseurId], references: [id], onDelete: Restrict)
+  reference      String? // bon de livraison
+  recueLe        DateTime
+  auteurId       String // sans clé étrangère (D109)
+  createdAt      DateTime     @default(now())
+
+  // Facture fournisseur, tous les champs facultatifs. Montants en GNF entiers (coûts d'achat : masqués sans marge:read).
+  numeroFacture     String?
+  referenceCommande String?
+  dateFacture       DateTime? @db.Date
+  nombrePages       Int?
+  montantHT         Int?
+  totalTva          Int?
+  montantTTC        Int?
+  netAPayer         Int?
+
+  lots LotStock[]
+
+  @@index([pointDeVenteId, recueLe])
+}
+
+// Inventaire d'un point de vente, immuable avec ses lignes.
+model Inventaire {
+  id             String       @id @default(uuid())
+  pointDeVenteId String
+  pointDeVente   PointDeVente @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  auteurId       String // sans clé étrangère (D109)
+  commentaire    String?
+  createdAt      DateTime     @default(now())
+
+  lignes LigneInventaire[]
+
+  @@index([pointDeVenteId, createdAt])
+}
+
+// Ligne d'inventaire par lot, immuable ; ecart = quantiteComptee - quantiteTheorique (CHECK).
+model LigneInventaire {
+  id                String          @id @default(uuid())
+  inventaireId      String
+  inventaire        Inventaire      @relation(fields: [inventaireId], references: [id], onDelete: Restrict)
+  stockMedicamentId String
+  stockMedicament   StockMedicament @relation(fields: [stockMedicamentId], references: [id], onDelete: Restrict)
+  lotId             String? // nul seulement pour une fiche sans lot (PB15)
+  lot               LotStock?       @relation(fields: [lotId], references: [id], onDelete: Restrict)
+  quantiteTheorique Int
+  quantiteComptee   Int
+  ecart             Int
+  sousTolerance     Boolean
+  anomalieId        String?
+  anomalie          Anomalie?       @relation(fields: [anomalieId], references: [id], onDelete: Restrict)
+
+  @@index([inventaireId])
+  @@index([lotId])
+}
+
+// Événement de synchronisation reçu d'un poste desktop. Seule transition permise (trigger) :
+// EN_ATTENTE vers APPLIQUE ou REJETE (avec son résultat).
+model EvenementSynchro {
+  id              String                 @id @default(uuid())
+  evenementId     String                 @unique // UUID client
+  posteId         String
+  poste           Poste                  @relation(fields: [posteId], references: [id], onDelete: Restrict)
+  sequence        Int
+  type            String
+  utilisateurId   String? // nul seulement pour un événement illisible (PB18)
+  horodatageLocal DateTime?
+  recuLe          DateTime               @default(now())
+  statut          StatutEvenementSynchro
+  empreinte       String // sha256 du corps canonique
+  corps           Json
+  resultat        Json?
+
+  @@unique([posteId, sequence])
+  @@index([posteId, statut])
+}
+
+// ====== Tranche pharmacie 1 : allocations de lots des lignes de vente (PB09, M6) ======
+
+enum StatutAllocation {
+  DEFINITIVE
+  PROVISOIRE
+  REMPLACEE
+}
+
+// Allocation d'une ligne de vente à un lot (copie du lot, sans clé étrangère). Seule mise à jour
+// permise (trigger) : PROVISOIRE vers REMPLACEE. Lot présent si et seulement si DEFINITIVE.
+model AllocationLot {
+  id                  String           @id @default(uuid())
+  ligneVenteId        String
+  ligneVente          LigneVente       @relation(fields: [ligneVenteId], references: [id], onDelete: Restrict)
+  lotId               String? // copie sans clé étrangère ; nul pour une allocation provisoire
+  numeroLot           String?
+  dateExpiration      DateTime?        @db.Date
+  quantite            Int // UM, signée (négative pour une annulation)
+  coutUnitaire        Int // copie du coût du lot à la sortie, GNF par UM
+  lotTechnique        Boolean          @default(false)
+  statut              StatutAllocation
+  remplaceeParPieceId String?
+  sortieManuelle      Boolean          @default(false)
+  motif               String?
+  auteurId            String? // nul = système, sans clé étrangère (D109)
+  createdAt           DateTime         @default(now())
+
+  @@index([ligneVenteId])
+  @@index([lotId])
+}
+
 // ====== SECURITE ET ACCES ======
 
 // Niveau 1: Autorisation de partage de dossier avec une structure
 model AutorisationStructure {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   patientId   String
-  patient     User     @relation("PatientAutorisations", fields: [patientId], references: [id], onDelete: Cascade)
+  patient     User      @relation("PatientAutorisations", fields: [patientId], references: [id], onDelete: Cascade)
   structureId String
   structure   Structure @relation("StructureAutorisations", fields: [structureId], references: [id], onDelete: Cascade)
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
 
   @@unique([patientId, structureId])
 }
@@ -522,46 +1249,47 @@ model AutorisationStructure {
 // ====== MESSAGERIE (CHAT) ======
 
 enum ConversationType {
-  PRIVE      // Patient - Médecin
-  STRUCTURE  // Patient - Structure
+  PRIVE // Patient - Médecin
+  STRUCTURE // Patient - Structure
 }
 
 model Conversation {
-  id          String   @id @default(uuid())
-  type        ConversationType
-  
+  id   String           @id @default(uuid())
+  type ConversationType
+
   // Si PRIVE (Patient - Médecin)
-  patientId   String?
-  patient     User?     @relation("ConversationPatient", fields: [patientId], references: [id], onDelete: Cascade)
-  medecinId   String?
-  medecin     User?     @relation("ConversationMedecin", fields: [medecinId], references: [id], onDelete: Cascade)
-  
+  patientId String?
+  patient   User?   @relation("ConversationPatient", fields: [patientId], references: [id], onDelete: Cascade)
+  medecinId String?
+  medecin   User?   @relation("ConversationMedecin", fields: [medecinId], references: [id], onDelete: Cascade)
+
   // Si STRUCTURE (Patient - Structure)
   structureId String?
   structure   Structure? @relation("ConversationStructure", fields: [structureId], references: [id], onDelete: Cascade)
 
-  messages    Message[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  messages  Message[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 }
 
 model Message {
   id             String       @id @default(uuid())
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  
-  senderId       String
-  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  
-  content        String
-  isLocation     Boolean      @default(false) // Pour le bouton 📍 Position
-  latitude       Float?
-  longitude      Float?
-  
-  lu             Boolean      @default(false)
-  
-  createdAt      DateTime     @default(now())
+
+  senderId String
+  sender   User   @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  content    String
+  isLocation Boolean @default(false) // Pour le bouton 📍 Position
+  latitude   Float?
+  longitude  Float?
+
+  lu Boolean @default(false)
+
+  createdAt DateTime @default(now())
 }
+
 enum MessageType {
   TEXTE
   IMAGE
@@ -584,9 +1312,9 @@ enum SourcePositionUrgence {
 }
 
 model Urgence {
-  id        String   @id @default(uuid())
+  id        String @id @default(uuid())
   patientId String
-  patient   User     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patient   User   @relation(fields: [patientId], references: [id], onDelete: Cascade)
 
   latitude  Float?
   longitude Float?
@@ -603,7 +1331,7 @@ model Urgence {
   cleIdempotence String?
   bilanDiffusion Json?
 
-  status    UrgenceStatus @default(LANCE)
+  status UrgenceStatus @default(LANCE)
 
   // Prise en charge : structure qui intervient (SetNull si elle est supprimée,
   // l'historique de l'alerte est conservé).
@@ -619,10 +1347,10 @@ model Urgence {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Lecture de la dernière alerte d'un patient (anti-relance)
-  @@index([patientId, createdAt])
   // Un rejeu (même patient, même clé) retrouve l'alerte d'origine ; NULL n'est jamais en conflit.
   @@unique([patientId, cleIdempotence])
+  // Lecture de la dernière alerte d'un patient (anti-relance)
+  @@index([patientId, createdAt])
 }
 
 // ====== STOCKAGE OBJETS (Cloudflare R2) ======
@@ -632,13 +1360,13 @@ model Urgence {
 // Cf. `src/storage/` (StorageModule), module isolé, migration des usages métier séparée.
 
 enum StoredFileBucket {
-  PUBLIC   // bucket public (cdn.medconnecte.com) : avatars, logos, images d'articles
-  PRIVATE  // bucket privé : documents médicaux, accès par URL présignée uniquement
+  PUBLIC // bucket public (cdn.medconnecte.com) : avatars, logos, images d'articles
+  PRIVATE // bucket privé : documents médicaux, accès par URL présignée uniquement
 }
 
 enum StoredFileStatus {
-  PENDING    // enregistrement créé lors de la demande d'URL présignée, upload non confirmé
-  CONFIRMED  // upload vérifié via HeadObject
+  PENDING // enregistrement créé lors de la demande d'URL présignée, upload non confirmé
+  CONFIRMED // upload vérifié via HeadObject
 }
 
 model StoredFile {
@@ -646,8 +1374,8 @@ model StoredFile {
   key          String           @unique // clé R2 (jamais une URL présignée)
   bucket       StoredFileBucket
   mimeType     String
-  size         Int                      // taille en octets
-  originalName String                   // conservé pour l'affichage uniquement (jamais dans la clé)
+  size         Int // taille en octets
+  originalName String // conservé pour l'affichage uniquement (jamais dans la clé)
   ownerId      String
   owner        User             @relation("UserStoredFiles", fields: [ownerId], references: [id], onDelete: Cascade)
   status       StoredFileStatus @default(PENDING)
@@ -680,17 +1408,17 @@ enum NotificationType {
 }
 
 model Notification {
-  id        String           @id @default(uuid())
-  userId    String
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  type      NotificationType
-  titre     String
-  message   String
-  lu        Boolean          @default(false)
-  lien      String?          // URL optionnelle vers laquelle naviguer
+  type    NotificationType
+  titre   String
+  message String
+  lu      Boolean          @default(false)
+  lien    String? // URL optionnelle vers laquelle naviguer
 
-  createdAt DateTime         @default(now())
+  createdAt DateTime @default(now())
 }
 
 // ====== SESSIONS PAR APPAREIL (TB3) ======
@@ -723,4 +1451,48 @@ model Session {
 
   @@index([userId])
   @@index([userId, deviceId])
+}
+
+// ====== Tranche pharmacie 2 : cahier de crédit (M11) ======
+
+// Client du cahier de crédit, propre à une pharmacie. Un client n'existe que si le pharmacien lui ouvre un crédit.
+// Reste à payer = ventes à crédit non annulées moins remboursements (jamais stocké). auteurId sans clé étrangère (D109).
+model ClientCredit {
+  id          String    @id @default(uuid())
+  structureId String
+  structure   Structure @relation(fields: [structureId], references: [id], onDelete: Restrict)
+  nomComplet  String
+  telephone   String?
+  note        String?
+  auteurId    String // sans clé étrangère
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  ventes         Vente[]
+  remboursements RemboursementCredit[]
+
+  @@index([structureId, nomComplet])
+}
+
+// Remboursement d'un client de crédit, immuable (aucune modification : un trigger la refuse).
+// mouvementCaisseId : entrée de caisse (APPORT) si l'argent est versé dans la caisse ouverte de l'auteur ; sans clé étrangère.
+model RemboursementCredit {
+  id                String       @id @default(uuid())
+  clientCreditId    String
+  clientCredit      ClientCredit @relation(fields: [clientCreditId], references: [id], onDelete: Restrict)
+  montant           Int // GNF, strictement positif
+  note              String?
+  verseEnCaisse     Boolean      @default(false)
+  mouvementCaisseId String?
+  auteurId          String // sans clé étrangère
+  createdAt         DateTime     @default(now())
+
+  @@index([clientCreditId])
+}
+
+// Date limite d'une prise à crédit. Vente est immuable : la date, modifiable, vit ici. venteId sans clé étrangère (la purge des pièces reste valable).
+model EcheanceCredit {
+  venteId    String   @id
+  dateLimite DateTime @db.Date
+  updatedAt  DateTime @updatedAt
 }

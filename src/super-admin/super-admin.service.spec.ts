@@ -11,9 +11,17 @@ describe("SuperAdminService : email d'invitation", () => {
       update: jest.Mock;
     };
     user: { findUnique: jest.Mock };
+    $transaction: jest.Mock;
   };
   let logError: jest.SpyInstance;
   let service: SuperAdminService;
+
+  const tx = {
+    pointDeVente: { upsert: jest.fn().mockResolvedValue({ id: 'pv1' }) },
+    poste: { upsert: jest.fn().mockResolvedValue({}) },
+    compteurTicket: { upsert: jest.fn().mockResolvedValue({}) },
+    parametresPharmacie: { upsert: jest.fn().mockResolvedValue({}) },
+  };
 
   const DATE_ANCIENNE = new Date('2026-10-20T10:00:00.000Z');
   const MESSAGE_CREATION_ECHEC =
@@ -46,7 +54,10 @@ describe("SuperAdminService : email d'invitation", () => {
         update: jest.fn().mockResolvedValue({}),
       },
       user: { findUnique: jest.fn().mockResolvedValue(null) },
+      $transaction: jest.fn((fn: (t: unknown) => Promise<unknown>) => fn(tx)),
     };
+    tx.pointDeVente.upsert.mockClear();
+    tx.poste.upsert.mockClear();
     const rolesService = {
       seedStructureDefaultRoles: jest.fn().mockResolvedValue(undefined),
     };
@@ -83,6 +94,64 @@ describe("SuperAdminService : email d'invitation", () => {
           expect(String(argument)).not.toContain('clinique@exemple.gn');
         }
       }
+    });
+  });
+
+  describe('createStructure : pharmacie', () => {
+    const dtoPharmacie = {
+      nom: 'Pharmacie Test',
+      type: 'PHARMACIE',
+      email: 'pharmacie@exemple.gn',
+    } as never;
+    const structurePharmacie = () => ({
+      id: 's1',
+      nom: 'Pharmacie Test',
+      type: 'PHARMACIE',
+      email: 'pharmacie@exemple.gn',
+      isConfigured: false,
+      createdAt: new Date(),
+    });
+
+    it('pharmacie : point de vente, poste de reprise, compteur et paramètres créés dans une transaction', async () => {
+      prisma.structure.create.mockResolvedValueOnce(structurePharmacie());
+      envoyer.mockResolvedValue(undefined);
+      const reponse = await service.createStructure(dtoPharmacie);
+      expect(reponse.success).toBe(true);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(tx.pointDeVente.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { structureId_ordre: { structureId: 's1', ordre: 1 } },
+          create: { structureId: 's1', ordre: 1, nom: 'Pharmacie Test' },
+        }),
+      );
+      const appelPoste = (
+        tx.poste.upsert.mock.calls as [
+          { create: { code: string; type: string; actif: boolean } },
+        ][]
+      )[0][0];
+      expect(appelPoste.create).toMatchObject({
+        code: 'REPRISE',
+        type: 'TECHNIQUE',
+        actif: false,
+      });
+    });
+
+    it("pharmacie : échec du point de vente, la structure reste créée et l'échec est journalisé", async () => {
+      prisma.structure.create.mockResolvedValueOnce(structurePharmacie());
+      prisma.$transaction.mockRejectedValueOnce(new Error('base'));
+      envoyer.mockResolvedValue(undefined);
+      const reponse = await service.createStructure(dtoPharmacie);
+      expect(reponse.success).toBe(true);
+      expect(reponse.data.id).toBe('s1');
+      expect(logError).toHaveBeenCalledWith(
+        'superadmin.point_de_vente_echec structureId=s1',
+      );
+    });
+
+    it('clinique : aucun point de vente', async () => {
+      envoyer.mockResolvedValue(undefined);
+      await service.createStructure(dto);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
   });
 

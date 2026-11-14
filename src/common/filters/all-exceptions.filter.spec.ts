@@ -126,6 +126,197 @@ describe('AllExceptionsFilter', () => {
     ]);
   });
 
+  it('recopie unite et disponibleUm du 409 STOCK_INSUFFISANT, sans autre clé', () => {
+    filtre.catch(
+      new ConflictException({
+        message: 'Stock insuffisant.',
+        code: 'STOCK_INSUFFISANT',
+        details: [
+          {
+            stockId: 's1',
+            nom: 'Doliprane',
+            unite: 'BOITE',
+            demande: 2,
+            disponible: 1,
+            disponibleUm: 35,
+            interne: 'x',
+          },
+          { stockId: 's2', unite: 12, disponibleUm: '3' },
+        ],
+      }),
+      host,
+    );
+    expect(corpsRenvoye().details).toEqual([
+      {
+        stockId: 's1',
+        nom: 'Doliprane',
+        unite: 'BOITE',
+        demande: 2,
+        disponible: 1,
+        disponibleUm: 35,
+      },
+      { stockId: 's2' },
+    ]);
+  });
+
+  it('recopie les lots périmés assainis du 409 SORTIE_MANUELLE_REQUISE', () => {
+    filtre.catch(
+      new ConflictException({
+        message: 'Il ne reste que des lots périmés.',
+        code: 'SORTIE_MANUELLE_REQUISE',
+        details: [
+          {
+            stockId: 's1',
+            nom: 'Doliprane',
+            disponible: 0,
+            demande: 2,
+            interne: 'x',
+            lots: [
+              {
+                lotId: 'l1',
+                numeroLot: 'A12',
+                dateExpiration: '2026-01-01',
+                quantite: 10,
+                coutUnitaire: 300,
+              },
+              {
+                lotId: 'l2',
+                numeroLot: 7,
+                dateExpiration: '2026-02-01',
+                quantite: 4,
+              },
+              { lotId: 3 },
+            ],
+          },
+        ],
+      }),
+      host,
+    );
+    expect(corpsRenvoye().details).toEqual([
+      {
+        stockId: 's1',
+        nom: 'Doliprane',
+        disponible: 0,
+        demande: 2,
+        lots: [
+          {
+            lotId: 'l1',
+            numeroLot: 'A12',
+            dateExpiration: '2026-01-01',
+            quantite: 10,
+          },
+          {
+            lotId: 'l2',
+            numeroLot: null,
+            dateExpiration: '2026-02-01',
+            quantite: 4,
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('LOT_REQUIS recopie les lots, date nulle comprise', () => {
+    filtre.catch(
+      new ConflictException({
+        message: 'm',
+        code: 'LOT_REQUIS',
+        details: [
+          {
+            stockId: 's',
+            nom: 'n',
+            lots: [
+              {
+                lotId: 'a',
+                numeroLot: null,
+                dateExpiration: null,
+                quantite: 3,
+              },
+              {
+                lotId: 'b',
+                numeroLot: 'B1',
+                dateExpiration: '2027-01-31',
+                quantite: 2,
+                coutUnitaire: 9,
+              },
+            ],
+          },
+        ],
+      }),
+      host,
+    );
+    expect(corpsRenvoye().details).toEqual([
+      {
+        stockId: 's',
+        nom: 'n',
+        lots: [
+          {
+            lotId: 'a',
+            numeroLot: null,
+            dateExpiration: null,
+            quantite: 3,
+          },
+          {
+            lotId: 'b',
+            numeroLot: 'B1',
+            dateExpiration: '2027-01-31',
+            quantite: 2,
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('garde details pour le 400 VENTE_UNITE_INTERDITE', () => {
+    filtre.catch(
+      new BadRequestException({
+        message: 'Ce médicament se vend uniquement à la boîte.',
+        code: 'VENTE_UNITE_INTERDITE',
+        details: [{ stockId: 's1', nom: 'Doliprane', secret: 'x' }],
+      }),
+      host,
+    );
+    expect(corpsRenvoye().details).toEqual([
+      { stockId: 's1', nom: 'Doliprane' },
+    ]);
+  });
+
+  it('CAISSES_A_FERMER recopie les clés chaînes des postes, sans les valeurs nulles ni les autres clés', () => {
+    filtre.catch(
+      new ConflictException({
+        message: 'm',
+        code: 'CAISSES_A_FERMER',
+        details: [
+          {
+            posteId: 'p1',
+            posteCode: 'W1',
+            libelle: 'Poste W1',
+            type: 'WEB',
+            raison: 'SESSION_OUVERTE',
+            sessionId: 's-1',
+            utilisateurNom: 'Mamadou Diallo',
+            dernierContactLe: null,
+            message: 'La caisse...',
+            secret: 'x',
+          },
+        ],
+      }),
+      host,
+    );
+    expect(corpsRenvoye().details).toEqual([
+      {
+        posteId: 'p1',
+        posteCode: 'W1',
+        libelle: 'Poste W1',
+        type: 'WEB',
+        raison: 'SESSION_OUVERTE',
+        sessionId: 's-1',
+        utilisateurNom: 'Mamadou Diallo',
+        message: 'La caisse...',
+      },
+    ]);
+  });
+
   it('ne recopie pas details sans code de vente', () => {
     filtre.catch(
       new BadRequestException({
@@ -413,6 +604,20 @@ describe('AllExceptionsFilter', () => {
     filtre.catch(new PayloadTooLargeException(), host);
     expect(status).toHaveBeenCalledWith(413);
     expect(corpsRenvoye().message).toBe(MESSAGES.tropVolumineux);
+  });
+
+  it('traduit le 415 de body-parser (corps compressé refusé, D663)', () => {
+    const erreur = Object.assign(new Error('content encoding unsupported'), {
+      status: 415,
+      type: 'encoding.unsupported',
+    });
+    filtre.catch(erreur, host);
+    expect(status).toHaveBeenCalledWith(415);
+    expect(corpsRenvoye()).toEqual({
+      statusCode: 415,
+      message: MESSAGES.formatNonPrisEnCharge,
+      error: 'Format non pris en charge',
+    });
   });
 
   it('transforme P2002 en 409 sans code Prisma', () => {
