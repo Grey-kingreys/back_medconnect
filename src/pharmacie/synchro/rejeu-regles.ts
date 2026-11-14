@@ -414,6 +414,13 @@ export function resumeEvenement(type: unknown, corps: unknown): Resume {
         stockId: texteLisible(c.stockId),
         variation: entierLisible(c.variation),
       };
+    case 'FOURNISSEUR_CREE':
+      return { fournisseurId: texteLisible(c.id) };
+    case 'RECEPTION_ENREGISTREE':
+      return {
+        receptionId: texteLisible(c.id),
+        nombreLignes: Array.isArray(c.lignes) ? c.lignes.length : null,
+      };
     case 'ANOMALIE_TRAITEE':
       return { anomalieId: texteLisible(c.anomalieId) };
     default:

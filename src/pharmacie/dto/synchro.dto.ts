@@ -20,7 +20,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 import {
   ComptageOuvertureDto,
   MOMENTS_COMPTAGE,
@@ -29,6 +29,7 @@ import {
   TYPES_MOUVEMENT_CAISSE,
 } from './sessions-caisse.dto';
 import { RAISONS_SORTIE, type RaisonSortie } from '../domaine/sortie';
+import { CreerReceptionDto, LigneReceptionDto } from './receptions.dto';
 import {
   FORMAT_TELEPHONE_PRESCRIPTEUR,
   nettoyerTelephonePrescripteur,
@@ -60,6 +61,8 @@ export const TYPES_EVENEMENT = [
   'SORTIE_STOCK',
   'CORRECTION_QUANTITE',
   'ANOMALIE_TRAITEE',
+  'FOURNISSEUR_CREE',
+  'RECEPTION_ENREGISTREE',
 ] as const;
 
 export class EtatPosteDto {
@@ -420,4 +423,49 @@ export class CorpsAnomalieTraiteeDto {
   @Transform(rognerTexte)
   @MaxLength(500)
   commentaire?: string;
+}
+
+/** Fournisseur créé hors ligne : l'identifiant vient du poste ; un fournisseur de même nom déjà là est réutilisé. */
+export class CorpsFournisseurCreeDto {
+  @IsUUID('all')
+  id: string;
+
+  @IsString()
+  @Transform(rognerTexte)
+  @Length(2, 100)
+  nom: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(rognerTexte)
+  @Matches(/^[0-9 +().-]{6,30}$/)
+  telephone?: string;
+}
+
+/** Ligne d'une réception faite hors ligne : le poste fournit l'identifiant du lot et le coefficient qu'il a utilisé. */
+export class LigneReceptionRejeuDto extends LigneReceptionDto {
+  @IsUUID('all')
+  lotId: string;
+
+  /** Unités par boîte de la fiche telle que le poste la voyait : la quantité en unités minimales en dépend. */
+  @IsInt()
+  @Min(1)
+  @Max(1_000_000)
+  coefficientLocal: number;
+}
+
+/** Réception faite hors ligne : le corps de CreerReceptionDto, avec identifiant obligatoire et lignes à lot stable. */
+export class CorpsReceptionEnregistreeDto extends OmitType(CreerReceptionDto, [
+  'id',
+  'lignes',
+] as const) {
+  @IsUUID('all')
+  id: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => LigneReceptionRejeuDto)
+  lignes: LigneReceptionRejeuDto[];
 }

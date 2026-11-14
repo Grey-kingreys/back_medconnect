@@ -51,6 +51,51 @@ export interface FicheSynchro {
   lots: LotSynchro[];
 }
 
+export interface FournisseurSynchro {
+  id: string;
+  nom: string;
+  telephone: string | null;
+}
+
+/** Lot d'une réception récente, sans aucun coût ni montant de facture (Q8 : aucun prix d'achat sur le poste). */
+export interface LotReceptionSynchro {
+  id: string;
+  stockId: string;
+  nom: string;
+  numeroLot: string | null;
+  dateExpiration: string | null;
+  quantiteRecue: number;
+  coefficientReception: number;
+  solde: number;
+  codeArticleFournisseur: string | null;
+  codeBarres: string | null;
+  quantiteCommandee: number | null;
+  prixPublicBoite: number | null;
+  codeTva: string | null;
+  tauxTvaPourMille: number | null;
+  colisage: number | null;
+  tableau: string | null;
+  bonPreparation: string | null;
+}
+
+/** Réception récente (le poste n'en montre que 30 jours, Q11), sans montantHT, totalTva, montantTTC, netAPayer ni coût. */
+export interface ReceptionSynchro {
+  id: string;
+  reference: string | null;
+  recueLe: string;
+  createdAt: string;
+  auteurId: string;
+  numeroFacture: string | null;
+  referenceCommande: string | null;
+  dateFacture: string | null;
+  nombrePages: number | null;
+  fournisseur: { id: string; nom: string } | null;
+  lots: LotReceptionSynchro[];
+}
+
+/** Garde-fou du poids de la photographie. */
+export const RECEPTIONS_PHOTOGRAPHIE_MAX = 500;
+
 /**
  * Photographie complète du catalogue d'un poste desktop (D633). L'ordre des clés fixe l'ETag.
  * Aucun champ qui dépend de l'heure (D662) : l'ETag ne change que si le catalogue change.
@@ -90,6 +135,10 @@ export interface CatalogueSynchro {
   fiches: FicheSynchro[];
   /** Anomalies OUVERTES de la pharmacie, détails lisibles, sans aucun coût (lecture hors ligne). */
   anomalies: ElementAnomalie[];
+  /** Fournisseurs actifs de la pharmacie (réception hors ligne). */
+  fournisseurs: FournisseurSynchro[];
+  /** Les 500 dernières réceptions, les plus récentes d'abord, sans filtre de date (D662) ni coût ni montant de facture. */
+  receptions: ReceptionSynchro[];
 }
 
 function comparerLots(a: LotSynchro, b: LotSynchro): number {
@@ -239,7 +288,55 @@ export class CatalogueSynchroService {
           tx,
           pointDeVente.id,
         );
+        const fournisseurs = await tx.fournisseur.findMany({
+          where: { structureId: structure.id, actif: true },
+          orderBy: [{ nom: 'asc' }, { id: 'asc' }],
+          select: { id: true, nom: true, telephone: true },
+        });
+        const receptions = await tx.reception.findMany({
+          where: { pointDeVenteId: pointDeVente.id },
+          orderBy: [{ recueLe: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+          take: RECEPTIONS_PHOTOGRAPHIE_MAX,
+          // Liste blanche : aucune colonne de coût ni de montant de facture n'est lue.
+          select: {
+            id: true,
+            reference: true,
+            recueLe: true,
+            createdAt: true,
+            auteurId: true,
+            numeroFacture: true,
+            referenceCommande: true,
+            dateFacture: true,
+            nombrePages: true,
+            fournisseur: { select: { id: true, nom: true } },
+            lots: {
+              select: {
+                id: true,
+                stockMedicamentId: true,
+                stockMedicament: {
+                  select: { medicament: { select: { nom: true } } },
+                },
+                numeroLot: true,
+                dateExpiration: true,
+                quantiteRecue: true,
+                coefficientReception: true,
+                agregat: { select: { quantite: true } },
+                codeArticleFournisseur: true,
+                codeBarres: true,
+                quantiteCommandee: true,
+                prixPublicBoite: true,
+                codeTva: true,
+                tauxTvaPourMille: true,
+                colisage: true,
+                tableau: true,
+                bonPreparation: true,
+              },
+            },
+          },
+        });
         return {
+          fournisseurs,
+          receptions,
           anomalies,
           posteLu,
           sequenceMaxRecue,
@@ -334,6 +431,46 @@ export class CatalogueSynchroService {
       coupures: lue.coupures,
       fiches: fichesSynchro,
       anomalies: lue.anomalies,
+      fournisseurs: lue.fournisseurs,
+      receptions: lue.receptions.map((r) => ({
+        id: r.id,
+        reference: r.reference,
+        recueLe: r.recueLe.toISOString(),
+        createdAt: r.createdAt.toISOString(),
+        auteurId: r.auteurId,
+        numeroFacture: r.numeroFacture,
+        referenceCommande: r.referenceCommande,
+        dateFacture: r.dateFacture ? dateVersJour(r.dateFacture) : null,
+        nombrePages: r.nombrePages,
+        fournisseur: r.fournisseur,
+        lots: r.lots
+          .map((l) => ({
+            id: l.id,
+            stockId: l.stockMedicamentId,
+            nom: l.stockMedicament.medicament.nom,
+            numeroLot: l.numeroLot,
+            dateExpiration: l.dateExpiration
+              ? dateVersJour(l.dateExpiration)
+              : null,
+            quantiteRecue: l.quantiteRecue,
+            coefficientReception: l.coefficientReception,
+            solde: Math.max(0, l.agregat?.quantite ?? 0),
+            codeArticleFournisseur: l.codeArticleFournisseur,
+            codeBarres: l.codeBarres,
+            quantiteCommandee: l.quantiteCommandee,
+            prixPublicBoite: l.prixPublicBoite,
+            codeTva: l.codeTva,
+            tauxTvaPourMille: l.tauxTvaPourMille,
+            colisage: l.colisage,
+            tableau: l.tableau,
+            bonPreparation: l.bonPreparation,
+          }))
+          .sort(
+            (a, b) =>
+              a.nom.localeCompare(b.nom, 'fr') ||
+              (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+          ),
+      })),
     };
   }
 }

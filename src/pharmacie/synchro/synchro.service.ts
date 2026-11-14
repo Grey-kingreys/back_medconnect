@@ -10,7 +10,10 @@ import type { Prisma } from 'generated/prisma/client';
 import { isISO8601 } from 'class-validator';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { PermissionsService } from 'src/common/rbac/permissions.service';
-import { AccesPharmacieService } from '../acces-pharmacie.service';
+import {
+  AccesPharmacieService,
+  type AccesPharmacie,
+} from '../acces-pharmacie.service';
 import {
   estJourCloture,
   jourDeRattachement,
@@ -25,6 +28,7 @@ import {
 } from '../caisse/sessions-caisse.service';
 import { CODE_ESPECES } from '../domaine/caisse';
 import { reliquatLot } from '../domaine/quantites';
+import { jourValide } from '../domaine/reception';
 import { estPerime } from '../domaine/selection-lots';
 import { ecrirePieceVente } from '../ecriture-vente';
 import { jourConakry, jourLisible } from '../jour-metier';
@@ -35,6 +39,10 @@ import {
   lireLotsCandidats,
 } from '../stock/lecture-stock';
 import { MouvementsStockService } from '../stock/mouvements-stock.service';
+import {
+  entreeDepuisDto,
+  ReceptionsService,
+} from '../receptions/receptions.service';
 import {
   allouerLignes,
   formaterNumeroTicket,
@@ -48,6 +56,8 @@ import {
   CorpsSessionOuverteDto,
   CorpsVenteDto,
   CorpsSortieStockDto,
+  CorpsFournisseurCreeDto,
+  CorpsReceptionEnregistreeDto,
   CorpsAnomalieTraiteeDto,
   CorpsCorrectionQuantiteDto,
   TYPES_EVENEMENT,
@@ -109,6 +119,8 @@ export interface ResultatEvenement {
       | 'REGULARISATION'
       | 'SORTIE_STOCK'
       | 'CORRECTION_QUANTITE'
+      | 'FOURNISSEUR'
+      | 'RECEPTION'
       | 'ANOMALIE';
     id: string;
     numero?: string;
@@ -211,6 +223,8 @@ export class SynchroService {
     private readonly sessionsCaisse: SessionsCaisseService,
     // Droits au rejeu des types d'événements qui exigent une permission ; sans service, ces types sont refusés.
     @Optional() private readonly permissions?: PermissionsService,
+    // Sert au rejeu des fournisseurs et des réceptions faits hors ligne ; sans service, ces types sont rejetés.
+    @Optional() private readonly receptions?: ReceptionsService,
   ) {}
 
   // ------------------------------------------------------------------ route
@@ -738,7 +752,8 @@ export class SynchroService {
       | 'PRODUIT_ARCHIVE'
       | 'CONDITIONNEMENT_CONCURRENT'
       | 'PLAGE_EPUISEE'
-      | 'STOCK_NEGATIF',
+      | 'STOCK_NEGATIF'
+      | 'RECEPTION_COEFFICIENT_DIFFERENT',
     pieceType: string,
     pieceId: string,
     details: Prisma.InputJsonObject,
@@ -834,6 +849,17 @@ export class SynchroService {
           e.corps,
         );
         return this.appliquerCorrection(tx, ctx, e, corps, utilisateur, local);
+      }
+      case 'FOURNISSEUR_CREE': {
+        const corps = await this.corpsValide(CorpsFournisseurCreeDto, e.corps);
+        return this.appliquerFournisseur(tx, ctx, corps, utilisateur);
+      }
+      case 'RECEPTION_ENREGISTREE': {
+        const corps = await this.corpsValide(
+          CorpsReceptionEnregistreeDto,
+          e.corps,
+        );
+        return this.appliquerReception(tx, ctx, corps, utilisateur, local);
       }
       case 'ANOMALIE_TRAITEE': {
         const corps = await this.corpsValide(CorpsAnomalieTraiteeDto, e.corps);
@@ -1035,6 +1061,120 @@ export class SynchroService {
       );
     }
     return { piece, ...(anomalies.length > 0 ? { anomalies } : {}) };
+  }
+
+  // ------------------------------------------------- réception hors ligne (fournisseur, réception)
+
+  private serviceReceptions(): ReceptionsService {
+    // Sans service de réception, l'événement est rejeté proprement (type non pris en charge par ce serveur).
+    if (!this.receptions) throw new RejetSynchro('EVENEMENT_INVALIDE');
+    return this.receptions;
+  }
+
+  private async appliquerFournisseur(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    corps: CorpsFournisseurCreeDto,
+    utilisateur: UtilisateurCharge,
+  ): Promise<ResultatApplication> {
+    const f = await this.serviceReceptions().creerFournisseurRejeu(
+      tx,
+      ctx.structure.id,
+      utilisateur.id,
+      corps,
+      { ip: ctx.ip ?? null, posteId: ctx.poste.id },
+    );
+    // L'identifiant retenu par le serveur est rendu dans la pièce : égal à celui du poste, sauf nom déjà pris.
+    return {
+      piece: { type: 'FOURNISSEUR', id: f.id },
+      ...(f.cree
+        ? {}
+        : {
+            code: f.reutilise
+              ? 'FOURNISSEUR_EXISTANT_REUTILISE'
+              : 'FOURNISSEUR_DEJA_ENREGISTRE',
+          }),
+      ...(f.cree || f.reutilise ? {} : { dejaApplique: true as const }),
+    };
+  }
+
+  private async appliquerReception(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    corps: CorpsReceptionEnregistreeDto,
+    utilisateur: UtilisateurCharge,
+    local: Date,
+  ): Promise<ResultatApplication> {
+    const service = this.serviceReceptions();
+    const piece = { type: 'RECEPTION' as const, id: corps.id };
+    if (corps.dateFacture && !jourValide(corps.dateFacture)) {
+      throw new RejetSynchro('EVENEMENT_INVALIDE', { champs: ['dateFacture'] });
+    }
+    const idsLots = corps.lignes.map((l) => l.lotId);
+    if (new Set(idsLots).size !== idsLots.length) {
+      throw new RejetSynchro('LOT_EN_DOUBLE');
+    }
+    // Un fournisseur du poste devenu inconnu ne bloque pas la réception : la marchandise est là.
+    let fournisseurId: string | null = null;
+    let fournisseurPerdu = false;
+    if (corps.fournisseurId) {
+      fournisseurId = await service.fournisseurDuPoste(
+        tx,
+        ctx.structure.id,
+        corps.fournisseurId,
+      );
+      fournisseurPerdu = fournisseurId === null;
+    }
+    const entree = entreeDepuisDto(corps);
+    entree.fournisseurId = fournisseurId;
+    entree.recueLe = corps.recueLe ? new Date(corps.recueLe) : local;
+    entree.rejeu = {
+      posteId: ctx.poste.id,
+      horodatageLocal: local,
+      lotIds: corps.lignes.map((l) => l.lotId),
+      coefficientsLocaux: corps.lignes.map((l) => l.coefficientLocal),
+    };
+    const acces = {
+      structure: ctx.structure,
+      user: utilisateur,
+    } as unknown as AccesPharmacie;
+    const ecrite = await service.enregistrerDansTransaction(
+      tx,
+      acces,
+      entree,
+      ctx.ip ?? null,
+    );
+    if (!ecrite.cree) return { piece, code: 'RECEPTION_DEJA_ENREGISTREE' };
+    const anomalies: { type: string; id: string }[] = [];
+    const auteur = `${utilisateur.prenom} ${utilisateur.nom}`.trim();
+    for (const ecart of ecrite.ecartsCoefficient ?? []) {
+      anomalies.push(
+        await this.creerAnomalie(
+          tx,
+          ctx,
+          'RECEPTION_COEFFICIENT_DIFFERENT',
+          'RECEPTION',
+          corps.id,
+          {
+            stockId: ecart.stockId,
+            nom: ecart.nom,
+            coefficientLocal: ecart.coefficientLocal,
+            coefficientServeur: ecart.coefficientServeur,
+            quantiteUm: ecart.quantiteUm,
+            posteCode: ctx.poste.code,
+            utilisateurId: utilisateur.id,
+            utilisateurNom: auteur,
+            jourMetier: jourConakry(local),
+            message: `${ecart.nom} : la réception faite hors ligne (poste ${ctx.poste.code}, ${auteur}) comptait ${ecart.coefficientLocal} unité(s) par boîte, la fiche en compte maintenant ${ecart.coefficientServeur}. Les ${ecart.quantiteUm} unité(s) reçues ont été ajoutées au stock telles que le poste les a comptées : vérifiez la fiche et, au besoin, faites un inventaire de ce médicament.`,
+          },
+        ),
+      );
+    }
+    return {
+      piece,
+      ...(fournisseurPerdu ? { code: 'FOURNISSEUR_INCONNU_IGNORE' } : {}),
+      ...(anomalies.length > 0 ? { anomalies } : {}),
+    };
   }
 
   private async appliquerAnomalieTraitee(

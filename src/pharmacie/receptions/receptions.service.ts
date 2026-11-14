@@ -117,6 +117,20 @@ export interface ReceptionAEnregistrer {
   /** Champs facultatifs de l'en-tête de la facture fournisseur. */
   facture?: EnteteFacture;
   lignes: LigneReceptionAEnregistrer[];
+  /**
+   * Rejeu d'une réception faite hors ligne sur un poste desktop : la marchandise est là, la réception est toujours
+   * acceptée. Le jour de péremption est celui de l'horodatage local, le coefficient de chaque ligne est celui du
+   * poste (la quantité en unités minimales du poste est appliquée), le lot de chaque ligne a l'identifiant fourni
+   * par le poste, et ni le jour clôturé ni la date dans le futur ne refusent la réception.
+   */
+  rejeu?: {
+    posteId: string;
+    horodatageLocal: Date;
+    /** Un identifiant de lot par ligne, dans l'ordre des lignes. */
+    lotIds: string[];
+    /** Un coefficient local par ligne, dans l'ordre des lignes. */
+    coefficientsLocaux: number[];
+  };
 }
 export interface EnteteFacture {
   numeroFacture?: string | null;
@@ -147,6 +161,14 @@ export interface ReceptionEcrite {
   avertissements: AvertissementReception[];
   /** Ventes faites sans stock rattachées aux lots reçus ; vide pour un rejeu. */
   resolutions: ResolutionEcrite[];
+  /** Rejeu d'un poste seulement : lignes dont le coefficient du poste diffère de celui de la fiche au serveur. */
+  ecartsCoefficient?: {
+    stockId: string;
+    nom: string;
+    coefficientLocal: number;
+    coefficientServeur: number;
+    quantiteUm: number;
+  }[];
 }
 
 const OPTIONS_TRANSACTION_RECEPTION = { maxWait: 10_000, timeout: 30_000 };
@@ -239,6 +261,47 @@ function elementLot(c: LotCandidat, jour: string): ElementLot {
   };
 }
 
+/** Corps de la route (ou d'une réception rejouée) converti en réception à enregistrer. */
+export function entreeDepuisDto(dto: CreerReceptionDto): ReceptionAEnregistrer {
+  return {
+    id: dto.id,
+    fournisseurId: dto.fournisseurId ?? null,
+    reference: dto.reference?.trim() ? dto.reference.trim() : null,
+    recueLe: dto.recueLe ? new Date(dto.recueLe) : new Date(),
+    facture: {
+      numeroFacture: texteOuNull(dto.numeroFacture),
+      referenceCommande: texteOuNull(dto.referenceCommande),
+      dateFacture: dto.dateFacture ? jourVersDate(dto.dateFacture) : null,
+      nombrePages: dto.nombrePages ?? null,
+      montantHT: dto.montantHT ?? null,
+      totalTva: dto.totalTva ?? null,
+      montantTTC: dto.montantTTC ?? null,
+      netAPayer: dto.netAPayer ?? null,
+    },
+    lignes: dto.lignes.map((l) => ({
+      stockId: l.stockId,
+      numeroLot: l.numeroLot?.trim() ? l.numeroLot.trim() : null,
+      dateExpiration: l.dateExpiration ?? null,
+      sansPeremption: l.sansPeremption ?? false,
+      nombreBoites: l.nombreBoites ?? null,
+      quantiteUnites: l.quantiteUnites ?? null,
+      coutAchatBoite: l.coutAchatBoite ?? null,
+      facture: {
+        codeArticleFournisseur: texteOuNull(l.codeArticleFournisseur),
+        codeBarres: texteOuNull(l.codeBarres),
+        quantiteCommandee: l.quantiteCommandee ?? null,
+        prixPublicBoite: l.prixPublicBoite ?? null,
+        codeTva: texteOuNull(l.codeTva),
+        tauxTvaPourMille: l.tauxTvaPourMille ?? null,
+        montantHTLigne: l.montantHTLigne ?? null,
+        colisage: l.colisage ?? null,
+        tableau: texteOuNull(l.tableau),
+        bonPreparation: texteOuNull(l.bonPreparation),
+      },
+    })),
+  };
+}
+
 @Injectable()
 export class ReceptionsService {
   constructor(
@@ -298,8 +361,8 @@ export class ReceptionsService {
       }
     }
 
-    // 3. Fournisseur
-    if (entree.fournisseurId) {
+    // 3. Fournisseur (au rejeu, l'appelant l'a déjà résolu)
+    if (entree.fournisseurId && !entree.rejeu) {
       const fournisseur = await tx.fournisseur.findFirst({
         where: { id: entree.fournisseurId, structureId, actif: true },
         select: { id: true },
@@ -309,8 +372,8 @@ export class ReceptionsService {
       }
     }
 
-    // 4. Pas de réception datée dans le futur
-    if (entree.recueLe.getTime() > Date.now() + 5 * 60_000) {
+    // 4. Pas de réception datée dans le futur (jamais refusée au rejeu : l'horloge du poste peut avoir dérivé)
+    if (!entree.rejeu && entree.recueLe.getTime() > Date.now() + 5 * 60_000) {
       throw new BadRequestException({
         message: MESSAGE_RECUE_DANS_LE_FUTUR,
         code: 'VALIDATION',
@@ -320,7 +383,7 @@ export class ReceptionsService {
 
     // 4b. Réception datée d'un jour antérieur clôturé (D614) ; le jour même reste permis
     const jourRecu = jourConakry(entree.recueLe);
-    if (jourRecu < jourConakry(new Date())) {
+    if (!entree.rejeu && jourRecu < jourConakry(new Date())) {
       await verrouillerJourneesPartage(tx, structureId);
       await exigerJourOuvert(
         tx,
@@ -356,20 +419,24 @@ export class ReceptionsService {
       ).map((f) => [f.id, f.medicament.nom]),
     );
 
-    // 6. Préparation et refus groupés
+    // 6. Préparation et refus groupés (au rejeu : péremption jugée au jour local, coefficient du poste)
     const jour = jourConakry(new Date());
-    const preparees: LigneReceptionPreparee[] = entree.lignes.map((l) =>
+    const jourPeremption = entree.rejeu
+      ? jourConakry(entree.rejeu.horodatageLocal)
+      : jour;
+    const preparees: LigneReceptionPreparee[] = entree.lignes.map((l, i) =>
       preparerLigneReception(
         {
-          coefficientBoite: (fiches.get(l.stockId) as FicheVerrouillee)
-            .coefficientBoite,
+          coefficientBoite: entree.rejeu
+            ? entree.rejeu.coefficientsLocaux[i]
+            : (fiches.get(l.stockId) as FicheVerrouillee).coefficientBoite,
           nombreBoites: l.nombreBoites,
           quantiteUnites: l.quantiteUnites,
           coutAchatBoite: l.coutAchatBoite,
           dateExpiration: l.dateExpiration,
           sansPeremption: l.sansPeremption,
         },
-        jour,
+        jourPeremption,
       ),
     );
     const refusEn = (codes: CodeRefusLigneReception[]) =>
@@ -516,6 +583,7 @@ export class ReceptionsService {
           coutUnitaire: prete.coutUnitaire,
           coutAchatBoite: prete.coutAchatBoite,
           coefficientReception: prete.coefficientReception,
+          ...(entree.rejeu ? { lotId: entree.rejeu.lotIds[i] } : {}),
           fournisseurId: entree.fournisseurId,
           receptionId: reception.id,
           lotTechnique: false,
@@ -561,6 +629,7 @@ export class ReceptionsService {
           ...(resolutions.length > 0
             ? { nombreResolutions: resolutions.length }
             : {}),
+          ...(entree.rejeu ? { posteId: entree.rejeu.posteId } : {}),
         },
       },
     });
@@ -575,12 +644,33 @@ export class ReceptionsService {
         message: MESSAGE_FICHE_NON_QUALIFIEE,
       }));
 
+    const ecartsCoefficient = entree.rejeu
+      ? entree.lignes.flatMap((l, i) => {
+          const serveur = (fiches.get(l.stockId) as FicheVerrouillee)
+            .coefficientBoite;
+          const local = (entree.rejeu as { coefficientsLocaux: number[] })
+            .coefficientsLocaux[i];
+          return local === serveur
+            ? []
+            : [
+                {
+                  stockId: l.stockId,
+                  nom: noms.get(l.stockId) ?? '',
+                  coefficientLocal: local,
+                  coefficientServeur: serveur,
+                  quantiteUm: pretes[i].quantiteUm,
+                },
+              ];
+        })
+      : undefined;
+
     return {
       receptionId: reception.id,
       cree: true,
       lignes,
       avertissements,
       resolutions,
+      ...(ecartsCoefficient ? { ecartsCoefficient } : {}),
     };
   }
 
@@ -599,43 +689,7 @@ export class ReceptionsService {
         champs: [{ champ: 'dateFacture', contraintes: ['dateValide'] }],
       });
     }
-    const entree: ReceptionAEnregistrer = {
-      id: dto.id,
-      fournisseurId: dto.fournisseurId ?? null,
-      reference: dto.reference?.trim() ? dto.reference.trim() : null,
-      recueLe: dto.recueLe ? new Date(dto.recueLe) : new Date(),
-      facture: {
-        numeroFacture: texteOuNull(dto.numeroFacture),
-        referenceCommande: texteOuNull(dto.referenceCommande),
-        dateFacture: dto.dateFacture ? jourVersDate(dto.dateFacture) : null,
-        nombrePages: dto.nombrePages ?? null,
-        montantHT: dto.montantHT ?? null,
-        totalTva: dto.totalTva ?? null,
-        montantTTC: dto.montantTTC ?? null,
-        netAPayer: dto.netAPayer ?? null,
-      },
-      lignes: dto.lignes.map((l) => ({
-        stockId: l.stockId,
-        numeroLot: l.numeroLot?.trim() ? l.numeroLot.trim() : null,
-        dateExpiration: l.dateExpiration ?? null,
-        sansPeremption: l.sansPeremption ?? false,
-        nombreBoites: l.nombreBoites ?? null,
-        quantiteUnites: l.quantiteUnites ?? null,
-        coutAchatBoite: l.coutAchatBoite ?? null,
-        facture: {
-          codeArticleFournisseur: texteOuNull(l.codeArticleFournisseur),
-          codeBarres: texteOuNull(l.codeBarres),
-          quantiteCommandee: l.quantiteCommandee ?? null,
-          prixPublicBoite: l.prixPublicBoite ?? null,
-          codeTva: texteOuNull(l.codeTva),
-          tauxTvaPourMille: l.tauxTvaPourMille ?? null,
-          montantHTLigne: l.montantHTLigne ?? null,
-          colisage: l.colisage ?? null,
-          tableau: texteOuNull(l.tableau),
-          bonPreparation: texteOuNull(l.bonPreparation),
-        },
-      })),
-    };
+    const entree = entreeDepuisDto(dto);
 
     let ecrite: ReceptionEcrite;
     try {
@@ -953,6 +1007,105 @@ export class ReceptionsService {
       if (estDoublonSur(erreur, 'Fournisseur')) throw refus();
       throw erreur;
     }
+  }
+
+  /**
+   * Identifiant du fournisseur au serveur pour un identifiant donné par un poste : le fournisseur lui-même, ou celui
+   * qui a été réutilisé à sa place parce qu'un fournisseur de même nom existait (id retenu lu dans le résultat de
+   * l'événement FOURNISSEUR_CREE du poste, journal immuable `EvenementSynchro`).
+   * Null si aucun fournisseur de la pharmacie ne correspond.
+   */
+  async fournisseurDuPoste(
+    tx: Prisma.TransactionClient,
+    structureId: string,
+    idPoste: string,
+  ): Promise<string | null> {
+    const direct = await tx.fournisseur.findFirst({
+      where: { id: idPoste, structureId },
+      select: { id: true },
+    });
+    if (direct) return direct.id;
+    const evenement = await tx.evenementSynchro.findFirst({
+      where: {
+        type: 'FOURNISSEUR_CREE',
+        statut: 'APPLIQUE',
+        poste: { pointDeVente: { structureId } },
+        corps: { path: ['id'], equals: idPoste },
+      },
+      select: { resultat: true },
+    });
+    const resultat = evenement?.resultat;
+    const piece =
+      resultat !== null &&
+      typeof resultat === 'object' &&
+      !Array.isArray(resultat)
+        ? (resultat as Record<string, unknown>).piece
+        : undefined;
+    const retenu =
+      piece !== null && typeof piece === 'object' && !Array.isArray(piece)
+        ? (piece as Record<string, unknown>).id
+        : undefined;
+    if (typeof retenu !== 'string') return null;
+    const existe = await tx.fournisseur.findFirst({
+      where: { id: retenu, structureId },
+      select: { id: true },
+    });
+    return existe ? existe.id : null;
+  }
+
+  /**
+   * Fournisseur créé hors ligne, rejoué dans la transaction de l'appelant. Jamais d'erreur sur un nom déjà pris
+   * (insensible à la casse) : le fournisseur existant est utilisé et l'identifiant du poste devient son alias, pour
+   * que les réceptions du poste qui le citent retrouvent le bon fournisseur. Idempotent par identifiant.
+   */
+  async creerFournisseurRejeu(
+    tx: Prisma.TransactionClient,
+    structureId: string,
+    userId: string,
+    corps: { id: string; nom: string; telephone?: string },
+    ctx: { ip: string | null; posteId: string },
+  ): Promise<{ id: string; cree: boolean; reutilise: boolean }> {
+    const connu = await this.fournisseurDuPoste(tx, structureId, corps.id);
+    if (connu) {
+      return { id: connu, cree: false, reutilise: connu !== corps.id };
+    }
+    const autre = await tx.fournisseur.findUnique({
+      where: { id: corps.id },
+      select: { id: true },
+    });
+    if (autre) {
+      throw new ConflictException({
+        message: MESSAGE_IDENTIFIANT_RECEPTION,
+        code: 'IDENTIFIANT_DEJA_UTILISE',
+      });
+    }
+    const meme = await tx.fournisseur.findFirst({
+      where: { structureId, nom: { equals: corps.nom, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    if (meme) {
+      return { id: meme.id, cree: false, reutilise: true };
+    }
+    const cree = await tx.fournisseur.create({
+      data: {
+        id: corps.id,
+        structureId,
+        nom: corps.nom,
+        telephone: corps.telephone ? corps.telephone : null,
+      },
+      select: { id: true, nom: true },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId,
+        action: 'create',
+        entityType: 'Fournisseur',
+        entityId: cree.id,
+        ip: ctx.ip,
+        metadata: { nom: cree.nom, posteId: ctx.posteId },
+      },
+    });
+    return { id: cree.id, cree: true, reutilise: false };
   }
 
   async listerLots(structureId: string, userId: string, stockId: string) {
