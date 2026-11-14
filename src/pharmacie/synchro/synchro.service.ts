@@ -48,6 +48,7 @@ import {
   CorpsSessionOuverteDto,
   CorpsVenteDto,
   CorpsSortieStockDto,
+  CorpsAnomalieTraiteeDto,
   CorpsCorrectionQuantiteDto,
   TYPES_EVENEMENT,
   type RecevoirEvenementsDto,
@@ -107,7 +108,8 @@ export interface ResultatEvenement {
       | 'VENTE'
       | 'REGULARISATION'
       | 'SORTIE_STOCK'
-      | 'CORRECTION_QUANTITE';
+      | 'CORRECTION_QUANTITE'
+      | 'ANOMALIE';
     id: string;
     numero?: string;
   };
@@ -162,6 +164,8 @@ interface EchecImprevu {
 
 interface ResultatApplication {
   code?: string;
+  /** Opération déjà faite : le statut rendu est DEJA_APPLIQUE (l'événement est stocké APPLIQUE). */
+  dejaApplique?: true;
   piece?: ResultatEvenement['piece'];
   anomalies?: { type: string; id: string }[];
 }
@@ -316,7 +320,9 @@ export class SynchroService {
       );
       resultats.push(resultat);
       if (
-        (resultat.statut === 'APPLIQUE' || resultat.statut === 'REJETE') &&
+        (resultat.statut === 'APPLIQUE' ||
+          resultat.statut === 'DEJA_APPLIQUE' ||
+          resultat.statut === 'REJETE') &&
         !resultat.horsOrdre
       ) {
         resultats.push(...(await this.drainer(ctx)));
@@ -546,9 +552,10 @@ export class SynchroService {
 
     const horsOrdre = !stocke && e.sequence <= derniere;
     const application = await this.appliquer(tx, ctx, e);
+    const { dejaApplique, ...applicationRendue } = application;
     const resultat = {
       statut: 'APPLIQUE',
-      ...application,
+      ...applicationRendue,
       ...(horsOrdre ? { horsOrdre: true } : {}),
     } as Prisma.InputJsonObject;
     if (stocke) {
@@ -572,10 +579,10 @@ export class SynchroService {
       });
     }
     return {
-      ...application,
+      ...applicationRendue,
       evenementId: e.evenementId,
       sequence: e.sequence,
-      statut: 'APPLIQUE',
+      statut: dejaApplique ? 'DEJA_APPLIQUE' : 'APPLIQUE',
       ...(differe ? { differe: true as const } : {}),
       ...(horsOrdre ? { horsOrdre: true as const } : {}),
     };
@@ -828,6 +835,16 @@ export class SynchroService {
         );
         return this.appliquerCorrection(tx, ctx, e, corps, utilisateur, local);
       }
+      case 'ANOMALIE_TRAITEE': {
+        const corps = await this.corpsValide(CorpsAnomalieTraiteeDto, e.corps);
+        return this.appliquerAnomalieTraitee(
+          tx,
+          ctx,
+          corps,
+          utilisateur,
+          local,
+        );
+      }
       case 'SESSION_OUVERTE': {
         const corps = await this.corpsValide(CorpsSessionOuverteDto, e.corps);
         return this.ouvrirSession(tx, ctx, e, corps, utilisateur, local, borne);
@@ -1018,6 +1035,57 @@ export class SynchroService {
       );
     }
     return { piece, ...(anomalies.length > 0 ? { anomalies } : {}) };
+  }
+
+  private async appliquerAnomalieTraitee(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    corps: CorpsAnomalieTraiteeDto,
+    utilisateur: UtilisateurCharge,
+    local: Date,
+  ): Promise<ResultatApplication> {
+    const commentaire = corps.commentaire?.trim() ?? '';
+    if (commentaire.length < 3) throw new RejetSynchro('MOTIF_REQUIS');
+    const anomalie = await tx.anomalie.findFirst({
+      where: {
+        id: corps.anomalieId,
+        pointDeVente: { structureId: ctx.structure.id },
+      },
+      select: { id: true, type: true, statut: true },
+    });
+    if (!anomalie) throw new RejetSynchro('ANOMALIE_INCONNUE');
+    const piece = { type: 'ANOMALIE' as const, id: anomalie.id };
+    if (anomalie.statut === 'TRAITEE') {
+      return { piece, code: 'ANOMALIE_DEJA_TRAITEE', dejaApplique: true };
+    }
+    const maj = await tx.anomalie.updateMany({
+      where: { id: anomalie.id, statut: 'OUVERTE' },
+      data: {
+        statut: 'TRAITEE',
+        traiteeLe: local,
+        traiteeParId: utilisateur.id,
+        commentaireTraitement: commentaire,
+      },
+    });
+    if (maj.count !== 1) {
+      return { piece, code: 'ANOMALIE_DEJA_TRAITEE', dejaApplique: true };
+    }
+    await tx.auditLog.create({
+      data: {
+        userId: utilisateur.id,
+        action: 'update',
+        entityType: 'Anomalie',
+        entityId: anomalie.id,
+        ip: ctx.ip ?? null,
+        metadata: {
+          type: anomalie.type,
+          avant: { statut: 'OUVERTE' },
+          apres: { statut: 'TRAITEE' },
+          posteId: ctx.poste.id,
+        },
+      },
+    });
+    return { piece };
   }
 
   private async corpsValide<T extends object>(

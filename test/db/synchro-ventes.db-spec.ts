@@ -134,7 +134,12 @@ describe('Synchro desktop : rejeu des ventes, sur base de test (PB18c)', () => {
     const mouvements = new MouvementsStockService();
     const sessions = new SessionsCaisseService(prisma, acces, permissions);
     postes = new PointsDeVenteService(prisma, acces);
-    catalogue = new CatalogueSynchroService(prisma, acces, stockage);
+    catalogue = new CatalogueSynchroService(
+      prisma,
+      acces,
+      stockage,
+      new AnomaliesService(prisma, acces),
+    );
     synchro = new SynchroService(prisma, acces, mouvements, sessions);
     service = new VenteService(
       prisma,

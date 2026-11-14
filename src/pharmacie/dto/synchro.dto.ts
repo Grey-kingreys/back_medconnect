@@ -59,6 +59,7 @@ export const TYPES_EVENEMENT = [
   'VENTE',
   'SORTIE_STOCK',
   'CORRECTION_QUANTITE',
+  'ANOMALIE_TRAITEE',
 ] as const;
 
 export class EtatPosteDto {
@@ -405,4 +406,18 @@ export class CorpsVenteDto {
   @MaxLength(30)
   @Matches(FORMAT_TELEPHONE_PRESCRIPTEUR)
   telephonePrescripteur?: string | null;
+}
+
+/** Traitement d'une anomalie fait hors ligne (le commentaire trop court donne le rejet MOTIF_REQUIS). */
+export class CorpsAnomalieTraiteeDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  anomalieId: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(rognerTexte)
+  @MaxLength(500)
+  commentaire?: string;
 }

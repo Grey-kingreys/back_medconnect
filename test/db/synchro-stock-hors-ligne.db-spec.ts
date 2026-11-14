@@ -6,6 +6,12 @@ import { SessionsCaisseService } from 'src/pharmacie/caisse/sessions-caisse.serv
 import { PointsDeVenteService } from 'src/pharmacie/points-de-vente.service';
 import { ReceptionsService } from 'src/pharmacie/receptions/receptions.service';
 import { MouvementsStockService } from 'src/pharmacie/stock/mouvements-stock.service';
+import {
+  AnomaliesService,
+  LIMITE_ANOMALIES_PHOTOGRAPHIE,
+} from 'src/pharmacie/anomalies/anomalies.service';
+import { CatalogueSynchroService } from 'src/pharmacie/synchro/catalogue-synchro.service';
+import type { StorageService } from 'src/storage/storage.service';
 import { MESSAGES_REJET } from 'src/pharmacie/synchro/rejeu-regles';
 import {
   SynchroService,
@@ -31,6 +37,7 @@ describe('Synchro desktop : sortie de stock et correction de quantité hors lign
   let prisma: PrismaService;
   let synchro: SynchroService;
   let receptions: ReceptionsService;
+  let catalogue: CatalogueSynchroService;
   let D: string;
   let sequence = 0;
   let compteurFiche = 0;
@@ -55,6 +62,7 @@ describe('Synchro desktop : sortie de stock et correction de quantité hors lign
                 'caisse:superviser',
                 'stock:write',
                 'reception:write',
+                'anomalie:gerer',
               ]
             : ['caisse:utiliser'],
         ),
@@ -67,6 +75,14 @@ describe('Synchro desktop : sortie de stock et correction de quantité hors lign
       mouvements,
       sessions,
       permissions,
+    );
+    catalogue = new CatalogueSynchroService(
+      prisma,
+      acces,
+      {
+        getPublicUrl: (cle: string) => `logo/${cle}`,
+      } as unknown as StorageService,
+      new AnomaliesService(prisma, acces),
     );
     receptions = new ReceptionsService(prisma, acces, mouvements, permissions);
     D = (
@@ -371,6 +387,122 @@ describe('Synchro desktop : sortie de stock et correction de quantité hors lign
       );
       expect(r.statut).toBe('REJETE');
       expect(r.code).toBe('LOT_INTROUVABLE');
+    });
+  });
+  describe('ANOMALIE_TRAITEE', () => {
+    async function anomalieOuverte(): Promise<string> {
+      const id = randomUUID();
+      await sql(
+        `INSERT INTO "Anomalie" ("id", "pointDeVenteId", "type", "statut", "pieceType", "pieceId", "details")
+         SELECT $1, "pointDeVenteId", 'STOCK_NEGATIF', 'OUVERTE', 'VENTE', $2, $3::jsonb FROM "Poste" WHERE "id" = $4`,
+        [
+          id,
+          randomUUID(),
+          JSON.stringify({
+            message: 'Vente sans stock',
+            soldeProduit: -3,
+            coutUnitaire: 700,
+            margeBrute: 5,
+          }),
+          D,
+        ],
+      );
+      return id;
+    }
+    async function statut(id: string) {
+      const r = await sql(
+        `SELECT "statut"::text AS statut, "commentaireTraitement" AS commentaire FROM "Anomalie" WHERE "id" = $1`,
+        [id],
+      );
+      return r.rows[0];
+    }
+
+    it('est appliquée, puis déjà traitée sans erreur (DEJA_APPLIQUE)', async () => {
+      const id = await anomalieOuverte();
+      const r = await envoyer('ANOMALIE_TRAITEE', {
+        anomalieId: id,
+        commentaire: 'Vérifié au comptoir',
+      });
+      expect(r.statut).toBe('APPLIQUE');
+      expect(r.piece).toEqual({ type: 'ANOMALIE', id });
+      expect(await statut(id)).toEqual({
+        statut: 'TRAITEE',
+        commentaire: 'Vérifié au comptoir',
+      });
+      const audit = await sql(
+        `SELECT count(*)::int AS n FROM "AuditLog" WHERE "entityType" = 'Anomalie' AND "entityId" = $1`,
+        [id],
+      );
+      expect(Number(audit.rows[0].n)).toBe(1);
+
+      const encore = await envoyer('ANOMALIE_TRAITEE', {
+        anomalieId: id,
+        commentaire: 'Autre poste, même anomalie',
+      });
+      expect(encore.statut).toBe('DEJA_APPLIQUE');
+      expect(encore.code).toBe('ANOMALIE_DEJA_TRAITEE');
+      expect((await statut(id)).commentaire).toBe('Vérifié au comptoir');
+    });
+
+    it('anomalie inconnue : rejet ANOMALIE_INCONNUE ; commentaire trop court : MOTIF_REQUIS', async () => {
+      const inconnue = await envoyer('ANOMALIE_TRAITEE', {
+        anomalieId: randomUUID(),
+        commentaire: 'Vérifié',
+      });
+      expect(inconnue.statut).toBe('REJETE');
+      expect(inconnue.code).toBe('ANOMALIE_INCONNUE');
+      expect(inconnue.message).toBe(MESSAGES_REJET.ANOMALIE_INCONNUE);
+      const id = await anomalieOuverte();
+      const court = await envoyer('ANOMALIE_TRAITEE', {
+        anomalieId: id,
+        commentaire: 'a',
+      });
+      expect(court.code).toBe('MOTIF_REQUIS');
+      expect((await statut(id)).statut).toBe('OUVERTE');
+    });
+
+    it('utilisateur sans anomalie:gerer : rejet PERMISSION_INSUFFISANTE', async () => {
+      const id = await anomalieOuverte();
+      const r = await envoyer(
+        'ANOMALIE_TRAITEE',
+        { anomalieId: id, commentaire: 'Vérifié' },
+        { utilisateurId: VENDEUR },
+      );
+      expect(r.code).toBe('PERMISSION_INSUFFISANTE');
+      expect((await statut(id)).statut).toBe('OUVERTE');
+    });
+
+    it('la photographie borne les anomalies ouvertes aux plus récentes', async () => {
+      await sql(
+        `INSERT INTO "Anomalie" ("id", "pointDeVenteId", "type", "statut", "pieceType", "details", "creeLe")
+         SELECT 'lim-' || g, "pointDeVenteId", 'STOCK_NEGATIF', 'OUVERTE', 'VENTE', '{}'::jsonb, now() + (g || ' seconds')::interval
+         FROM generate_series(1, 510) g, "Poste" WHERE "Poste"."id" = $1`,
+        [D],
+      );
+      const photo = await catalogue.photographier(PHARMACIE, RESPONSABLE, D);
+      expect(photo.anomalies).toHaveLength(LIMITE_ANOMALIES_PHOTOGRAPHIE);
+      expect(photo.anomalies[0].id).toBe('lim-510');
+      expect(photo.anomalies.map((a) => a.id)).not.toContain('lim-1');
+      await sql(`DELETE FROM "Anomalie" WHERE "id" LIKE 'lim-%'`);
+    });
+
+    it('la photographie contient les anomalies ouvertes, sans coût, pas les traitées', async () => {
+      const ouverte = await anomalieOuverte();
+      const traitee = await anomalieOuverte();
+      await envoyer('ANOMALIE_TRAITEE', {
+        anomalieId: traitee,
+        commentaire: 'Vérifié',
+      });
+      const photo = await catalogue.photographier(PHARMACIE, RESPONSABLE, D);
+      const ids = photo.anomalies.map((a) => a.id);
+      expect(ids).toContain(ouverte);
+      expect(ids).not.toContain(traitee);
+      const lue = photo.anomalies.find((a) => a.id === ouverte);
+      expect(lue?.details).toEqual({
+        message: 'Vente sans stock',
+        soldeProduit: 0,
+      });
+      expect(JSON.stringify(photo.anomalies)).not.toMatch(/cout|marge/i);
     });
   });
 });

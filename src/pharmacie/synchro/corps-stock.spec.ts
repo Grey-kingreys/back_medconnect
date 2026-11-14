@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  CorpsAnomalieTraiteeDto,
   CorpsCorrectionQuantiteDto,
   CorpsSortieStockDto,
   TYPES_EVENEMENT,
@@ -72,5 +73,24 @@ describe('Événements de stock hors ligne : corps et droits', () => {
     });
     expect(JSON.stringify(r)).not.toContain('secret');
     expect(r).toEqual({ sortieId: 'a', stockId: 's', quantite: 3 });
+  });
+
+  it('ANOMALIE_TRAITEE est acceptée, exige anomalie:gerer et son corps est validé', async () => {
+    expect(TYPES_EVENEMENT).toContain('ANOMALIE_TRAITEE');
+    expect(permissionsRequisesPourType('ANOMALIE_TRAITEE')).toEqual([
+      'anomalie:gerer',
+    ]);
+    const corps = { anomalieId: randomUUID(), commentaire: 'Vérifié' };
+    expect((await validerCorps(CorpsAnomalieTraiteeDto, corps)).ok).toBe(true);
+    expect(
+      (await validerCorps(CorpsAnomalieTraiteeDto, { ...corps, statut: 'X' }))
+        .ok,
+    ).toBe(false);
+    expect(
+      (await validerCorps(CorpsAnomalieTraiteeDto, { commentaire: 'x' })).ok,
+    ).toBe(false);
+    expect(
+      resumeEvenement('ANOMALIE_TRAITEE', { ...corps, commentaire: 'secret' }),
+    ).toEqual({ anomalieId: corps.anomalieId });
   });
 });

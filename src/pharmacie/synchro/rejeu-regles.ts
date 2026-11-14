@@ -25,6 +25,7 @@ export type CodeRejet =
   | 'EVENEMENT_INAPPLICABLE'
   | 'CREDIT_HORS_LIGNE'
   | 'PERMISSION_INSUFFISANTE'
+  | 'ANOMALIE_INCONNUE'
   | CodeMetier;
 
 /**
@@ -87,6 +88,8 @@ export const MESSAGES_REJET: Record<CodeRejet | CodeARenvoyer, string> = {
     'Le crédit demande une connexion. Cette vente à crédit a été mise de côté : le responsable de la pharmacie la retrouvera dans les anomalies.',
   PERMISSION_INSUFFISANTE:
     "L'utilisateur de cette opération n'a pas le droit de la faire. L'opération a été mise de côté pour le responsable de la pharmacie.",
+  ANOMALIE_INCONNUE:
+    "L'anomalie que vous avez traitée sur le poste est introuvable. L'opération a été mise de côté pour le responsable de la pharmacie.",
   LOT_INTROUVABLE:
     "Le lot de cette opération n'existe plus. L'opération a été mise de côté pour le responsable de la pharmacie.",
   LOT_REQUIS:
@@ -159,6 +162,7 @@ const CODES_HTTP_GARDES: readonly CodeRejet[] = [
   'IDENTIFIANT_DEJA_UTILISE',
   'SESSION_FERMEE',
   'STOCK_INTROUVABLE',
+  'ANOMALIE_INCONNUE',
   ...CODES_METIER,
 ];
 
@@ -410,6 +414,8 @@ export function resumeEvenement(type: unknown, corps: unknown): Resume {
         stockId: texteLisible(c.stockId),
         variation: entierLisible(c.variation),
       };
+    case 'ANOMALIE_TRAITEE':
+      return { anomalieId: texteLisible(c.anomalieId) };
     default:
       return {};
   }

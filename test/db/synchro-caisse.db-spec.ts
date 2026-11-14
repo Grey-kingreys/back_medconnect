@@ -1,3 +1,4 @@
+import { AnomaliesService } from 'src/pharmacie/anomalies/anomalies.service';
 import { randomUUID } from 'node:crypto';
 import { HttpException } from '@nestjs/common';
 import type { Prisma } from 'generated/prisma/client';
@@ -118,7 +119,12 @@ describe('Synchro desktop : moteur de rejeu et événements de caisse, sur base 
     postes = new PointsDeVenteService(prisma, acces);
     clotures = new ClotureService(prisma, acces);
     synchro = new SynchroService(prisma, acces, mouvements, sessions);
-    catalogue = new CatalogueSynchroService(prisma, acces, stockage);
+    catalogue = new CatalogueSynchroService(
+      prisma,
+      acces,
+      stockage,
+      new AnomaliesService(prisma, acces),
+    );
     await sql(
       `UPDATE "ParametresPharmacie" SET "debutCaisse" = now() - interval '30 days' WHERE "structureId" = $1`,
       [PHARMACIE],
