@@ -21,6 +21,10 @@ import {
 } from './domaine/quantites';
 import { avertissementEcartPrix } from './domaine/prix';
 import { MouvementsStockService } from './stock/mouvements-stock.service';
+import {
+  correctionDejaFaite,
+  ecrireCorrectionQuantite,
+} from './stock/operations-stock';
 import { estCleEtrangereViolee } from './stock/erreurs-base';
 import {
   avecStock,
@@ -799,7 +803,7 @@ export class PharmacieService {
     }
     const jour = jourConakry(new Date());
 
-    const { avant, apres, coefficientBoite, seuilStockBas } =
+    const { avant, apres, coefficientBoite, seuilStockBas, cree } =
       await this.prisma.$transaction(async (tx) => {
         // Verrou de ligne de la fiche, puis verrou consultatif (D507)
         const lignes = await tx.$queryRaw<
@@ -815,8 +819,21 @@ export class PharmacieService {
           stockId,
         ) as EtatStockFiche;
 
+        if (
+          dto.id &&
+          (await correctionDejaFaite(tx, dto.id, pointDeVente.id))
+        ) {
+          // Rejeu d'une correction déjà enregistrée : rien à écrire
+          return {
+            avant: etat.quantite,
+            apres: etat.quantite,
+            coefficientBoite: lignes[0].coefficientBoite,
+            seuilStockBas: parametres.seuilStockBas,
+            cree: false,
+          };
+        }
+
         let lotId: string;
-        let soldeLot: number;
         if (dto.lotId !== undefined) {
           const lot = await tx.lotStock.findFirst({
             where: {
@@ -824,14 +841,12 @@ export class PharmacieService {
               stockMedicamentId: stockId,
               pointDeVenteId: pointDeVente.id,
             },
-            select: { id: true, agregat: { select: { quantite: true } } },
+            select: { id: true },
           });
           if (!lot) throw new NotFoundException(MESSAGE_LOT_INTROUVABLE);
           lotId = lot.id;
-          soldeLot = lot.agregat?.quantite ?? 0;
         } else if (etat.lots.length === 1) {
           lotId = etat.lots[0].id;
-          soldeLot = etat.lots[0].quantite;
         } else {
           throw new ConflictException({
             message:
@@ -842,37 +857,23 @@ export class PharmacieService {
           });
         }
 
-        if (soldeLot + dto.variation < 0) {
-          throw new ConflictException({
-            message: messageStockLotNegatif(soldeLot),
-            code: 'STOCK_LOT_NEGATIF',
-          });
-        }
-
-        const notes = dto.notes?.trim();
-        if (notes) {
-          await tx.stockMedicament.update({
-            where: { id: stockId },
-            data: { notes },
-          });
-        }
-
-        const ecrit = await this.mouvementsStock.ecrire(tx, {
+        const ecrit = await ecrireCorrectionQuantite(this.mouvementsStock, tx, {
           pointDeVenteId: pointDeVente.id,
-          stockMedicamentId: stockId,
-          lotId,
-          type: 'CORRECTION',
-          quantite: dto.variation,
-          pieceOrigineType: 'AJUSTEMENT',
-          pieceOrigineId: null,
-          motif,
           auteurId: user.id,
+          stockId,
+          lotId,
+          variation: dto.variation,
+          motif,
+          notes: dto.notes,
+          id: dto.id,
+          tolerant: false,
         });
         return {
           avant: etat.quantite,
-          apres: ecrit.soldeProduit,
+          apres: ecrit.soldeProduit ?? etat.quantite,
           coefficientBoite: lignes[0].coefficientBoite,
           seuilStockBas: parametres.seuilStockBas,
+          cree: ecrit.cree,
         };
       });
 
@@ -880,6 +881,7 @@ export class PharmacieService {
 
     // Alerte au seul franchissement vers bas ou rupture (seuil en boîtes, A4)
     if (
+      cree &&
       etatStock(avant, coefficientBoite, seuilStockBas) === 'NORMAL' &&
       etatStock(apres, coefficientBoite, seuilStockBas) !== 'NORMAL'
     ) {

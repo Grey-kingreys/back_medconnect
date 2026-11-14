@@ -7,6 +7,7 @@ import {
   IsArray,
   IsDateString,
   IsIn,
+  IsUUID,
   Min,
   Max,
   Length,
@@ -135,6 +136,14 @@ export class UpsertStockDto {
 }
 
 export class UpdateStockQuantiteDto {
+  @ApiPropertyOptional({
+    description:
+      "Identifiant choisi par le client : rejouer la même correction ne l'applique qu'une fois",
+  })
+  @IsOptional()
+  @IsUUID()
+  id?: string;
+
   @ApiProperty({
     example: -2,
     description: 'Ajouter ou retirer (négatif), en unités minimales',

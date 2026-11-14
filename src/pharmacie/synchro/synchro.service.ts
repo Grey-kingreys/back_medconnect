@@ -47,6 +47,8 @@ import {
   CorpsSessionFermeeDto,
   CorpsSessionOuverteDto,
   CorpsVenteDto,
+  CorpsSortieStockDto,
+  CorpsCorrectionQuantiteDto,
   TYPES_EVENEMENT,
   type RecevoirEvenementsDto,
 } from '../dto/synchro.dto';
@@ -74,6 +76,13 @@ import {
   type CodeARenvoyer,
   type StatutResultat,
 } from './rejeu-regles';
+import {
+  correctionDejaFaite,
+  ecrireCorrectionQuantite,
+  ecrireSortieStock,
+  ficheDeLaPharmacie,
+  motifDeSortieOuRefus,
+} from '../stock/operations-stock';
 import { validerCorps } from './valider-corps';
 import { CODE_CREDIT } from '../credit/credit-regles';
 
@@ -96,7 +105,9 @@ export interface ResultatEvenement {
       | 'COMPTAGE'
       | 'MOUVEMENT_CAISSE'
       | 'VENTE'
-      | 'REGULARISATION';
+      | 'REGULARISATION'
+      | 'SORTIE_STOCK'
+      | 'CORRECTION_QUANTITE';
     id: string;
     numero?: string;
   };
@@ -719,7 +730,8 @@ export class SynchroService {
       | 'ORDONNANCE_NON_CONFIRMEE'
       | 'PRODUIT_ARCHIVE'
       | 'CONDITIONNEMENT_CONCURRENT'
-      | 'PLAGE_EPUISEE',
+      | 'PLAGE_EPUISEE'
+      | 'STOCK_NEGATIF',
     pieceType: string,
     pieceId: string,
     details: Prisma.InputJsonObject,
@@ -805,6 +817,17 @@ export class SynchroService {
           borne,
         );
       }
+      case 'SORTIE_STOCK': {
+        const corps = await this.corpsValide(CorpsSortieStockDto, e.corps);
+        return this.appliquerSortieStock(tx, ctx, e, corps, utilisateur, local);
+      }
+      case 'CORRECTION_QUANTITE': {
+        const corps = await this.corpsValide(
+          CorpsCorrectionQuantiteDto,
+          e.corps,
+        );
+        return this.appliquerCorrection(tx, ctx, e, corps, utilisateur, local);
+      }
       case 'SESSION_OUVERTE': {
         const corps = await this.corpsValide(CorpsSessionOuverteDto, e.corps);
         return this.ouvrirSession(tx, ctx, e, corps, utilisateur, local, borne);
@@ -857,6 +880,142 @@ export class SynchroService {
         return { piece: { type: 'SESSION', id: s.id }, anomalies };
       }
     }
+  }
+
+  // ------------------------------------------------- stock hors ligne (sortie, correction)
+
+  /** Anomalie STOCK_NEGATIF d'une opération de stock dont une part n'a pas de lot (jamais de refus, Q2). */
+  private async anomalieStockSansLot(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    pieceType: 'SORTIE_MANUELLE' | 'CORRECTION',
+    pieceId: string,
+    stockId: string,
+    nom: string,
+    quantiteProvisoire: number,
+    soldeProduit: number | null,
+    utilisateur: UtilisateurCharge,
+    local: Date,
+  ) {
+    const auteur = `${utilisateur.prenom} ${utilisateur.nom}`.trim();
+    // Aucune réception ne rattache ces unités (seules les ventes sont rattachées) : seul un inventaire remet le stock juste.
+    const fait =
+      pieceType === 'SORTIE_MANUELLE'
+        ? 'Cette sortie faite hors ligne dépasse'
+        : 'Cette correction faite hors ligne dépasse';
+    const verbe = pieceType === 'SORTIE_MANUELLE' ? 'sorties' : 'retirées';
+    return this.creerAnomalie(tx, ctx, 'STOCK_NEGATIF', pieceType, pieceId, {
+      stockId,
+      nom,
+      quantiteProvisoire,
+      soldeProduit: soldeProduit ?? 0,
+      posteCode: ctx.poste.code,
+      utilisateurId: utilisateur.id,
+      utilisateurNom: auteur,
+      jourMetier: jourConakry(local),
+      message: `${nom} : ${fait} le stock restant du lot (poste ${ctx.poste.code}, ${auteur}) : ${quantiteProvisoire} unité(s) sont ${verbe} sans lot. Faites un inventaire de ce médicament pour remettre le stock à la bonne quantité.`,
+    });
+  }
+
+  private async appliquerSortieStock(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    e: EvenementBrut,
+    corps: CorpsSortieStockDto,
+    utilisateur: UtilisateurCharge,
+    local: Date,
+  ): Promise<ResultatApplication> {
+    const { motif, raison } = motifDeSortieOuRefus(
+      corps.raison,
+      corps.commentaire,
+    );
+    const ecrit = await ecrireSortieStock(this.mouvementsStock, tx, {
+      structureId: ctx.structure.id,
+      pointDeVenteId: ctx.poste.pointDeVenteId,
+      auteurId: utilisateur.id,
+      idSortie: corps.id,
+      stockId: corps.stockId,
+      lotId: corps.lotId,
+      unite: corps.unite,
+      quantite: corps.quantite,
+      motif,
+      raison,
+      tolerant: true,
+      horodatageLocal: local,
+      posteId: ctx.poste.id,
+      sequencePoste: e.sequence,
+      ip: ctx.ip,
+    });
+    const piece = { type: 'SORTIE_STOCK' as const, id: corps.id };
+    if (!ecrit.cree) return { piece, code: 'SORTIE_DEJA_ENREGISTREE' };
+    const anomalies: { type: string; id: string }[] = [];
+    if (ecrit.partieProvisoire > 0) {
+      anomalies.push(
+        await this.anomalieStockSansLot(
+          tx,
+          ctx,
+          'SORTIE_MANUELLE',
+          corps.id,
+          corps.stockId,
+          ecrit.nom ?? 'Médicament',
+          ecrit.partieProvisoire,
+          ecrit.soldeProduit,
+          utilisateur,
+          local,
+        ),
+      );
+    }
+    return { piece, ...(anomalies.length > 0 ? { anomalies } : {}) };
+  }
+
+  private async appliquerCorrection(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    e: EvenementBrut,
+    corps: CorpsCorrectionQuantiteDto,
+    utilisateur: UtilisateurCharge,
+    local: Date,
+  ): Promise<ResultatApplication> {
+    const motif = corps.motif?.trim() ?? '';
+    if (motif.length < 3) throw new RejetSynchro('MOTIF_REQUIS');
+    const fiche = await ficheDeLaPharmacie(tx, ctx.structure.id, corps.stockId);
+    await this.mouvementsStock.verrouillerFiches(tx, [corps.stockId]);
+    const piece = { type: 'CORRECTION_QUANTITE' as const, id: corps.id };
+    if (await correctionDejaFaite(tx, corps.id, ctx.poste.pointDeVenteId)) {
+      return { piece, code: 'CORRECTION_DEJA_ENREGISTREE' };
+    }
+    const ecrit = await ecrireCorrectionQuantite(this.mouvementsStock, tx, {
+      pointDeVenteId: ctx.poste.pointDeVenteId,
+      auteurId: utilisateur.id,
+      stockId: corps.stockId,
+      lotId: corps.lotId,
+      variation: corps.variation,
+      motif,
+      notes: corps.notes,
+      id: corps.id,
+      tolerant: true,
+      horodatageLocal: local,
+      posteId: ctx.poste.id,
+      sequencePoste: e.sequence,
+    });
+    const anomalies: { type: string; id: string }[] = [];
+    if (ecrit.partieProvisoire > 0) {
+      anomalies.push(
+        await this.anomalieStockSansLot(
+          tx,
+          ctx,
+          'CORRECTION',
+          corps.id,
+          corps.stockId,
+          fiche.nom,
+          ecrit.partieProvisoire,
+          ecrit.soldeProduit,
+          utilisateur,
+          local,
+        ),
+      );
+    }
+    return { piece, ...(anomalies.length > 0 ? { anomalies } : {}) };
   }
 
   private async corpsValide<T extends object>(

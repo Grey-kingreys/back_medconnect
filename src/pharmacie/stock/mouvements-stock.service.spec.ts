@@ -77,7 +77,7 @@ describe('validerMouvement', () => {
       validerMouvement(
         mouvement({
           lotId: null,
-          pieceOrigineType: 'AJUSTEMENT',
+          pieceOrigineType: 'RECEPTION',
           motif: 'Test',
         }),
       ),

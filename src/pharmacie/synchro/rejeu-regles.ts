@@ -80,7 +80,7 @@ export const MESSAGES_REJET: Record<CodeRejet | CodeARenvoyer, string> = {
   IDENTIFIANT_DEJA_UTILISE:
     "Cette opération porte l'identifiant d'un autre enregistrement. Elle a été mise de côté pour le responsable.",
   STOCK_INTROUVABLE:
-    'Un médicament de cette vente est inconnu de la pharmacie. La vente a été mise de côté pour le responsable.',
+    "Un médicament de cette opération est inconnu de la pharmacie. L'opération a été mise de côté pour le responsable.",
   EVENEMENT_INAPPLICABLE:
     "Cette opération n'a pas pu être enregistrée après plusieurs essais. Elle a été mise de côté : le responsable de la pharmacie la retrouvera dans les anomalies.",
   CREDIT_HORS_LIGNE:
@@ -397,6 +397,18 @@ export function resumeEvenement(type: unknown, corps: unknown): Resume {
           entierLisible(c.numeroSecours) ?? texteLisible(c.numeroSecours),
         total: entierLisible(c.total),
         nombreLignes: Array.isArray(c.lignes) ? c.lignes.length : null,
+      };
+    case 'SORTIE_STOCK':
+      return {
+        sortieId: texteLisible(c.id),
+        stockId: texteLisible(c.stockId),
+        quantite: entierLisible(c.quantite),
+      };
+    case 'CORRECTION_QUANTITE':
+      return {
+        correctionId: texteLisible(c.id),
+        stockId: texteLisible(c.stockId),
+        variation: entierLisible(c.variation),
       };
     default:
       return {};

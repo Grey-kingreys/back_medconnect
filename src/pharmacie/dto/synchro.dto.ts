@@ -16,6 +16,7 @@ import {
   Max,
   MaxLength,
   Min,
+  NotEquals,
   ValidateNested,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
@@ -27,6 +28,7 @@ import {
   ReleveModeDto,
   TYPES_MOUVEMENT_CAISSE,
 } from './sessions-caisse.dto';
+import { RAISONS_SORTIE, type RaisonSortie } from '../domaine/sortie';
 import {
   FORMAT_TELEPHONE_PRESCRIPTEUR,
   nettoyerTelephonePrescripteur,
@@ -55,6 +57,8 @@ export const TYPES_EVENEMENT = [
   'MOUVEMENT_CAISSE',
   'SESSION_FERMEE',
   'VENTE',
+  'SORTIE_STOCK',
+  'CORRECTION_QUANTITE',
 ] as const;
 
 export class EtatPosteDto {
@@ -199,6 +203,74 @@ export class CorpsSessionFermeeDto {
   @Transform(rognerTexte)
   @MaxLength(500)
   commentaire?: string;
+}
+
+/** Sortie de stock faite hors ligne (la raison et le commentaire absents donnent le rejet MOTIF_REQUIS). */
+export class CorpsSortieStockDto {
+  @IsUUID('all')
+  id: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  stockId: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  lotId: string;
+
+  @IsIn(['BOITE', 'UNITE'])
+  unite: 'BOITE' | 'UNITE';
+
+  @IsInt()
+  @Min(1)
+  @Max(1000000000)
+  quantite: number;
+
+  @IsOptional()
+  @IsIn(RAISONS_SORTIE)
+  raison?: RaisonSortie;
+
+  @IsOptional()
+  @IsString()
+  @Transform(rognerTexte)
+  @MaxLength(300)
+  commentaire?: string;
+}
+
+/** Correction de quantité faite hors ligne : variation signée en unités minimales sur un lot. */
+export class CorpsCorrectionQuantiteDto {
+  @IsUUID('all')
+  id: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  stockId: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  lotId: string;
+
+  @IsInt()
+  @Min(-1000000000)
+  @Max(1000000000)
+  @NotEquals(0)
+  variation: number;
+
+  @IsOptional()
+  @IsString()
+  @Transform(rognerTexte)
+  @MaxLength(300)
+  motif?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(rognerTexte)
+  @MaxLength(500)
+  notes?: string;
 }
 
 export class SortieManuelleRejeuDto {

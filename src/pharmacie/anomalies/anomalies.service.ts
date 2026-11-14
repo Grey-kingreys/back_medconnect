@@ -210,7 +210,12 @@ export class AnomaliesService {
     const venteIds = [
       ...new Set(
         lignes
-          .filter((l) => l.type === 'STOCK_NEGATIF' && l.pieceId !== null)
+          .filter(
+            (l) =>
+              l.type === 'STOCK_NEGATIF' &&
+              l.pieceType === 'VENTE' &&
+              l.pieceId !== null,
+          )
           .map((l) => l.pieceId as string),
       ),
     ];
@@ -257,7 +262,11 @@ export class AnomaliesService {
 
     return lignes.map((l) => {
       let rattachement: Rattachement | null = null;
-      if (l.type === 'STOCK_NEGATIF' && l.pieceId !== null) {
+      if (
+        l.type === 'STOCK_NEGATIF' &&
+        l.pieceType === 'VENTE' &&
+        l.pieceId !== null
+      ) {
         const d = detailsEnObjet(l.details);
         const cle = `${l.pieceId}:${String(d.stockId)}`;
         rattachement = etatRattachement({

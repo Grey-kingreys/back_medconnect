@@ -31,6 +31,9 @@ export const PIECES_SANS_LOT: readonly TypePiece[] = [
   'VENTE',
   'ANNULATION',
   'RESOLUTION',
+  // Rejeu d'une sortie ou d'une correction faite hors ligne sur un poste : la part que le lot ne couvre plus
+  'SORTIE_MANUELLE',
+  'AJUSTEMENT',
 ];
 /** Pièces dont le motif est obligatoire. */
 export const PIECES_AVEC_MOTIF: readonly TypePiece[] = [
@@ -149,7 +152,7 @@ export function validerMouvement(m: MouvementAEcrire): void {
   }
   if (m.lotId === null && !PIECES_SANS_LOT.includes(m.pieceOrigineType)) {
     throw new RangeError(
-      `Un mouvement sans lot n'est permis que pour une vente, une annulation ou une résolution (reçu : ${m.pieceOrigineType}).`,
+      `Un mouvement sans lot n'est permis que pour une vente, une annulation, une résolution ou le rejeu d'une sortie ou d'une correction (reçu : ${m.pieceOrigineType}).`,
     );
   }
   if (
