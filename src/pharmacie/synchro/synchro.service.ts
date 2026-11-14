@@ -844,6 +844,7 @@ export class SynchroService {
           {
             id: corps.comptageId,
             coupures: corps.coupures,
+            montantEspeces: corps.montantEspeces,
             releves: corps.releves,
           },
           utilisateur.id,
@@ -869,6 +870,7 @@ export class SynchroService {
             ? {
                 id: corps.comptageFermeture.comptageId,
                 coupures: corps.comptageFermeture.coupures,
+                montantEspeces: corps.comptageFermeture.montantEspeces,
                 releves: corps.comptageFermeture.releves,
               }
             : undefined,

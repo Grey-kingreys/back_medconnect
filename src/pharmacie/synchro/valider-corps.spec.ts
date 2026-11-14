@@ -8,6 +8,49 @@ import {
 import { validerCorps } from './valider-corps';
 
 describe('validerCorps', () => {
+  it('accepte un comptage par montant total, refuse un montant négatif ou décimal', async () => {
+    const base = {
+      comptageId: randomUUID(),
+      sessionId: randomUUID(),
+      moment: 'FERMETURE',
+    };
+    const ok = await validerCorps(CorpsComptageSaisiDto, {
+      ...base,
+      montantEspeces: 350000,
+    });
+    expect(ok.ok).toBe(true);
+    for (const montantEspeces of [-1, 1.5, 'abc', null]) {
+      const r = await validerCorps(CorpsComptageSaisiDto, {
+        ...base,
+        montantEspeces,
+      });
+      expect(r.ok).toBe(false);
+    }
+  });
+
+  it('refuse coupures à null, en comptage et en fermeture rejouée', async () => {
+    const base = {
+      comptageId: randomUUID(),
+      sessionId: randomUUID(),
+      moment: 'FERMETURE',
+    };
+    expect(
+      (await validerCorps(CorpsComptageSaisiDto, { ...base, coupures: null }))
+        .ok,
+    ).toBe(false);
+    expect(
+      (
+        await validerCorps(CorpsSessionFermeeDto, {
+          sessionId: base.sessionId,
+          comptageFermeture: {
+            comptageId: base.comptageId,
+            montantEspeces: null,
+          },
+        })
+      ).ok,
+    ).toBe(false);
+  });
+
   it("refuse un corps qui n'est pas un objet", async () => {
     for (const corps of [null, undefined, 'texte', 12, [1]]) {
       expect(await validerCorps(CorpsSessionOuverteDto, corps)).toEqual({

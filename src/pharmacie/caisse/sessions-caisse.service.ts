@@ -47,7 +47,7 @@ export const MESSAGE_SESSION_FERMEE =
 export const MESSAGE_IDENTIFIANT_DEJA_UTILISE =
   'Cet identifiant est déjà utilisé par un autre enregistrement de caisse.';
 export const MESSAGE_COMPTAGE_FERMETURE_REQUIS =
-  'Comptez les billets du tiroir avant de fermer la caisse.';
+  "Comptez l'argent du tiroir avant de fermer la caisse.";
 export const MESSAGE_MOTIF_MOUVEMENT_REQUIS =
   'Indiquez le motif de ce mouvement de caisse (3 caractères au moins).';
 export function messageOuvertureJourSuivant(jour: string): string {
@@ -147,7 +147,9 @@ type Client = PrismaService | Prisma.TransactionClient;
 
 export interface EntreeComptage {
   id?: string;
-  coupures: { valeurFaciale: number; nombre: number }[];
+  /** Total d'espèces saisi directement ; exclusif avec `coupures` (ancien format). */
+  montantEspeces?: number;
+  coupures?: { valeurFaciale: number; nombre: number }[];
   releves?: { mode: string; montant: number }[];
 }
 
@@ -674,7 +676,7 @@ export class SessionsCaisseService {
       utilisateurNom: string;
       posteId: string;
       sessionId?: string;
-      comptage?: { coupures: { valeurFaciale: number; nombre: number }[] };
+      comptage?: EntreeComptage;
     },
   ): Promise<{
     session: SessionReponse;
@@ -886,7 +888,25 @@ export class SessionsCaisseService {
       }
     }
 
-    const coupures = dto.coupures;
+    if (dto.montantEspeces === null || dto.coupures === null) {
+      throw erreurValidation(
+        dto.montantEspeces === null ? 'montantEspeces' : 'coupures',
+        'valeurNulle',
+        'Indiquez le montant des espèces du tiroir.',
+      );
+    }
+    const aMontant = dto.montantEspeces !== undefined;
+    const aCoupures = dto.coupures !== undefined;
+    if (aMontant === aCoupures) {
+      throw erreurValidation(
+        'montantEspeces',
+        'montantOuCoupures',
+        aMontant
+          ? 'Indiquez le montant des espèces ou les coupures, pas les deux.'
+          : 'Indiquez le montant des espèces du tiroir.',
+      );
+    }
+    const coupures = dto.coupures ?? [];
     const vues = new Set<number>();
     for (const c of coupures) {
       if (vues.has(c.valeurFaciale)) {
@@ -948,7 +968,7 @@ export class SessionsCaisseService {
         throw erreurValidation(
           'releves',
           'releveSansEspeces',
-          'Les espèces se comptent billet par billet, pas par relevé.',
+          'Les espèces se comptent dans le tiroir, pas par relevé.',
         );
       }
     }
@@ -959,7 +979,9 @@ export class SessionsCaisseService {
         id,
         sessionCaisseId: session.id,
         moment,
-        totalEspeces: totalComptage(coupures),
+        totalEspeces: aMontant
+          ? (dto.montantEspeces as number)
+          : totalComptage(coupures),
         auteurId,
         evenementId: id,
         horodatageLocal: horodatageLocal ?? null,

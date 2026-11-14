@@ -10,6 +10,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
@@ -63,12 +64,29 @@ export class ReleveModeDto {
 }
 
 export class ComptageOuvertureDto {
-  @ApiProperty({ type: [LigneComptageDto] })
+  @ApiPropertyOptional({
+    example: 350000,
+    description:
+      "Total des espèces comptées, en GNF (saisie simplifiée). Exclusif avec « coupures » : l'un ou l'autre.",
+  })
+  // null refusé : seul undefined (champ absent) est toléré
+  @ValidateIf((o: ComptageOuvertureDto) => o.montantEspeces !== undefined)
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000_000)
+  montantEspeces?: number;
+
+  @ApiPropertyOptional({
+    type: [LigneComptageDto],
+    description:
+      'Comptage par coupures (ancien format, toujours accepté), sinon montantEspeces.',
+  })
+  @ValidateIf((o: ComptageOuvertureDto) => o.coupures !== undefined)
   @IsArray()
   @ArrayMaxSize(20)
   @ValidateNested({ each: true })
   @Type(() => LigneComptageDto)
-  coupures: LigneComptageDto[];
+  coupures?: LigneComptageDto[];
 }
 
 export class ComptageFermetureDto extends ComptageOuvertureDto {
