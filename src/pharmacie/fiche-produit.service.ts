@@ -31,7 +31,7 @@ export const MESSAGE_CONVERSION_REQUISE =
 export const MESSAGE_FICHE_DEJA_QUALIFIEE =
   "Ce médicament est déjà qualifié : son stock n'est plus converti. Enregistrez le nouveau nombre d'unités par boîte sans conversion : il vaudra pour les prochaines réceptions.";
 export const MESSAGE_CONVERSION_IMPOSSIBLE =
-  'Le stock de ce médicament ne vient pas seulement de la reprise initiale : il ne peut pas être multiplié automatiquement. Choisissez « Conserver », puis corrigez la quantité en unités par un inventaire.';
+  "Une partie du stock de ce médicament a déjà été convertie ou reste à régulariser : il ne peut pas être converti automatiquement. Choisissez la seconde réponse (le stock garde son nombre d'unités), puis corrigez la quantité par un inventaire.";
 export const MESSAGE_CONVERSION_TROP_GRANDE =
   "La conversion donnerait une quantité trop grande pour être enregistrée. Vérifiez le nombre d'unités par boîte.";
 export const MESSAGE_UNITE_CHANGEMENT_AVEC_STOCK =

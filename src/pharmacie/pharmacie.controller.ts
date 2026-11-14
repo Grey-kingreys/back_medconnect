@@ -44,6 +44,7 @@ import {
   FichierImport,
   OptionsImportStockDto,
   ModeleImportStockDto,
+  ExportStockDto,
 } from './dto/pharmacie.dto';
 
 // Schéma Swagger du formulaire d'envoi du classeur (stock et catalogue)
@@ -281,6 +282,33 @@ export class PharmacieController {
       structureId,
       req.user.userId,
     );
+  }
+
+  @UseGuards(AuthGuard, PermissionsGuard)
+  @RequirePermissions(PERMISSIONS.STOCK_READ, PERMISSIONS.STOCK_WRITE)
+  @Get('stock/:structureId/export')
+  @ApiBearerAuth()
+  @ApiParam({ name: 'structureId' })
+  @ApiProduces(MIME_XLSX)
+  @ApiOperation({
+    summary: 'Exporter le stock en Excel',
+    description:
+      "Permissions : stock:read et stock:write. Succès : 200. Classeur .xlsx au format du modèle d'import du stock (feuille « Stock », mêmes colonnes), réimportable tel quel : une ligne par lot en stock, une ligne sans péremption pour un médicament sans lot. Coûts d'achat vides sans marge:read. Paramètres : filtre (tous par défaut, alertes, rupture, qualifier) et q (recherche sur le nom). Nom : stock-<pharmacie>-<AAAA-MM-JJ>.xlsx.",
+  })
+  async exporterStock(
+    @Param('structureId') structureId: string,
+    @Req() req: RequestWithUser,
+    @Query() options: ExportStockDto,
+  ): Promise<StreamableFile> {
+    const { contenu, nomFichier } = await this.pharmacieService.exporterStock(
+      structureId,
+      req.user.userId,
+      options,
+    );
+    return new StreamableFile(contenu, {
+      type: MIME_XLSX,
+      disposition: `attachment; filename="${nomFichier}"`,
+    });
   }
 
   @UseGuards(AuthGuard, PermissionsGuard)

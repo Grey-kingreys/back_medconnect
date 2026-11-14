@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { CorpsVenteDto } from '../dto/synchro.dto';
 import { arrondiGnf } from '../domaine/quantites';
+import { PERMISSIONS } from '../../common/rbac/permissions.constants';
 
 /** Règles pures du rejeu des opérations d'un poste desktop (PB18b, D637 à D660). */
 
@@ -21,7 +22,42 @@ export type CodeRejet =
   | 'COMPTAGE_DEJA_SAISI'
   | 'IDENTIFIANT_DEJA_UTILISE'
   | 'STOCK_INTROUVABLE'
-  | 'EVENEMENT_INAPPLICABLE';
+  | 'EVENEMENT_INAPPLICABLE'
+  | 'CREDIT_HORS_LIGNE'
+  | 'PERMISSION_INSUFFISANTE'
+  | 'ANOMALIE_INCONNUE'
+  | CodeMetier;
+
+/**
+ * Codes métier des services de la pharmacie, conservés tels quels quand une opération rejouée
+ * est refusée (au lieu de tout transformer en EVENEMENT_INVALIDE). Chaque code a son message français.
+ */
+export const CODES_METIER = [
+  'LOT_INTROUVABLE',
+  'LOT_REQUIS',
+  'STOCK_LOT_NEGATIF',
+  'MOTIF_REQUIS',
+  'RAISON_REQUISE',
+  'QUANTITE_REQUISE',
+  'QUANTITE_TROP_GRANDE',
+  'LOT_EN_DOUBLE',
+  'DATE_PEREMPTION_REQUISE',
+  'DATE_PEREMPTION_PASSEE',
+  'FOURNISSEUR_EXISTANT',
+  'ANOMALIE_DEJA_TRAITEE',
+  'FICHE_MODIFIEE',
+  'PRIX_UNITE_SANS_DECONDITIONNEMENT',
+  'CLIENT_CREDIT_INTROUVABLE',
+  'PRISE_INTROUVABLE',
+  'PRISE_ANNULEE',
+  'PRISE_SOLDEE',
+  'MONTANT_SUPERIEUR_AU_RESTE',
+  'CREDIT_DEJA_SOLDE',
+  'CAISSE_NON_OUVERTE',
+  'JOURNEE_CLOTUREE',
+] as const;
+
+export type CodeMetier = (typeof CODES_METIER)[number];
 
 export type CodeARenvoyer =
   | 'SERVICE_INDISPONIBLE'
@@ -45,9 +81,59 @@ export const MESSAGES_REJET: Record<CodeRejet | CodeARenvoyer, string> = {
   IDENTIFIANT_DEJA_UTILISE:
     "Cette opération porte l'identifiant d'un autre enregistrement. Elle a été mise de côté pour le responsable.",
   STOCK_INTROUVABLE:
-    'Un médicament de cette vente est inconnu de la pharmacie. La vente a été mise de côté pour le responsable.',
+    "Un médicament de cette opération est inconnu de la pharmacie. L'opération a été mise de côté pour le responsable.",
   EVENEMENT_INAPPLICABLE:
     "Cette opération n'a pas pu être enregistrée après plusieurs essais. Elle a été mise de côté : le responsable de la pharmacie la retrouvera dans les anomalies.",
+  CREDIT_HORS_LIGNE:
+    'Le crédit demande une connexion. Cette vente à crédit a été mise de côté : le responsable de la pharmacie la retrouvera dans les anomalies.',
+  PERMISSION_INSUFFISANTE:
+    "L'utilisateur de cette opération n'a pas le droit de la faire. L'opération a été mise de côté pour le responsable de la pharmacie.",
+  ANOMALIE_INCONNUE:
+    "L'anomalie que vous avez traitée sur le poste est introuvable. L'opération a été mise de côté pour le responsable de la pharmacie.",
+  LOT_INTROUVABLE:
+    "Le lot de cette opération n'existe plus. L'opération a été mise de côté pour le responsable de la pharmacie.",
+  LOT_REQUIS:
+    'Cette opération ne précise pas le lot alors que le produit en a plusieurs. Elle a été mise de côté pour le responsable.',
+  STOCK_LOT_NEGATIF:
+    "Le lot n'avait pas assez de stock pour cette opération. Elle a été mise de côté pour le responsable de la pharmacie.",
+  MOTIF_REQUIS:
+    "Cette opération n'a pas de motif. Elle a été mise de côté pour le responsable de la pharmacie.",
+  RAISON_REQUISE:
+    "Cette sortie de stock n'a pas de raison. Elle a été mise de côté pour le responsable de la pharmacie.",
+  QUANTITE_REQUISE:
+    "Cette opération n'a pas de quantité valable. Elle a été mise de côté pour le responsable de la pharmacie.",
+  QUANTITE_TROP_GRANDE:
+    'La quantité de cette opération est trop grande. Elle a été mise de côté pour le responsable de la pharmacie.',
+  LOT_EN_DOUBLE:
+    'Un même lot apparaît deux fois dans cette opération. Elle a été mise de côté pour le responsable de la pharmacie.',
+  DATE_PEREMPTION_REQUISE:
+    "Un lot de cette opération n'a pas de date de péremption. Elle a été mise de côté pour le responsable de la pharmacie.",
+  DATE_PEREMPTION_PASSEE:
+    'Un lot de cette opération est déjà périmé. Elle a été mise de côté pour le responsable de la pharmacie.',
+  FOURNISSEUR_EXISTANT:
+    'Un fournisseur de ce nom existe déjà dans la pharmacie. Elle a été mise de côté pour le responsable.',
+  ANOMALIE_DEJA_TRAITEE:
+    "Cette anomalie a déjà été traitée par quelqu'un d'autre.",
+  FICHE_MODIFIEE:
+    'Cette fiche produit a été modifiée ailleurs entre-temps. Le changement a été mis de côté pour le responsable de la pharmacie.',
+  PRIX_UNITE_SANS_DECONDITIONNEMENT:
+    "Un prix à l'unité a été donné pour un produit qui ne se vend pas à l'unité. L'opération a été mise de côté pour le responsable.",
+  CLIENT_CREDIT_INTROUVABLE:
+    "Le client du cahier de crédit de cette opération est introuvable. L'opération a été mise de côté pour le responsable.",
+  PRISE_INTROUVABLE:
+    "La prise à crédit de cette opération est introuvable. L'opération a été mise de côté pour le responsable.",
+  PRISE_ANNULEE:
+    "La prise à crédit de cette opération est annulée. L'opération a été mise de côté pour le responsable.",
+  PRISE_SOLDEE:
+    "La prise à crédit de cette opération est déjà soldée. L'opération a été mise de côté pour le responsable.",
+  MONTANT_SUPERIEUR_AU_RESTE:
+    'Le montant de ce remboursement dépasse ce que le client devait. Il a été mis de côté pour le responsable de la pharmacie.',
+  CREDIT_DEJA_SOLDE:
+    'Le crédit de ce client était déjà soldé. Le remboursement a été mis de côté pour le responsable de la pharmacie.',
+  CAISSE_NON_OUVERTE:
+    "Aucune caisse n'était ouverte pour cette opération. Elle a été mise de côté pour le responsable de la pharmacie.",
+  JOURNEE_CLOTUREE:
+    'La journée de cette opération est déjà clôturée. Elle a été mise de côté pour le responsable de la pharmacie.',
   SERVICE_INDISPONIBLE:
     'Le service est momentanément indisponible : cette opération sera renvoyée automatiquement.',
   REGULARISATION_INDISPONIBLE:
@@ -76,7 +162,52 @@ const CODES_HTTP_GARDES: readonly CodeRejet[] = [
   'IDENTIFIANT_DEJA_UTILISE',
   'SESSION_FERMEE',
   'STOCK_INTROUVABLE',
+  'ANOMALIE_INCONNUE',
+  ...CODES_METIER,
 ];
+
+/**
+ * Permission exigée pour rejouer chaque type d'événement : l'utilisateur de l'événement doit
+ * avoir TOUTES les permissions listées (liste vide = aucun contrôle, comme avant pour la vente
+ * et la caisse). Les types listés ici sans être encore acceptés par `TYPES_EVENEMENT` sont
+ * ceux des fonctions à venir ; un type absent du tableau n'exige rien de plus.
+ */
+export const PERMISSIONS_PAR_TYPE: Readonly<Record<string, readonly string[]>> =
+  {
+    SESSION_OUVERTE: [],
+    COMPTAGE_SAISI: [],
+    MOUVEMENT_CAISSE: [],
+    SESSION_FERMEE: [],
+    VENTE: [],
+    SORTIE_STOCK: [PERMISSIONS.STOCK_WRITE],
+    CORRECTION_QUANTITE: [PERMISSIONS.STOCK_WRITE],
+    FICHE_MODIFIEE: [PERMISSIONS.STOCK_WRITE],
+    FICHE_CREEE: [PERMISSIONS.STOCK_WRITE],
+    FOURNISSEUR_CREE: [PERMISSIONS.RECEPTION_WRITE],
+    RECEPTION_ENREGISTREE: [PERMISSIONS.RECEPTION_WRITE],
+    INVENTAIRE_ENREGISTRE: [PERMISSIONS.INVENTAIRE_WRITE],
+    ANOMALIE_TRAITEE: [PERMISSIONS.ANOMALIE_GERER],
+    CLIENT_CREDIT_CREE: [PERMISSIONS.CREDIT_WRITE],
+    CLIENT_CREDIT_MODIFIE: [PERMISSIONS.CREDIT_WRITE],
+    REMBOURSEMENT_CREDIT: [PERMISSIONS.CREDIT_WRITE],
+    DATE_LIMITE_MODIFIEE: [PERMISSIONS.CREDIT_WRITE],
+    IMPORT_STOCK_FICHIER: [PERMISSIONS.STOCK_WRITE],
+  };
+
+/** Permissions requises pour un type d'événement (aucune pour un type absent du tableau). */
+export function permissionsRequisesPourType(type: string): readonly string[] {
+  return Object.prototype.hasOwnProperty.call(PERMISSIONS_PAR_TYPE, type)
+    ? PERMISSIONS_PAR_TYPE[type]
+    : [];
+}
+
+/** Vrai si l'utilisateur possède toutes les permissions requises. */
+export function permissionsSuffisantes(
+  requises: readonly string[],
+  possedees: readonly string[],
+): boolean {
+  return requises.every((p) => possedees.includes(p));
+}
 
 export function codeRejetDepuisHttp(code: string | undefined): CodeRejet {
   const garde = CODES_HTTP_GARDES.find((c) => c === code);
@@ -271,6 +402,20 @@ export function resumeEvenement(type: unknown, corps: unknown): Resume {
         total: entierLisible(c.total),
         nombreLignes: Array.isArray(c.lignes) ? c.lignes.length : null,
       };
+    case 'SORTIE_STOCK':
+      return {
+        sortieId: texteLisible(c.id),
+        stockId: texteLisible(c.stockId),
+        quantite: entierLisible(c.quantite),
+      };
+    case 'CORRECTION_QUANTITE':
+      return {
+        correctionId: texteLisible(c.id),
+        stockId: texteLisible(c.stockId),
+        variation: entierLisible(c.variation),
+      };
+    case 'ANOMALIE_TRAITEE':
+      return { anomalieId: texteLisible(c.anomalieId) };
     default:
       return {};
   }

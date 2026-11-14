@@ -1,4 +1,8 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type {
   ConditionnementOuvert,
@@ -15,11 +19,21 @@ export const MESSAGE_CONDITIONNEMENT_DEJA_OUVERT =
 export const MESSAGE_STOCK_LOT_INSUFFISANT =
   "Ce lot n'a pas assez de stock pour cette sortie.";
 
+export const MESSAGE_LOT_CONTENU_DIFFERENT =
+  'Cet identifiant de lot existe déjà avec un contenu différent (quantité, numéro, péremption ou coût).';
+export const MESSAGE_LOT_SANS_MOUVEMENT =
+  'Ce lot existe mais son premier mouvement est introuvable : le stock est incohérent.';
+export const MESSAGE_LOT_AUTRE_FICHE =
+  'Cet identifiant de lot appartient déjà à un autre produit.';
+
 /** Pièces qui peuvent porter un mouvement sans lot (stock négatif provisoire, O11, D404). */
 export const PIECES_SANS_LOT: readonly TypePiece[] = [
   'VENTE',
   'ANNULATION',
   'RESOLUTION',
+  // Rejeu d'une sortie ou d'une correction faite hors ligne sur un poste : la part que le lot ne couvre plus
+  'SORTIE_MANUELLE',
+  'AJUSTEMENT',
 ];
 /** Pièces dont le motif est obligatoire. */
 export const PIECES_AVEC_MOTIF: readonly TypePiece[] = [
@@ -70,6 +84,11 @@ export interface ChampsFactureLot {
 }
 
 export interface NouveauLot {
+  /**
+   * Identifiant imposé par l'appelant (lot créé hors ligne sur un poste desktop, identifiant stable).
+   * Idempotence : un lot déjà créé sous cet identifiant est rendu tel quel, sans doublon ni second mouvement.
+   */
+  lotId?: string;
   stockMedicamentId: string;
   pointDeVenteId: string;
   numeroLot: string | null;
@@ -133,7 +152,7 @@ export function validerMouvement(m: MouvementAEcrire): void {
   }
   if (m.lotId === null && !PIECES_SANS_LOT.includes(m.pieceOrigineType)) {
     throw new RangeError(
-      `Un mouvement sans lot n'est permis que pour une vente, une annulation ou une résolution (reçu : ${m.pieceOrigineType}).`,
+      `Un mouvement sans lot n'est permis que pour une vente, une annulation, une résolution ou le rejeu d'une sortie ou d'une correction (reçu : ${m.pieceOrigineType}).`,
     );
   }
   if (
@@ -146,7 +165,30 @@ export function validerMouvement(m: MouvementAEcrire): void {
   }
 }
 
+const MOTIF_UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const jourDe = (d: Date | null): string | null =>
+  d ? d.toISOString().slice(0, 10) : null;
+
+/** Un lot déjà créé a le contenu demandé : quantité reçue, numéro, péremption (jour), coûts et coefficient. */
+export function memeContenu(existant: LotStock, l: NouveauLot): boolean {
+  return (
+    existant.quantiteRecue === l.quantite &&
+    existant.numeroLot === l.numeroLot &&
+    jourDe(existant.dateExpiration) === jourDe(l.dateExpiration) &&
+    existant.coutUnitaire === l.coutUnitaire &&
+    (existant.coutAchatBoite ?? null) === (l.coutAchatBoite ?? null) &&
+    existant.coefficientReception === l.coefficientReception
+  );
+}
+
 export function validerNouveauLot(l: NouveauLot): void {
+  if (l.lotId !== undefined && !MOTIF_UUID.test(l.lotId)) {
+    throw new RangeError(
+      `Lot invalide : lotId doit être un UUID (reçu : ${l.lotId}).`,
+    );
+  }
   const entiers: Array<[string, number, number]> = [
     ['quantite', l.quantite, 1],
     ['coutUnitaire', l.coutUnitaire, 0],
@@ -275,8 +317,31 @@ export class MouvementsStockService {
   ): Promise<{ lot: LotStock; reception: MouvementEcrit }> {
     validerNouveauLot(l);
     await this.verrouillerFiches(tx, [l.stockMedicamentId]);
+    if (l.lotId !== undefined) {
+      const existant = await tx.lotStock.findUnique({ where: { id: l.lotId } });
+      if (existant) {
+        // Rejeu d'un lot créé hors ligne : même identifiant, même fiche et même point de vente = rien à refaire.
+        if (
+          existant.stockMedicamentId !== l.stockMedicamentId ||
+          existant.pointDeVenteId !== l.pointDeVenteId
+        ) {
+          throw new ConflictException({
+            message: MESSAGE_LOT_AUTRE_FICHE,
+            code: 'IDENTIFIANT_DEJA_UTILISE',
+          });
+        }
+        if (!memeContenu(existant, l)) {
+          throw new ConflictException({
+            message: MESSAGE_LOT_CONTENU_DIFFERENT,
+            code: 'IDENTIFIANT_DEJA_UTILISE',
+          });
+        }
+        return this.lotDejaCree(tx, existant);
+      }
+    }
     const lot = await tx.lotStock.create({
       data: {
+        ...(l.lotId !== undefined ? { id: l.lotId } : {}),
         stockMedicamentId: l.stockMedicamentId,
         pointDeVenteId: l.pointDeVenteId,
         numeroLot: l.numeroLot,
@@ -306,6 +371,44 @@ export class MouvementsStockService {
       auteurId: l.auteurId,
     });
     return { lot, reception };
+  }
+
+  /** Résultat d'un lot déjà créé : le lot et son premier mouvement (réception ou inventaire), avec les soldes actuels. */
+  private async lotDejaCree(
+    tx: Prisma.TransactionClient,
+    lot: LotStock,
+  ): Promise<{ lot: LotStock; reception: MouvementEcrit }> {
+    const mouvement = await tx.mouvementStock.findFirst({
+      where: { lotId: lot.id, type: { in: ['RECEPTION', 'INVENTAIRE'] } },
+      orderBy: [{ horodatageServeur: 'asc' }, { id: 'asc' }],
+    });
+    if (!mouvement) {
+      throw new InternalServerErrorException({
+        message: MESSAGE_LOT_SANS_MOUVEMENT,
+        code: 'LOT_SANS_MOUVEMENT',
+      });
+    }
+    const agregatLot = await tx.agregatStockLot.findUniqueOrThrow({
+      where: { lotId: lot.id },
+      select: { quantite: true },
+    });
+    const produit = await tx.agregatStockProduit.findUniqueOrThrow({
+      where: {
+        stockMedicamentId_pointDeVenteId: {
+          stockMedicamentId: lot.stockMedicamentId,
+          pointDeVenteId: lot.pointDeVenteId,
+        },
+      },
+      select: { quantite: true },
+    });
+    return {
+      lot,
+      reception: {
+        mouvement,
+        soldeLot: agregatLot.quantite,
+        soldeProduit: produit.quantite,
+      },
+    };
   }
 
   /** Multiplie un lot technique à la qualification de sa fiche (D557) : lot mis à jour puis mouvement CORRECTION. */

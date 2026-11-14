@@ -1,3 +1,4 @@
+import { AnomaliesService } from 'src/pharmacie/anomalies/anomalies.service';
 import { HttpException } from '@nestjs/common';
 import type { PermissionsService } from 'src/common/rbac/permissions.service';
 import { PrismaService } from 'src/common/services/prisma.service';
@@ -462,6 +463,7 @@ describe('Unité PLAQUETTE et parcours du porteur, sur base de test (PB21)', () 
       prisma,
       acces,
       stockage,
+      new AnomaliesService(prisma, acces),
     ).photographier(PHARMACIE, RESPONSABLE, poste.data.id);
     const fiche = photo.fiches.find((f) => f.stockId === stockId);
     expect(fiche).toMatchObject({

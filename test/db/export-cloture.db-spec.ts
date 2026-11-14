@@ -308,7 +308,7 @@ describe("Export CSV d'une journée clôturée sur base de test (PB17b)", () => 
     // Théorique espèces : 100 000 + 200 000 + 30 000 - 200 000 - 100 000 = 30 000.
     await sessions.fermer(PHARMACIE, VENDEUR, session.id, {
       comptageFermeture: {
-        coupures: coupures({ 20000: 1, 10000: 1 }),
+        montantEspeces: 30000,
         releves: [{ mode: 'ORANGE_MONEY', montant: 20000 }],
       },
     });

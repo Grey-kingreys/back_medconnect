@@ -36,6 +36,8 @@ export const PERMISSIONS = {
   RECEPTION_WRITE: 'reception:write',
   MARGE_READ: 'marge:read', // coûts d'achat et marges
   ANOMALIE_GERER: 'anomalie:gerer',
+  CREDIT_READ: 'credit:read', // cahier de crédit : lecture
+  CREDIT_WRITE: 'credit:write', // cahier de crédit : ventes à crédit, remboursements
 
   // 🏥 Établissement (délégable, portée = sa structure)
   STRUCTURE_READ: 'structure:read',
@@ -174,6 +176,16 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   {
     code: PERMISSIONS.ANOMALIE_GERER,
     libelle: 'Traiter les anomalies de caisse et de stock',
+    categorie: 'Pharmacie',
+  },
+  {
+    code: PERMISSIONS.CREDIT_READ,
+    libelle: 'Consulter le cahier de crédit',
+    categorie: 'Pharmacie',
+  },
+  {
+    code: PERMISSIONS.CREDIT_WRITE,
+    libelle: 'Vendre à crédit et enregistrer les remboursements',
     categorie: 'Pharmacie',
   },
 
@@ -349,6 +361,8 @@ export const DEFAULT_STRUCTURE_ROLES: Record<string, DefaultRoleDef[]> = {
         PERMISSIONS.VENTE_WRITE,
         PERMISSIONS.CAISSE_UTILISER,
         PERMISSIONS.RECEPTION_WRITE,
+        PERMISSIONS.CREDIT_READ,
+        PERMISSIONS.CREDIT_WRITE,
         PERMISSIONS.CHAT_STRUCTURE,
         PERMISSIONS.STRUCTURE_READ,
         PERMISSIONS.MEMBRE_READ,
@@ -372,6 +386,8 @@ export const DEFAULT_STRUCTURE_ROLES: Record<string, DefaultRoleDef[]> = {
         PERMISSIONS.RECEPTION_WRITE,
         PERMISSIONS.MARGE_READ,
         PERMISSIONS.ANOMALIE_GERER,
+        PERMISSIONS.CREDIT_READ,
+        PERMISSIONS.CREDIT_WRITE,
         PERMISSIONS.STRUCTURE_READ,
         PERMISSIONS.STRUCTURE_WRITE,
         PERMISSIONS.MEMBRE_READ,
@@ -401,6 +417,8 @@ export const PERMISSIONS_GARANTIES_ADMIN_PHARMACIE: readonly PermissionCode[] =
     PERMISSIONS.RECEPTION_WRITE,
     PERMISSIONS.MARGE_READ,
     PERMISSIONS.ANOMALIE_GERER,
+    PERMISSIONS.CREDIT_READ,
+    PERMISSIONS.CREDIT_WRITE,
   ];
 
 // Clinique = mêmes rôles par défaut qu'un hôpital.

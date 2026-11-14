@@ -40,10 +40,10 @@ describe('Swagger des routes /pharmacie', () => {
     routes = routesDesControleurs(controleurs).filter(estPharmacie);
   });
 
-  it('57 routes /pharmacie découvertes, celles de l’inventaire', () => {
+  it('64 routes /pharmacie découvertes, celles de l’inventaire', () => {
     const cles = routes.map((r) => r.cle).sort();
     expect(cles).toEqual(Object.keys(ROUTES_PHARMACIE).sort());
-    expect(cles).toHaveLength(57);
+    expect(cles).toHaveLength(64);
   });
 
   it('chaque route a un résumé et une description', () => {

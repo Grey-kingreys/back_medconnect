@@ -35,12 +35,13 @@ import {
   supprimerBaseDeTest,
 } from './harnais';
 
-/** Les 28 modèles reliés à `Structure` par des clés `Restrict` (D676). */
+/** Les 30 modèles reliés à `Structure` par des clés `Restrict` (D676). */
 const MODELES_DE_LA_TRANCHE = [
   'AgregatStockLot',
   'AgregatStockProduit',
   'AllocationLot',
   'Anomalie',
+  'ClientCredit',
   'ClotureJournaliere',
   'ComptageCaisse',
   'CompteurTicket',
@@ -61,6 +62,7 @@ const MODELES_DE_LA_TRANCHE = [
   'Poste',
   'Reception',
   'ReleveModePaiement',
+  'RemboursementCredit',
   'ResultatSessionMode',
   'SessionCaisse',
   'TotalClotureMode',
@@ -750,8 +752,17 @@ describe('Jeu démo de pharmacie : création, scénario et purge, sur base de te
   });
 
   it('9. purge complète : toutes les tables de la tranche', async () => {
-    // Les modèles reliés à Structure par un Restrict sont exactement les 28 de la tranche.
+    // Les modèles reliés à Structure par un Restrict sont exactement les 30 de la tranche.
     expect(modelesRestrictDepuisStructure()).toEqual(MODELES_DE_LA_TRANCHE);
+
+    // Le scénario démo n'ouvre aucun crédit : un client et un remboursement prouvent la purge du cahier.
+    await sql(
+      `INSERT INTO "ClientCredit" ("id", "structureId", "nomComplet", "auteurId", "updatedAt") VALUES ('cc-demo-purge', $1, 'Client démo', 'auteur', now())`,
+      [await idPharmacie('pharmaKaloum')],
+    );
+    await sql(
+      `INSERT INTO "RemboursementCredit" ("id", "clientCreditId", "montant", "auteurId") VALUES ('rc-demo-purge', 'cc-demo-purge', 1000, 'auteur')`,
+    );
 
     const avant = await comptesParModele();
     for (const modele of MODELES_DE_LA_TRANCHE) {
@@ -846,7 +857,8 @@ describe('Jeu démo de pharmacie : création, scénario et purge, sur base de te
         [idsComptes],
       ),
     ).toBe(demoAvant.audits);
-    comptesAvantPurge = avant;
+    // Le client et le remboursement posés par le test ne sont pas recréés avec le scénario.
+    comptesAvantPurge = { ...avant, ClientCredit: 0, RemboursementCredit: 0 };
   });
 
   it('10. purge puis recréation', async () => {

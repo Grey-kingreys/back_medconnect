@@ -51,7 +51,9 @@ export function planifierMultiplication(
   exigerEntier(coefficient, 'coefficient', 1);
 
   const consideres = lots.filter((l) => l.solde > 0);
-  if (consideres.some((l) => !l.lotTechnique || l.coefficientReception !== 1)) {
+  // Lot technique (reprise) ou lot reçu par réception ou import : tous comptent des unités par boîte figées à 1.
+  // Un lot déjà converti (coefficient autre que 1) est refusé.
+  if (consideres.some((l) => l.coefficientReception !== 1)) {
     return { ok: false, code: 'STOCK_NON_CONVERTIBLE' };
   }
 

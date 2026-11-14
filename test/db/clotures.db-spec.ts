@@ -315,7 +315,7 @@ describe('Clôture journalière sur base de test (PB17a)', () => {
     await venteEncaissee(session.id, 50000, 'ORANGE_MONEY');
     await sessions.fermer(PHARMACIE, VENDEUR, session.id, {
       comptageFermeture: {
-        coupures: coupures({ 20000: 14, 10000: 1 }),
+        montantEspeces: 290000,
         releves: [{ mode: 'ORANGE_MONEY', montant: 50000 }],
       },
       commentaire: 'Billet de 10 000 manquant',

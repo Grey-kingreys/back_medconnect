@@ -618,7 +618,7 @@ describe('Sessions de caisse sur base de test (PB10)', () => {
     expect(e.statut).toBe(400);
     expect(e.corps.code).toBe('COMPTAGE_FERMETURE_REQUIS');
     expect(e.corps.message).toBe(
-      'Comptez les billets du tiroir avant de fermer la caisse.',
+      "Comptez l'argent du tiroir avant de fermer la caisse.",
     );
     expect(
       (
@@ -864,5 +864,83 @@ describe('Sessions de caisse sur base de test (PB10)', () => {
     for (const reponse of [ouverture, comptage, mouvement, bilanFige, liste]) {
       expect(cheminsCout(reponse)).toEqual([]);
     }
+  });
+  it('22. comptage par montant total : fond, écart, commentaire au-delà du seuil, ancien format toujours accepté', async () => {
+    const poste = await nouveauPoste();
+    const ouverture = await service.ouvrir(PHARMACIE, VENDEUR, {
+      posteId: poste,
+      comptage: { montantEspeces: 200000 },
+    });
+    const session = ouverture.data;
+    expect(session.comptageOuverture?.totalEspeces).toBe(200000);
+    expect(session.comptageOuverture?.coupures).toEqual([]);
+    await venteEncaissee(session.id, 300000);
+
+    // les deux formats ensemble, ou aucun : refusés
+    for (const corps of [
+      { montantEspeces: 1000, coupures: coupures({ 1000: 1 }) },
+      {},
+    ]) {
+      const e = await refus(
+        service.fermer(PHARMACIE, VENDEUR, session.id, {
+          comptageFermeture: corps,
+        }),
+      );
+      expect(e.statut).toBe(400);
+      expect(
+        (e.corps.champs as { contraintes: string[] }[])[0].contraintes,
+      ).toEqual(['montantOuCoupures']);
+    }
+    // null : refusé proprement, jamais une erreur de base
+    for (const corps of [{ montantEspeces: null }, { coupures: null }]) {
+      const e = await refus(
+        service.fermer(PHARMACIE, VENDEUR, session.id, {
+          comptageFermeture: corps as unknown as { montantEspeces: number },
+        }),
+      );
+      expect(e.statut).toBe(400);
+      expect(e.corps.code).toBe('VALIDATION');
+    }
+
+    // théorique 500 000, compté 490 000 : écart -10 000, commentaire requis
+    const sans = await refus(
+      service.fermer(PHARMACIE, VENDEUR, session.id, {
+        comptageFermeture: { montantEspeces: 490000 },
+      }),
+    );
+    expect(sans.corps.code).toBe('COMMENTAIRE_ECART_REQUIS');
+    const { data } = await service.fermer(PHARMACIE, VENDEUR, session.id, {
+      comptageFermeture: { montantEspeces: 490000 },
+      commentaire: 'Erreur de rendu de monnaie',
+    });
+    expect(data.compte[0].montant).toBe(490000);
+    expect(data.ecartEspeces).toBe(-10000);
+    const c = await sql(
+      `SELECT "totalEspeces", (SELECT count(*) FROM "LigneComptage" l WHERE l."comptageId" = c."id") AS n FROM "ComptageCaisse" c WHERE c."sessionCaisseId" = $1 AND c."moment" = 'FERMETURE'`,
+      [session.id],
+    );
+    expect(c.rows[0]).toMatchObject({ totalEspeces: 490000, n: '0' });
+    const anomalies = await sql(
+      'SELECT "type" FROM "Anomalie" WHERE "pieceId" = $1',
+      [session.id],
+    );
+    expect(anomalies.rows.map((a) => a.type)).toEqual(['ECART_CAISSE']);
+
+    // montant négatif ou décimal : le DTO le refuse ; zéro accepté
+    const autre = await ouvrirSession(await nouveauPoste());
+    const zero = await service.saisirComptage(PHARMACIE, VENDEUR, autre.id, {
+      moment: 'FERMETURE',
+      montantEspeces: 0,
+    });
+    expect(zero.data.totalEspeces).toBe(0);
+
+    // ancien format par coupures : total inchangé
+    const ancien = await ouvrirSession(await nouveauPoste());
+    const rep = await service.saisirComptage(PHARMACIE, VENDEUR, ancien.id, {
+      moment: 'FERMETURE',
+      coupures: coupures({ 20000: 2, 5000: 1 }),
+    });
+    expect(rep.data.totalEspeces).toBe(45000);
+    expect(rep.data.coupures).toHaveLength(2);
   });
 });

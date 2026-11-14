@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -7,32 +6,35 @@ import {
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { AccesPharmacieService } from '../acces-pharmacie.service';
-import { ENTIER_MAX } from '../domaine/reception';
 import { estPerime } from '../domaine/selection-lots';
-import { motifSortie, typeMouvementSortie } from '../domaine/sortie';
 import { jourConakry } from '../jour-metier';
 import { estDoublonSur } from '../stock/erreurs-base';
 import { dateVersJour } from '../stock/lecture-stock';
 import { MouvementsStockService } from '../stock/mouvements-stock.service';
+import {
+  ecrireSortieStock,
+  MESSAGE_COMMENTAIRE_SORTIE_REQUIS,
+  MESSAGE_IDENTIFIANT_SORTIE,
+  MESSAGE_LOT_INTROUVABLE_SORTIE,
+  MESSAGE_RAISON_SORTIE_REQUISE,
+  MESSAGE_SORTIE_QUANTITE_TROP_GRANDE,
+  messageSortieLotInsuffisante,
+  motifDeSortieOuRefus,
+} from '../stock/operations-stock';
 import type { CreerSortieStockDto } from '../dto/inventaires.dto';
 
-export const MESSAGE_RAISON_SORTIE_REQUISE =
-  'Choisissez la raison de la sortie : périmé, cassé ou abîmé, perdu ou volé, retour au fournisseur, ou autre.';
-export const MESSAGE_COMMENTAIRE_SORTIE_REQUIS =
-  'Précisez la raison de la sortie en quelques mots (3 caractères au moins).';
-export const MESSAGE_LOT_INTROUVABLE_SORTIE =
-  'Ce lot est introuvable pour ce médicament.';
-export const MESSAGE_SORTIE_QUANTITE_TROP_GRANDE =
-  'La quantité sortie est trop grande. Vérifiez la quantité.';
-export const MESSAGE_IDENTIFIANT_SORTIE =
-  'Cet identifiant est déjà utilisé par une autre sortie de stock.';
+// Messages gardés ici pour les importeurs existants.
+export {
+  MESSAGE_COMMENTAIRE_SORTIE_REQUIS,
+  MESSAGE_IDENTIFIANT_SORTIE,
+  MESSAGE_LOT_INTROUVABLE_SORTIE,
+  MESSAGE_RAISON_SORTIE_REQUISE,
+  MESSAGE_SORTIE_QUANTITE_TROP_GRANDE,
+  messageSortieLotInsuffisante,
+};
 export const MESSAGE_SORTIE_ENREGISTREE = 'Sortie de stock enregistrée.';
 export const MESSAGE_SORTIE_REJOUEE =
   'Cette sortie de stock était déjà enregistrée.';
-export function messageSortieLotInsuffisante(solde: number): string {
-  return `Ce lot n'a que ${solde} unité(s) en stock : la sortie ne peut pas dépasser ce stock.`;
-}
-
 const OPTIONS_TRANSACTION = { maxWait: 10_000, timeout: 30_000 };
 
 @Injectable()
@@ -50,21 +52,7 @@ export class SortiesStockService {
     ip?: string | null,
   ) {
     const acces = await this.accesPharmacie.verifier(structureId, userId);
-
-    const resultat = motifSortie(dto.raison ?? null, dto.commentaire ?? null);
-    if (!resultat.ok) {
-      throw new BadRequestException({
-        message:
-          resultat.code === 'RAISON_REQUISE'
-            ? MESSAGE_RAISON_SORTIE_REQUISE
-            : MESSAGE_COMMENTAIRE_SORTIE_REQUIS,
-        code: 'MOTIF_REQUIS',
-      });
-    }
-    const motif = resultat.motif;
-    const raison = dto.raison as NonNullable<typeof dto.raison>;
-    const type = typeMouvementSortie(raison);
-
+    const { motif, raison } = motifDeSortieOuRefus(dto.raison, dto.commentaire);
     const idSortie = dto.id ?? randomUUID();
     const evenementId = `sortie:${idSortie}`;
 
@@ -78,88 +66,21 @@ export class SortiesStockService {
         if (!pointDeVente) {
           throw new NotFoundException(MESSAGE_LOT_INTROUVABLE_SORTIE);
         }
-        const pointDeVenteId = pointDeVente.id;
-
-        const rejeu = await tx.mouvementStock.findUnique({
-          where: { evenementId },
-          select: { id: true, pointDeVenteId: true },
-        });
-        if (rejeu) {
-          if (rejeu.pointDeVenteId === pointDeVenteId) return false;
-          throw new ConflictException({
-            message: MESSAGE_IDENTIFIANT_SORTIE,
-            code: 'IDENTIFIANT_DEJA_UTILISE',
-          });
-        }
-
-        const lot = await tx.lotStock.findFirst({
-          where: {
-            id: dto.lotId,
-            stockMedicamentId: dto.stockId,
-            pointDeVenteId,
-          },
-          select: { id: true },
-        });
-        if (!lot) throw new NotFoundException(MESSAGE_LOT_INTROUVABLE_SORTIE);
-
-        await this.mouvementsStock.verrouillerFiches(tx, [dto.stockId]);
-
-        const sous = await tx.lotStock.findUniqueOrThrow({
-          where: { id: dto.lotId },
-          select: {
-            coefficientReception: true,
-            agregat: { select: { quantite: true } },
-          },
-        });
-        const solde = sous.agregat?.quantite ?? 0;
-        const quantiteUm =
-          dto.unite === 'BOITE'
-            ? dto.quantite * sous.coefficientReception
-            : dto.quantite;
-        if (quantiteUm > ENTIER_MAX) {
-          throw new BadRequestException({
-            message: MESSAGE_SORTIE_QUANTITE_TROP_GRANDE,
-            code: 'VALIDATION',
-            champs: [{ champ: 'quantite', contraintes: ['quantiteMaximale'] }],
-          });
-        }
-        if (quantiteUm > solde) {
-          throw new ConflictException({
-            message: messageSortieLotInsuffisante(solde),
-            code: 'STOCK_LOT_NEGATIF',
-          });
-        }
-
-        const ecrit = await this.mouvementsStock.ecrire(tx, {
-          evenementId,
-          pointDeVenteId,
-          stockMedicamentId: dto.stockId,
-          lotId: dto.lotId,
-          type,
-          quantite: -quantiteUm,
-          pieceOrigineType: 'SORTIE_MANUELLE',
-          pieceOrigineId: idSortie,
-          motif,
+        const ecrit = await ecrireSortieStock(this.mouvementsStock, tx, {
+          structureId,
+          pointDeVenteId: pointDeVente.id,
           auteurId: acces.user.id,
+          idSortie,
+          stockId: dto.stockId,
+          lotId: dto.lotId,
+          unite: dto.unite,
+          quantite: dto.quantite,
+          motif,
+          raison,
+          tolerant: false,
+          ip,
         });
-
-        await tx.auditLog.create({
-          data: {
-            userId: acces.user.id,
-            action: 'create',
-            entityType: 'MouvementStock',
-            entityId: ecrit.mouvement.id,
-            ip: ip ?? null,
-            metadata: {
-              type,
-              quantite: quantiteUm,
-              stockId: dto.stockId,
-              lotId: dto.lotId,
-              raison,
-            },
-          },
-        });
-        return true;
+        return ecrit.cree;
       }, OPTIONS_TRANSACTION);
     } catch (erreur) {
       if (!dto.id || !estDoublonSur(erreur, 'MouvementStock')) throw erreur;

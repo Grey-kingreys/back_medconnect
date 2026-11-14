@@ -21,6 +21,21 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 const rognerTexte = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim() : value;
 
+/** Téléphone du prescripteur : texte nettoyé, vide -> null (absent -> undefined). */
+export const nettoyerTelephonePrescripteur = ({
+  value,
+}: {
+  value: unknown;
+}): unknown => {
+  if (typeof value !== 'string') return value;
+  const t = value.trim();
+  return t === '' ? null : t;
+};
+
+/** Chiffres, espaces, +, tirets ; 6 à 20 chiffres utiles. */
+export const FORMAT_TELEPHONE_PRESCRIPTEUR =
+  /^(?=(?:\D*\d){6,20}\D*$)\+?[\d\s-]+$/;
+
 export const UNITES_VENTE = ['BOITE', 'UNITE'] as const;
 export type UniteVenteSaisie = (typeof UNITES_VENTE)[number];
 
@@ -110,6 +125,40 @@ export class PaiementVenteDto {
   montantRecu?: number;
 }
 
+/** Texte facultatif nettoyé : vide -> null (absent -> undefined). */
+const viderEnNull = ({ value }: { value: unknown }): unknown => {
+  if (typeof value !== 'string') return value;
+  const t = value.trim();
+  return t === '' ? null : t;
+};
+
+/** Client du cahier de crédit créé en même temps que la vente à crédit (ou seul). */
+export class NouveauClientCreditDto {
+  @ApiProperty({ example: 'Mamadou Bah', minLength: 2, maxLength: 100 })
+  @IsString()
+  @Transform(rognerTexte)
+  @Length(2, 100, {
+    message: 'Le nom complet du client est obligatoire (2 à 100 caractères).',
+  })
+  nomComplet: string;
+
+  @ApiPropertyOptional({
+    example: '+224 621 00 00 00',
+    nullable: true,
+    description:
+      'Téléphone facultatif (chiffres, espaces, +, tirets ; 6 à 20 chiffres). Vide : non renseigné.',
+  })
+  @IsOptional()
+  @Transform(viderEnNull)
+  @IsString()
+  @MaxLength(30)
+  @Matches(FORMAT_TELEPHONE_PRESCRIPTEUR, {
+    message:
+      'Le téléphone du client ne doit contenir que des chiffres, espaces, + et tirets (6 à 20 chiffres).',
+  })
+  telephone?: string | null;
+}
+
 export class CreerVenteDto {
   @ApiProperty({
     type: [LigneVenteDto],
@@ -144,6 +193,22 @@ export class CreerVenteDto {
   ordonnanceVerifiee?: boolean;
 
   @ApiPropertyOptional({
+    example: '+224 622 11 22 33',
+    nullable: true,
+    description:
+      "Téléphone du prescripteur lu sur l'ordonnance papier (facultatif ; chiffres, espaces, +, tirets ; 6 à 20 chiffres). Vide : non renseigné.",
+  })
+  @IsOptional()
+  @Transform(nettoyerTelephonePrescripteur)
+  @IsString()
+  @MaxLength(30)
+  @Matches(FORMAT_TELEPHONE_PRESCRIPTEUR, {
+    message:
+      'Le téléphone du prescripteur ne doit contenir que des chiffres, espaces, + et tirets (6 à 20 chiffres).',
+  })
+  telephonePrescripteur?: string | null;
+
+  @ApiPropertyOptional({
     type: [PaiementVenteDto],
     description:
       'Paiements (1 à 5, un par mode). Absent : espèces pour le total.',
@@ -165,6 +230,37 @@ export class CreerVenteDto {
   @IsNotEmpty()
   @MaxLength(64)
   posteId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Vente à crédit : client du cahier de crédit de la pharmacie. Exige la permission credit:write. Sans paiements, la vente est réglée en mode CREDIT ; avec paiements, un seul paiement CREDIT du montant total.',
+  })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  clientCreditId?: string;
+
+  @ApiPropertyOptional({
+    type: NouveauClientCreditDto,
+    description:
+      'Vente à crédit : nouveau client créé dans la même transaction (nom complet obligatoire, téléphone facultatif). Exclusif avec clientCreditId.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => NouveauClientCreditDto)
+  nouveauClientCredit?: NouveauClientCreditDto;
+
+  @ApiPropertyOptional({
+    example: '2026-12-15',
+    description:
+      'Vente à crédit : date limite de paiement convenue (AAAA-MM-JJ, aujourd’hui ou plus tard), facultative.',
+  })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'La date limite doit être au format AAAA-MM-JJ.',
+  })
+  dateLimiteCredit?: string;
 }
 
 export class AnnulerVenteDto {

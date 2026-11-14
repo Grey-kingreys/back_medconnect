@@ -1,3 +1,4 @@
+import { CODE_CREDIT } from './credit/credit-regles';
 import {
   ConflictException,
   Injectable,
@@ -278,7 +279,7 @@ export class PointsDeVenteService implements OnApplicationBootstrap {
     );
     const [modesPaiement, coupures, parametres] = await Promise.all([
       this.prisma.modePaiement.findMany({
-        where: { actif: true },
+        where: { actif: true, code: { not: CODE_CREDIT } },
         orderBy: [{ ordre: 'asc' }, { code: 'asc' }],
         select: {
           code: true,

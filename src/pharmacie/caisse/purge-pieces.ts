@@ -25,10 +25,23 @@ export async function purgerPiecesPharmacies(
   });
   await tx.paiement.deleteMany({ where: { vente: parStructure } });
   await tx.ligneVente.deleteMany({ where: { vente: parStructure } });
+  // Dates limites des prises à crédit (sans clé étrangère vers Vente) : avant les ventes.
+  const ventesDeLaPurge = await tx.vente.findMany({
+    where: parStructure,
+    select: { id: true },
+  });
+  await tx.echeanceCredit.deleteMany({
+    where: { venteId: { in: ventesDeLaPurge.map((v) => v.id) } },
+  });
   await tx.vente.deleteMany({
     where: { ...parStructure, venteOrigineId: { not: null } },
   });
   await tx.vente.deleteMany({ where: parStructure });
+  // Cahier de crédit : remboursements (immuables, sous le contournement) puis clients.
+  await tx.remboursementCredit.deleteMany({
+    where: { clientCredit: parStructure },
+  });
+  await tx.clientCredit.deleteMany({ where: parStructure });
   await tx.mouvementCaisse.deleteMany({ where: parPointDeVente });
   await tx.resultatSessionMode.deleteMany({ where: parSession });
   await tx.releveModePaiement.deleteMany({ where: { comptage: parSession } });

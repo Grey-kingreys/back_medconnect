@@ -60,6 +60,23 @@ function detailsEnObjet(details: Prisma.JsonValue): Record<string, unknown> {
     : {};
 }
 
+/** Retire récursivement toute clé de coût ou de marge (le poste ne reçoit aucun prix d'achat ni marge). */
+export function sansCout(valeur: Prisma.JsonValue): Prisma.JsonValue {
+  if (Array.isArray(valeur)) return valeur.map((v) => sansCout(v));
+  if (valeur !== null && typeof valeur === 'object') {
+    const copie: Record<string, Prisma.JsonValue> = {};
+    for (const [cle, v] of Object.entries(valeur)) {
+      if (/cout|marge/i.test(cle)) continue;
+      copie[cle] = sansCout(v as Prisma.JsonValue);
+    }
+    return copie;
+  }
+  return valeur;
+}
+
+/** Nombre maximal d'anomalies ouvertes descendues au poste desktop (les plus récentes d'abord). */
+export const LIMITE_ANOMALIES_PHOTOGRAPHIE = 500;
+
 @Injectable()
 export class AnomaliesService {
   constructor(
@@ -171,6 +188,27 @@ export class AnomaliesService {
     };
   }
 
+  /**
+   * Anomalies ouvertes du point de vente, présentées comme la liste (détails lisibles), pour la
+   * photographie du poste desktop. Aucune clé de coût ni de marge n'est rendue. Bornée aux
+   * LIMITE_ANOMALIES_PHOTOGRAPHIE plus récentes (ordre décroissant) : les plus anciennes se traitent en ligne.
+   */
+  async lireOuvertes(
+    client: Prisma.TransactionClient,
+    pointDeVenteId: string,
+  ): Promise<ElementAnomalie[]> {
+    const lignes = await client.anomalie.findMany({
+      where: { pointDeVenteId, statut: 'OUVERTE' },
+      orderBy: [{ creeLe: 'desc' }, { id: 'desc' }],
+      take: LIMITE_ANOMALIES_PHOTOGRAPHIE,
+    });
+    const elements = await this.presenter(client, lignes);
+    return elements.map((a) => ({
+      ...a,
+      details: sansCout(a.details),
+    }));
+  }
+
   private dejaTraitee(): ConflictException {
     return new ConflictException({
       message: MESSAGE_ANOMALIE_DEJA_TRAITEE,
@@ -210,7 +248,12 @@ export class AnomaliesService {
     const venteIds = [
       ...new Set(
         lignes
-          .filter((l) => l.type === 'STOCK_NEGATIF' && l.pieceId !== null)
+          .filter(
+            (l) =>
+              l.type === 'STOCK_NEGATIF' &&
+              l.pieceType === 'VENTE' &&
+              l.pieceId !== null,
+          )
           .map((l) => l.pieceId as string),
       ),
     ];
@@ -257,7 +300,11 @@ export class AnomaliesService {
 
     return lignes.map((l) => {
       let rattachement: Rattachement | null = null;
-      if (l.type === 'STOCK_NEGATIF' && l.pieceId !== null) {
+      if (
+        l.type === 'STOCK_NEGATIF' &&
+        l.pieceType === 'VENTE' &&
+        l.pieceId !== null
+      ) {
         const d = detailsEnObjet(l.details);
         const cle = `${l.pieceId}:${String(d.stockId)}`;
         rattachement = etatRattachement({

@@ -1,6 +1,8 @@
 import type { Prisma } from 'generated/prisma/client';
 import {
   cleVerrouFiche,
+  memeContenu,
+  MESSAGE_LOT_SANS_MOUVEMENT,
   MouvementsStockService,
   validerMouvement,
   validerNouveauLot,
@@ -75,7 +77,7 @@ describe('validerMouvement', () => {
       validerMouvement(
         mouvement({
           lotId: null,
-          pieceOrigineType: 'AJUSTEMENT',
+          pieceOrigineType: 'RECEPTION',
           motif: 'Test',
         }),
       ),
@@ -188,5 +190,90 @@ describe('verrouillerFiches', () => {
 describe('cleVerrouFiche', () => {
   it('préfixe l identifiant', () => {
     expect(cleVerrouFiche('x')).toBe('medconnecte:stock:x');
+  });
+});
+
+describe('creerLot avec lotId fourni (rejeu)', () => {
+  const lotId = '0f0f0f0f-1111-5222-8333-444444444444';
+  const existant = {
+    id: lotId,
+    stockMedicamentId: 'stk',
+    pointDeVenteId: 'pv',
+    numeroLot: 'L1',
+    dateExpiration: new Date('2027-01-31T00:00:00.000Z'),
+    quantiteRecue: 5,
+    coutUnitaire: 10,
+    coutAchatBoite: null,
+    coefficientReception: 1,
+  };
+  const demande = (s: Partial<NouveauLot> = {}) =>
+    lot({
+      lotId,
+      numeroLot: 'L1',
+      dateExpiration: new Date('2027-01-31T00:00:00.000Z'),
+      coutUnitaire: 10,
+      ...s,
+    });
+
+  function tx(premier: unknown) {
+    return {
+      $executeRaw: jest.fn().mockResolvedValue(1),
+      lotStock: {
+        findUnique: jest.fn().mockResolvedValue(existant),
+        create: jest.fn(),
+      },
+      mouvementStock: { findFirst: jest.fn().mockResolvedValue(premier) },
+      agregatStockLot: {
+        findUniqueOrThrow: jest.fn().mockResolvedValue({ quantite: 5 }),
+      },
+      agregatStockProduit: {
+        findUniqueOrThrow: jest.fn().mockResolvedValue({ quantite: 5 }),
+      },
+    };
+  }
+
+  it('même contenu : reconnu identique, rien créé', async () => {
+    expect(memeContenu(existant as never, demande())).toBe(true);
+    const t = tx({ id: 'm' });
+    const r = await new MouvementsStockService().creerLot(
+      t as unknown as Prisma.TransactionClient,
+      demande(),
+    );
+    expect(r.reception.soldeLot).toBe(5);
+    expect(t.lotStock.create).not.toHaveBeenCalled();
+  });
+
+  it('contenu différent : quantité, numéro, péremption, coût', async () => {
+    for (const d of [
+      { quantite: 6 },
+      { numeroLot: 'L2' },
+      { dateExpiration: null },
+      { coutUnitaire: 11 },
+    ]) {
+      const t = tx({ id: 'm' });
+      await expect(
+        new MouvementsStockService().creerLot(
+          t as unknown as Prisma.TransactionClient,
+          demande(d),
+        ),
+      ).rejects.toMatchObject({
+        response: { code: 'IDENTIFIANT_DEJA_UTILISE' },
+      });
+      expect(t.lotStock.create).not.toHaveBeenCalled();
+    }
+  });
+
+  it('premier mouvement introuvable : erreur typée', async () => {
+    await expect(
+      new MouvementsStockService().creerLot(
+        tx(null) as unknown as Prisma.TransactionClient,
+        demande(),
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'LOT_SANS_MOUVEMENT',
+        message: MESSAGE_LOT_SANS_MOUVEMENT,
+      },
+    });
   });
 });

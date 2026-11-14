@@ -197,6 +197,7 @@ model Structure {
   // Ventes au comptoir et compteur de numérotation (pharmacies)
   ventes         Vente[]
   compteursVente CompteurVente[]
+  clientsCredit  ClientCredit[]
 
   // Tranche pharmacie 1 : points de vente, paramètres et fournisseurs (PB05)
   pointsDeVente       PointDeVente[]
@@ -508,39 +509,42 @@ enum UniteVente {
 // annuleeParId et motifAnnulation de l'origine sont gelés et dérivés en lecture (PB12).
 // vendeurId, annuleeParId et les identifiants des lignes sont sans clé étrangère (D109).
 model Vente {
-  id                 String         @id @default(uuid())
-  structureId        String
-  structure          Structure      @relation(fields: [structureId], references: [id], onDelete: Restrict)
-  pointDeVenteId     String
-  pointDeVente       PointDeVente   @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
-  posteId            String // ventes historiques : poste technique REPRISE (D421)
-  poste              Poste          @relation(fields: [posteId], references: [id], onDelete: Restrict)
-  sessionCaisseId    String // ventes historiques : session technique de reprise (D421)
-  sessionCaisse      SessionCaisse  @relation(fields: [sessionCaisseId], references: [id], onDelete: Restrict)
-  typePiece          TypePieceVente @default(VENTE)
-  venteOrigineId     String?        @unique // l'unicité interdit une seconde pièce sur la même origine
-  venteOrigine       Vente?         @relation("PieceLiee", fields: [venteOrigineId], references: [id], onDelete: Restrict)
-  pieceLiee          Vente?         @relation("PieceLiee")
-  numero             String // V-AAAA-NNNNNN (historique), T<ordre>-NNNNNNN, S<ordre>-<poste>-<n>, A-<numero>
-  numeroTicket       Int? // numéro pris dans le compteur ou la plage du point de vente
-  jourMetier         DateTime       @db.Date // jour de rattachement (Conakry, O10) ; historique : jour de createdAt
-  jourMetierOrigine  DateTime?      @db.Date // jour réel si la pièce est rattachée à un autre jour
-  horodatageLocal    DateTime?
-  sequencePoste      Int?
-  vendeurId          String
-  vendeurNom         String // copie « Prénom Nom » au moment de la vente
-  clientNom          String?
-  clientTelephone    String?
-  ordonnanceVerifiee Boolean        @default(false)
-  total              Int // GNF, entier ; négatif pour une annulation
-  statut             StatutVente    @default(VALIDEE) // gelé : plus écrit après M6
-  annuleeLe          DateTime? // gelé
-  annuleeParId       String? // gelé
-  motifAnnulation    String? // gelé sur l'origine ; motif de l'annulation sur une pièce ANNULATION
-  cleIdempotence     String? // jamais renvoyée au client
-  lignes             LigneVente[]
-  paiements          Paiement[]
-  createdAt          DateTime       @default(now())
+  id                    String         @id @default(uuid())
+  structureId           String
+  structure             Structure      @relation(fields: [structureId], references: [id], onDelete: Restrict)
+  pointDeVenteId        String
+  pointDeVente          PointDeVente   @relation(fields: [pointDeVenteId], references: [id], onDelete: Restrict)
+  posteId               String // ventes historiques : poste technique REPRISE (D421)
+  poste                 Poste          @relation(fields: [posteId], references: [id], onDelete: Restrict)
+  sessionCaisseId       String // ventes historiques : session technique de reprise (D421)
+  sessionCaisse         SessionCaisse  @relation(fields: [sessionCaisseId], references: [id], onDelete: Restrict)
+  typePiece             TypePieceVente @default(VENTE)
+  venteOrigineId        String?        @unique // l'unicité interdit une seconde pièce sur la même origine
+  venteOrigine          Vente?         @relation("PieceLiee", fields: [venteOrigineId], references: [id], onDelete: Restrict)
+  pieceLiee             Vente?         @relation("PieceLiee")
+  numero                String // V-AAAA-NNNNNN (historique), T<ordre>-NNNNNNN, S<ordre>-<poste>-<n>, A-<numero>
+  numeroTicket          Int? // numéro pris dans le compteur ou la plage du point de vente
+  jourMetier            DateTime       @db.Date // jour de rattachement (Conakry, O10) ; historique : jour de createdAt
+  jourMetierOrigine     DateTime?      @db.Date // jour réel si la pièce est rattachée à un autre jour
+  horodatageLocal       DateTime?
+  sequencePoste         Int?
+  vendeurId             String
+  vendeurNom            String // copie « Prénom Nom » au moment de la vente
+  clientNom             String?
+  clientTelephone       String?
+  ordonnanceVerifiee    Boolean        @default(false)
+  telephonePrescripteur String? // facultatif : numéro lu sur l'ordonnance papier
+  clientCreditId        String? // prise à crédit (mode CREDIT) : client du cahier de crédit, posé à la création seulement (pièce immuable)
+  clientCredit          ClientCredit?  @relation(fields: [clientCreditId], references: [id], onDelete: Restrict)
+  total                 Int // GNF, entier ; négatif pour une annulation
+  statut                StatutVente    @default(VALIDEE) // gelé : plus écrit après M6
+  annuleeLe             DateTime? // gelé
+  annuleeParId          String? // gelé
+  motifAnnulation       String? // gelé sur l'origine ; motif de l'annulation sur une pièce ANNULATION
+  cleIdempotence        String? // jamais renvoyée au client
+  lignes                LigneVente[]
+  paiements             Paiement[]
+  createdAt             DateTime       @default(now())
 
   @@unique([structureId, numero])
   @@unique([structureId, cleIdempotence])
@@ -548,6 +552,7 @@ model Vente {
   @@index([structureId, createdAt])
   @@index([pointDeVenteId, jourMetier])
   @@index([sessionCaisseId])
+  @@index([clientCreditId])
 }
 
 // Ligne de vente, immuable depuis M6. quantite en UM, toujours égale à nombreAffiche x
@@ -1446,4 +1451,48 @@ model Session {
 
   @@index([userId])
   @@index([userId, deviceId])
+}
+
+// ====== Tranche pharmacie 2 : cahier de crédit (M11) ======
+
+// Client du cahier de crédit, propre à une pharmacie. Un client n'existe que si le pharmacien lui ouvre un crédit.
+// Reste à payer = ventes à crédit non annulées moins remboursements (jamais stocké). auteurId sans clé étrangère (D109).
+model ClientCredit {
+  id          String    @id @default(uuid())
+  structureId String
+  structure   Structure @relation(fields: [structureId], references: [id], onDelete: Restrict)
+  nomComplet  String
+  telephone   String?
+  note        String?
+  auteurId    String // sans clé étrangère
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  ventes         Vente[]
+  remboursements RemboursementCredit[]
+
+  @@index([structureId, nomComplet])
+}
+
+// Remboursement d'un client de crédit, immuable (aucune modification : un trigger la refuse).
+// mouvementCaisseId : entrée de caisse (APPORT) si l'argent est versé dans la caisse ouverte de l'auteur ; sans clé étrangère.
+model RemboursementCredit {
+  id                String       @id @default(uuid())
+  clientCreditId    String
+  clientCredit      ClientCredit @relation(fields: [clientCreditId], references: [id], onDelete: Restrict)
+  montant           Int // GNF, strictement positif
+  note              String?
+  verseEnCaisse     Boolean      @default(false)
+  mouvementCaisseId String?
+  auteurId          String // sans clé étrangère
+  createdAt         DateTime     @default(now())
+
+  @@index([clientCreditId])
+}
+
+// Date limite d'une prise à crédit. Vente est immuable : la date, modifiable, vit ici. venteId sans clé étrangère (la purge des pièces reste valable).
+model EcheanceCredit {
+  venteId    String   @id
+  dateLimite DateTime @db.Date
+  updatedAt  DateTime @updatedAt
 }

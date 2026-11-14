@@ -60,7 +60,7 @@ describe('RolesService (administrateur de pharmacie)', () => {
     const admin = DEFAULT_STRUCTURE_ROLES.PHARMACIE.find(
       (def) => def.legacyRole === 'STRUCTURE_ADMIN',
     );
-    expect(PERMISSIONS_GARANTIES_ADMIN_PHARMACIE).toHaveLength(12);
+    expect(PERMISSIONS_GARANTIES_ADMIN_PHARMACIE).toHaveLength(14);
     for (const code of PERMISSIONS_GARANTIES_ADMIN_PHARMACIE) {
       expect(admin?.permissions).toContain(code);
     }
@@ -104,7 +104,7 @@ describe('RolesService (administrateur de pharmacie)', () => {
         skipDuplicates: boolean;
       };
       expect(appel.skipDuplicates).toBe(true);
-      expect(appel.data).toHaveLength(12);
+      expect(appel.data).toHaveLength(14);
       expect(appel.data.every((l) => l.appRoleId === id)).toBe(true);
     }
     expect(permissions.invalidateRole).toHaveBeenCalledTimes(1);

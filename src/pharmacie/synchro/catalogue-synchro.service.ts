@@ -1,3 +1,4 @@
+import { CODE_CREDIT } from '../credit/credit-regles';
 import { ConflictException, Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { StorageService } from 'src/storage/storage.service';
@@ -8,6 +9,10 @@ import {
   versParametresReponse,
   type ParametresReponse,
 } from '../points-de-vente.service';
+import {
+  AnomaliesService,
+  type ElementAnomalie,
+} from '../anomalies/anomalies.service';
 import { dateVersJour } from '../stock/lecture-stock';
 import { lirePlagesNonEpuisees, type PlageLue } from './plages';
 
@@ -37,6 +42,9 @@ export interface FicheSynchro {
   coefficientBoite: number;
   uniteMinimale: string;
   deconditionnable: boolean;
+  /** Faux : la fiche reste à qualifier (filtre et export du stock hors ligne). */
+  qualifie: boolean;
+  notes: string | null;
   /** Jamais négative (D719) : le poste affiche 0 et `quantiteARegulariser`. */
   quantite: number;
   quantiteARegulariser: number;
@@ -80,6 +88,8 @@ export interface CatalogueSynchro {
     ordre: number;
   }[];
   fiches: FicheSynchro[];
+  /** Anomalies OUVERTES de la pharmacie, détails lisibles, sans aucun coût (lecture hors ligne). */
+  anomalies: ElementAnomalie[];
 }
 
 function comparerLots(a: LotSynchro, b: LotSynchro): number {
@@ -100,6 +110,7 @@ export class CatalogueSynchroService {
     private readonly prisma: PrismaService,
     private readonly accesPharmacie: AccesPharmacieService,
     private readonly storage: StorageService,
+    private readonly anomalies: AnomaliesService,
   ) {}
 
   async photographier(
@@ -161,7 +172,7 @@ export class CatalogueSynchroService {
           where: { structureId: structure.id },
         });
         const modesPaiement = await tx.modePaiement.findMany({
-          where: { actif: true },
+          where: { actif: true, code: { not: CODE_CREDIT } },
           orderBy: [{ ordre: 'asc' }, { code: 'asc' }],
           select: {
             code: true,
@@ -190,6 +201,8 @@ export class CatalogueSynchroService {
             coefficientBoite: true,
             uniteMinimale: true,
             deconditionnable: true,
+            qualifie: true,
+            notes: true,
             medicament: {
               select: {
                 id: true,
@@ -222,7 +235,12 @@ export class CatalogueSynchroService {
             agregat: { select: { quantite: true } },
           },
         });
+        const anomalies = await this.anomalies.lireOuvertes(
+          tx,
+          pointDeVente.id,
+        );
         return {
+          anomalies,
           posteLu,
           sequenceMaxRecue,
           plages,
@@ -278,6 +296,8 @@ export class CatalogueSynchroService {
         coefficientBoite: f.coefficientBoite,
         uniteMinimale: f.uniteMinimale,
         deconditionnable: f.deconditionnable,
+        qualifie: f.qualifie,
+        notes: f.notes ?? null,
         quantite: Math.max(0, agregat),
         quantiteARegulariser: Math.max(0, sommeLots - agregat),
         lots: lotsFiche,
@@ -313,6 +333,7 @@ export class CatalogueSynchroService {
       modesPaiement: lue.modesPaiement,
       coupures: lue.coupures,
       fiches: fichesSynchro,
+      anomalies: lue.anomalies,
     };
   }
 }

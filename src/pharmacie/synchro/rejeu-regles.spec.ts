@@ -2,7 +2,12 @@ import type { CorpsVenteDto } from '../dto/synchro.dto';
 import {
   anomaliesApplication,
   calculerLigneRejeu,
+  CODES_METIER,
   codeRejetDepuisHttp,
+  MESSAGES_REJET,
+  PERMISSIONS_PAR_TYPE,
+  permissionsRequisesPourType,
+  permissionsSuffisantes,
   contientNul,
   corpsIllisible,
   corpsStockable,
@@ -428,5 +433,70 @@ describe('anomaliesApplication (D653)', () => {
     expect(r.prixDivergents).toHaveLength(1);
     expect(r.prixDivergents[0].prixTicket).toBe(900);
     expect(r.archives).toHaveLength(1);
+  });
+});
+
+describe('codeRejetDepuisHttp : codes métier conservés (A4)', () => {
+  it('garde les codes métier connus et les anciens codes gardés', () => {
+    for (const code of CODES_METIER) {
+      expect(codeRejetDepuisHttp(code)).toBe(code);
+    }
+    expect(codeRejetDepuisHttp('SESSION_FERMEE')).toBe('SESSION_FERMEE');
+    expect(codeRejetDepuisHttp('STOCK_INTROUVABLE')).toBe('STOCK_INTROUVABLE');
+  });
+
+  it('transforme un code inconnu, VALIDATION ou absent en EVENEMENT_INVALIDE', () => {
+    expect(codeRejetDepuisHttp('VALIDATION')).toBe('EVENEMENT_INVALIDE');
+    expect(codeRejetDepuisHttp('CODE_QUI_NEXISTE_PAS')).toBe(
+      'EVENEMENT_INVALIDE',
+    );
+    expect(codeRejetDepuisHttp(undefined)).toBe('EVENEMENT_INVALIDE');
+  });
+
+  it('chaque code métier et PERMISSION_INSUFFISANTE a un message français non vide', () => {
+    for (const code of [...CODES_METIER, 'PERMISSION_INSUFFISANTE'] as const) {
+      expect(MESSAGES_REJET[code].length).toBeGreaterThan(20);
+    }
+  });
+});
+
+describe('droits au rejeu par type d événement (A3)', () => {
+  it('la vente et la caisse n exigent rien de plus qu avant', () => {
+    for (const t of [
+      'VENTE',
+      'SESSION_OUVERTE',
+      'COMPTAGE_SAISI',
+      'MOUVEMENT_CAISSE',
+      'SESSION_FERMEE',
+    ]) {
+      expect(permissionsRequisesPourType(t)).toEqual([]);
+    }
+  });
+
+  it('les types à venir ont une permission existante', () => {
+    expect(permissionsRequisesPourType('RECEPTION_ENREGISTREE')).toEqual([
+      'reception:write',
+    ]);
+    expect(permissionsRequisesPourType('SORTIE_STOCK')).toEqual([
+      'stock:write',
+    ]);
+    expect(permissionsRequisesPourType('INVENTAIRE_ENREGISTRE')).toEqual([
+      'inventaire:write',
+    ]);
+    expect(permissionsRequisesPourType('ANOMALIE_TRAITEE')).toEqual([
+      'anomalie:gerer',
+    ]);
+    expect(permissionsRequisesPourType('REMBOURSEMENT_CREDIT')).toEqual([
+      'credit:write',
+    ]);
+    expect(permissionsRequisesPourType('TYPE_INCONNU')).toEqual([]);
+    expect(permissionsRequisesPourType('toString')).toEqual([]);
+    expect(Object.keys(PERMISSIONS_PAR_TYPE).length).toBeGreaterThan(10);
+  });
+
+  it('exige toutes les permissions', () => {
+    expect(permissionsSuffisantes([], [])).toBe(true);
+    expect(permissionsSuffisantes(['a'], ['a', 'b'])).toBe(true);
+    expect(permissionsSuffisantes(['a', 'b'], ['a'])).toBe(false);
   });
 });

@@ -238,4 +238,23 @@ describe('Fiche produit (HTTP)', () => {
       );
     }
   });
+
+  it('7. conversion en unités d une fiche de 230 boîtes : coefficient 10 et MULTIPLIER transmis', async () => {
+    modifierFiche.mockClear();
+    const res = await request(serveur())
+      .patch(route)
+      .set('x-essai-user', 'pharmacien')
+      .send({ coefficientBoite: 10, conversionStock: 'MULTIPLIER' });
+    expect(res.status).toBe(200);
+    expect(modifierFiche).toHaveBeenCalledWith(
+      's1',
+      'pharmacien',
+      'k1',
+      expect.objectContaining({
+        coefficientBoite: 10,
+        conversionStock: 'MULTIPLIER',
+      }),
+      expect.any(String),
+    );
+  });
 });

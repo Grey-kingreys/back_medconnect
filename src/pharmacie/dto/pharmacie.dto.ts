@@ -7,6 +7,7 @@ import {
   IsArray,
   IsDateString,
   IsIn,
+  IsUUID,
   Min,
   Max,
   Length,
@@ -135,6 +136,14 @@ export class UpsertStockDto {
 }
 
 export class UpdateStockQuantiteDto {
+  @ApiPropertyOptional({
+    description:
+      "Identifiant choisi par le client : rejouer la même correction ne l'applique qu'une fois",
+  })
+  @IsOptional()
+  @IsUUID()
+  id?: string;
+
   @ApiProperty({
     example: -2,
     description: 'Ajouter ou retirer (négatif), en unités minimales',
@@ -194,6 +203,24 @@ export class OptionsImportStockDto {
   @IsOptional()
   @IsIn(MODES_IMPORT_STOCK)
   mode?: ModeImportStock;
+}
+
+/** Paramètres de la route d'export du stock. */
+export class ExportStockDto {
+  @ApiPropertyOptional({
+    enum: ['tous', 'alertes', 'rupture', 'qualifier'],
+    default: 'tous',
+    description: "Étendue : tout le stock ou l'un des onglets de la page Stock",
+  })
+  @IsOptional()
+  @IsIn(['tous', 'alertes', 'rupture', 'qualifier'])
+  filtre?: 'tous' | 'alertes' | 'rupture' | 'qualifier';
+
+  @ApiPropertyOptional({ description: 'Recherche sur le nom du médicament' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
 }
 
 /** Paramètre de la route du modèle Excel. */

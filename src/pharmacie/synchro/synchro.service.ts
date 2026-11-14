@@ -4,10 +4,12 @@ import {
   HttpException,
   Injectable,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import type { Prisma } from 'generated/prisma/client';
 import { isISO8601 } from 'class-validator';
 import { PrismaService } from 'src/common/services/prisma.service';
+import { PermissionsService } from 'src/common/rbac/permissions.service';
 import { AccesPharmacieService } from '../acces-pharmacie.service';
 import {
   estJourCloture,
@@ -45,6 +47,9 @@ import {
   CorpsSessionFermeeDto,
   CorpsSessionOuverteDto,
   CorpsVenteDto,
+  CorpsSortieStockDto,
+  CorpsAnomalieTraiteeDto,
+  CorpsCorrectionQuantiteDto,
   TYPES_EVENEMENT,
   type RecevoirEvenementsDto,
 } from '../dto/synchro.dto';
@@ -53,6 +58,8 @@ import {
   ARenvoyerSynchro,
   calculerLigneRejeu,
   codeRejetDepuisHttp,
+  permissionsRequisesPourType,
+  permissionsSuffisantes,
   contientNul,
   corpsIllisible,
   corpsStockable,
@@ -70,7 +77,15 @@ import {
   type CodeARenvoyer,
   type StatutResultat,
 } from './rejeu-regles';
+import {
+  correctionDejaFaite,
+  ecrireCorrectionQuantite,
+  ecrireSortieStock,
+  ficheDeLaPharmacie,
+  motifDeSortieOuRefus,
+} from '../stock/operations-stock';
 import { validerCorps } from './valider-corps';
+import { CODE_CREDIT } from '../credit/credit-regles';
 
 const OPTIONS_TRANSACTION = { maxWait: 5_000, timeout: 15_000 };
 const DELAI_SAUT_MS = 24 * 60 * 60 * 1000;
@@ -91,7 +106,10 @@ export interface ResultatEvenement {
       | 'COMPTAGE'
       | 'MOUVEMENT_CAISSE'
       | 'VENTE'
-      | 'REGULARISATION';
+      | 'REGULARISATION'
+      | 'SORTIE_STOCK'
+      | 'CORRECTION_QUANTITE'
+      | 'ANOMALIE';
     id: string;
     numero?: string;
   };
@@ -135,6 +153,8 @@ export interface ContexteRejeu {
   /** Échecs imprévus consécutifs de l'événement qui bloque le poste, gardés dans `dernierEtat` (D664). */
   echecImprevu: EchecImprevu | null;
   chargerUtilisateur(id: string): Promise<UtilisateurCharge | null>;
+  /** Permissions effectives de l'utilisateur (rôle, filtrées selon le type de structure), lues à la demande. */
+  chargerPermissions(id: string): Promise<string[]>;
 }
 
 interface EchecImprevu {
@@ -144,6 +164,8 @@ interface EchecImprevu {
 
 interface ResultatApplication {
   code?: string;
+  /** Opération déjà faite : le statut rendu est DEJA_APPLIQUE (l'événement est stocké APPLIQUE). */
+  dejaApplique?: true;
   piece?: ResultatEvenement['piece'];
   anomalies?: { type: string; id: string }[];
 }
@@ -187,6 +209,8 @@ export class SynchroService {
     // Sert au rejeu des ventes (PB18c).
     private readonly mouvementsStock: MouvementsStockService,
     private readonly sessionsCaisse: SessionsCaisseService,
+    // Droits au rejeu des types d'événements qui exigent une permission ; sans service, ces types sont refusés.
+    @Optional() private readonly permissions?: PermissionsService,
   ) {}
 
   // ------------------------------------------------------------------ route
@@ -213,6 +237,7 @@ export class SynchroService {
     }
 
     const utilisateurs = new Map<string, UtilisateurCharge | null>();
+    const droits = new Map<string, string[]>();
     const identifiants = [
       ...new Set(
         dto.evenements
@@ -257,6 +282,17 @@ export class SynchroService {
         }
         return utilisateurs.get(id) ?? null;
       },
+      chargerPermissions: async (id) => {
+        if (!droits.has(id)) {
+          droits.set(
+            id,
+            this.permissions
+              ? await this.permissions.getUserPermissions(id)
+              : [],
+          );
+        }
+        return droits.get(id) ?? [];
+      },
     };
 
     const ordonnes = dto.evenements
@@ -284,7 +320,9 @@ export class SynchroService {
       );
       resultats.push(resultat);
       if (
-        (resultat.statut === 'APPLIQUE' || resultat.statut === 'REJETE') &&
+        (resultat.statut === 'APPLIQUE' ||
+          resultat.statut === 'DEJA_APPLIQUE' ||
+          resultat.statut === 'REJETE') &&
         !resultat.horsOrdre
       ) {
         resultats.push(...(await this.drainer(ctx)));
@@ -514,9 +552,10 @@ export class SynchroService {
 
     const horsOrdre = !stocke && e.sequence <= derniere;
     const application = await this.appliquer(tx, ctx, e);
+    const { dejaApplique, ...applicationRendue } = application;
     const resultat = {
       statut: 'APPLIQUE',
-      ...application,
+      ...applicationRendue,
       ...(horsOrdre ? { horsOrdre: true } : {}),
     } as Prisma.InputJsonObject;
     if (stocke) {
@@ -540,10 +579,10 @@ export class SynchroService {
       });
     }
     return {
-      ...application,
+      ...applicationRendue,
       evenementId: e.evenementId,
       sequence: e.sequence,
-      statut: 'APPLIQUE',
+      statut: dejaApplique ? 'DEJA_APPLIQUE' : 'APPLIQUE',
       ...(differe ? { differe: true as const } : {}),
       ...(horsOrdre ? { horsOrdre: true as const } : {}),
     };
@@ -698,7 +737,8 @@ export class SynchroService {
       | 'ORDONNANCE_NON_CONFIRMEE'
       | 'PRODUIT_ARCHIVE'
       | 'CONDITIONNEMENT_CONCURRENT'
-      | 'PLAGE_EPUISEE',
+      | 'PLAGE_EPUISEE'
+      | 'STOCK_NEGATIF',
     pieceType: string,
     pieceId: string,
     details: Prisma.InputJsonObject,
@@ -758,6 +798,17 @@ export class SynchroService {
     ) {
       throw new RejetSynchro('UTILISATEUR_NON_AUTORISE');
     }
+    // Droit propre au type d'événement, évalué à l'heure du rejeu : un droit retiré pendant la coupure rejette l'opération.
+    const requises = permissionsRequisesPourType(type);
+    if (
+      requises.length > 0 &&
+      !permissionsSuffisantes(
+        requises,
+        await ctx.chargerPermissions(utilisateur.id),
+      )
+    ) {
+      throw new RejetSynchro('PERMISSION_INSUFFISANTE');
+    }
     const borne = horodatageBorne(local, new Date());
 
     switch (type) {
@@ -771,6 +822,27 @@ export class SynchroService {
           utilisateur,
           local,
           borne,
+        );
+      }
+      case 'SORTIE_STOCK': {
+        const corps = await this.corpsValide(CorpsSortieStockDto, e.corps);
+        return this.appliquerSortieStock(tx, ctx, e, corps, utilisateur, local);
+      }
+      case 'CORRECTION_QUANTITE': {
+        const corps = await this.corpsValide(
+          CorpsCorrectionQuantiteDto,
+          e.corps,
+        );
+        return this.appliquerCorrection(tx, ctx, e, corps, utilisateur, local);
+      }
+      case 'ANOMALIE_TRAITEE': {
+        const corps = await this.corpsValide(CorpsAnomalieTraiteeDto, e.corps);
+        return this.appliquerAnomalieTraitee(
+          tx,
+          ctx,
+          corps,
+          utilisateur,
+          local,
         );
       }
       case 'SESSION_OUVERTE': {
@@ -789,6 +861,7 @@ export class SynchroService {
           {
             id: corps.comptageId,
             coupures: corps.coupures,
+            montantEspeces: corps.montantEspeces,
             releves: corps.releves,
           },
           utilisateur.id,
@@ -814,6 +887,7 @@ export class SynchroService {
             ? {
                 id: corps.comptageFermeture.comptageId,
                 coupures: corps.comptageFermeture.coupures,
+                montantEspeces: corps.comptageFermeture.montantEspeces,
                 releves: corps.comptageFermeture.releves,
               }
             : undefined,
@@ -825,6 +899,193 @@ export class SynchroService {
         return { piece: { type: 'SESSION', id: s.id }, anomalies };
       }
     }
+  }
+
+  // ------------------------------------------------- stock hors ligne (sortie, correction)
+
+  /** Anomalie STOCK_NEGATIF d'une opération de stock dont une part n'a pas de lot (jamais de refus, Q2). */
+  private async anomalieStockSansLot(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    pieceType: 'SORTIE_MANUELLE' | 'CORRECTION',
+    pieceId: string,
+    stockId: string,
+    nom: string,
+    quantiteProvisoire: number,
+    soldeProduit: number | null,
+    utilisateur: UtilisateurCharge,
+    local: Date,
+  ) {
+    const auteur = `${utilisateur.prenom} ${utilisateur.nom}`.trim();
+    // Aucune réception ne rattache ces unités (seules les ventes sont rattachées) : seul un inventaire remet le stock juste.
+    const fait =
+      pieceType === 'SORTIE_MANUELLE'
+        ? 'Cette sortie faite hors ligne dépasse'
+        : 'Cette correction faite hors ligne dépasse';
+    const verbe = pieceType === 'SORTIE_MANUELLE' ? 'sorties' : 'retirées';
+    return this.creerAnomalie(tx, ctx, 'STOCK_NEGATIF', pieceType, pieceId, {
+      stockId,
+      nom,
+      quantiteProvisoire,
+      soldeProduit: soldeProduit ?? 0,
+      posteCode: ctx.poste.code,
+      utilisateurId: utilisateur.id,
+      utilisateurNom: auteur,
+      jourMetier: jourConakry(local),
+      message: `${nom} : ${fait} le stock restant du lot (poste ${ctx.poste.code}, ${auteur}) : ${quantiteProvisoire} unité(s) sont ${verbe} sans lot. Faites un inventaire de ce médicament pour remettre le stock à la bonne quantité.`,
+    });
+  }
+
+  private async appliquerSortieStock(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    e: EvenementBrut,
+    corps: CorpsSortieStockDto,
+    utilisateur: UtilisateurCharge,
+    local: Date,
+  ): Promise<ResultatApplication> {
+    const { motif, raison } = motifDeSortieOuRefus(
+      corps.raison,
+      corps.commentaire,
+    );
+    const ecrit = await ecrireSortieStock(this.mouvementsStock, tx, {
+      structureId: ctx.structure.id,
+      pointDeVenteId: ctx.poste.pointDeVenteId,
+      auteurId: utilisateur.id,
+      idSortie: corps.id,
+      stockId: corps.stockId,
+      lotId: corps.lotId,
+      unite: corps.unite,
+      quantite: corps.quantite,
+      motif,
+      raison,
+      tolerant: true,
+      horodatageLocal: local,
+      posteId: ctx.poste.id,
+      sequencePoste: e.sequence,
+      ip: ctx.ip,
+    });
+    const piece = { type: 'SORTIE_STOCK' as const, id: corps.id };
+    if (!ecrit.cree) return { piece, code: 'SORTIE_DEJA_ENREGISTREE' };
+    const anomalies: { type: string; id: string }[] = [];
+    if (ecrit.partieProvisoire > 0) {
+      anomalies.push(
+        await this.anomalieStockSansLot(
+          tx,
+          ctx,
+          'SORTIE_MANUELLE',
+          corps.id,
+          corps.stockId,
+          ecrit.nom ?? 'Médicament',
+          ecrit.partieProvisoire,
+          ecrit.soldeProduit,
+          utilisateur,
+          local,
+        ),
+      );
+    }
+    return { piece, ...(anomalies.length > 0 ? { anomalies } : {}) };
+  }
+
+  private async appliquerCorrection(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    e: EvenementBrut,
+    corps: CorpsCorrectionQuantiteDto,
+    utilisateur: UtilisateurCharge,
+    local: Date,
+  ): Promise<ResultatApplication> {
+    const motif = corps.motif?.trim() ?? '';
+    if (motif.length < 3) throw new RejetSynchro('MOTIF_REQUIS');
+    const fiche = await ficheDeLaPharmacie(tx, ctx.structure.id, corps.stockId);
+    await this.mouvementsStock.verrouillerFiches(tx, [corps.stockId]);
+    const piece = { type: 'CORRECTION_QUANTITE' as const, id: corps.id };
+    if (await correctionDejaFaite(tx, corps.id, ctx.poste.pointDeVenteId)) {
+      return { piece, code: 'CORRECTION_DEJA_ENREGISTREE' };
+    }
+    const ecrit = await ecrireCorrectionQuantite(this.mouvementsStock, tx, {
+      pointDeVenteId: ctx.poste.pointDeVenteId,
+      auteurId: utilisateur.id,
+      stockId: corps.stockId,
+      lotId: corps.lotId,
+      variation: corps.variation,
+      motif,
+      notes: corps.notes,
+      id: corps.id,
+      tolerant: true,
+      horodatageLocal: local,
+      posteId: ctx.poste.id,
+      sequencePoste: e.sequence,
+    });
+    const anomalies: { type: string; id: string }[] = [];
+    if (ecrit.partieProvisoire > 0) {
+      anomalies.push(
+        await this.anomalieStockSansLot(
+          tx,
+          ctx,
+          'CORRECTION',
+          corps.id,
+          corps.stockId,
+          fiche.nom,
+          ecrit.partieProvisoire,
+          ecrit.soldeProduit,
+          utilisateur,
+          local,
+        ),
+      );
+    }
+    return { piece, ...(anomalies.length > 0 ? { anomalies } : {}) };
+  }
+
+  private async appliquerAnomalieTraitee(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    corps: CorpsAnomalieTraiteeDto,
+    utilisateur: UtilisateurCharge,
+    local: Date,
+  ): Promise<ResultatApplication> {
+    const commentaire = corps.commentaire?.trim() ?? '';
+    if (commentaire.length < 3) throw new RejetSynchro('MOTIF_REQUIS');
+    const anomalie = await tx.anomalie.findFirst({
+      where: {
+        id: corps.anomalieId,
+        pointDeVente: { structureId: ctx.structure.id },
+      },
+      select: { id: true, type: true, statut: true },
+    });
+    if (!anomalie) throw new RejetSynchro('ANOMALIE_INCONNUE');
+    const piece = { type: 'ANOMALIE' as const, id: anomalie.id };
+    if (anomalie.statut === 'TRAITEE') {
+      return { piece, code: 'ANOMALIE_DEJA_TRAITEE', dejaApplique: true };
+    }
+    const maj = await tx.anomalie.updateMany({
+      where: { id: anomalie.id, statut: 'OUVERTE' },
+      data: {
+        statut: 'TRAITEE',
+        traiteeLe: local,
+        traiteeParId: utilisateur.id,
+        commentaireTraitement: commentaire,
+      },
+    });
+    if (maj.count !== 1) {
+      return { piece, code: 'ANOMALIE_DEJA_TRAITEE', dejaApplique: true };
+    }
+    await tx.auditLog.create({
+      data: {
+        userId: utilisateur.id,
+        action: 'update',
+        entityType: 'Anomalie',
+        entityId: anomalie.id,
+        ip: ctx.ip ?? null,
+        metadata: {
+          type: anomalie.type,
+          avant: { statut: 'OUVERTE' },
+          apres: { statut: 'TRAITEE' },
+          posteId: ctx.poste.id,
+        },
+      },
+    });
+    return { piece };
   }
 
   private async corpsValide<T extends object>(
@@ -889,6 +1150,11 @@ export class SynchroService {
       select: { id: true },
     });
     if (existante) throw new RejetSynchro('IDENTIFIANT_DEJA_UTILISE');
+
+    // Le crédit demande une connexion (client, reste à payer) : pas de vente à crédit rejouée depuis un poste.
+    if (corps.paiements.some((p) => p.mode === CODE_CREDIT)) {
+      throw new RejetSynchro('CREDIT_HORS_LIGNE', { champs: ['paiements'] });
+    }
 
     const coherence = verifierCoherenceVente(corps);
     if (!coherence.ok) {
@@ -1034,6 +1300,7 @@ export class SynchroService {
       clientNom: corps.clientNom || null,
       clientTelephone: corps.clientTelephone || null,
       ordonnanceVerifiee: corps.ordonnanceVerifiee,
+      telephonePrescripteur: corps.telephonePrescripteur ?? null,
       total: corps.total,
       cleIdempotence: null,
       horodatageLocal: local,

@@ -70,6 +70,29 @@ interface Contexte {
 }
 type Appel = (c: Contexte) => Promise<request.Response[]>;
 
+/** Lit le classeur de l'export du stock : titres et valeur de la colonne de coût de chaque ligne. */
+async function lireClasseurStock(corps: unknown) {
+  const classeur = new Workbook();
+  await classeur.xlsx.load(corps as ArrayBuffer);
+  const feuille = classeur.getWorksheet('Stock');
+  const titres: string[] = [];
+  feuille
+    ?.getRow(1)
+    .eachCell((cellule) =>
+      titres.push(typeof cellule.value === 'string' ? cellule.value : ''),
+    );
+  const colonne = titres.indexOf("Coût d'achat de la boîte (GNF)") + 1;
+  const lignes: { cout: unknown }[] = [];
+  feuille?.eachRow((ligne, numero) => {
+    if (numero === 1) return;
+    const valeur = ligne.getCell(colonne).value;
+    lignes.push({
+      cout: valeur === undefined || valeur === '' ? null : valeur,
+    });
+  });
+  return { titres, lignes };
+}
+
 const ENTETES_LIVRAISON = [
   'Médicament',
   'Quantité (boîtes)',
@@ -486,6 +509,60 @@ describe('Étanchéité des coûts, sur base de test (PB16b, CA22)', () => {
           commentaire: 'Contrôle de fin de journée',
         }),
     ],
+    'GET /pharmacie/:structureId/credits': async (c) => [
+      await c.en('get', `/pharmacie/${S}/credits`),
+    ],
+    'POST /pharmacie/:structureId/credits/clients': async (c) => {
+      const r = await c
+        .en('post', `/pharmacie/${S}/credits/clients`)
+        .send({ nomComplet: `Client crédit ${c.profil}` });
+      retenir(c, 'clientCreditId', r);
+      return [r];
+    },
+    'GET /pharmacie/:structureId/credits/clients/:clientId': async (c) => [
+      await c.en(
+        'get',
+        `/pharmacie/${S}/credits/clients/${id(c, 'clientCreditId')}`,
+      ),
+    ],
+    'PATCH /pharmacie/:structureId/credits/clients/:clientId': async (c) => [
+      await c
+        .en(
+          'patch',
+          `/pharmacie/${S}/credits/clients/${id(c, 'clientCreditId')}`,
+        )
+        .send({ note: 'Voisin' }),
+    ],
+    'PATCH /pharmacie/:structureId/credits/prises/:venteId/date-limite': async (
+      c,
+    ) => {
+      const vente = await c.en('post', `/pharmacie/${S}/ventes`).send({
+        posteId: id(c, 'posteId'),
+        lignes: [{ stockId: ficheF, quantite: 1 }],
+        ordonnanceVerifiee: true,
+        clientCreditId: id(c, 'clientCreditId'),
+        dateLimiteCredit: jour(30),
+      });
+      retenir(c, 'venteCreditId', vente);
+      return [
+        vente,
+        await c
+          .en(
+            'patch',
+            `/pharmacie/${S}/credits/prises/${id(c, 'venteCreditId')}/date-limite`,
+          )
+          .send({ dateLimite: jour(40) }),
+      ];
+    },
+    'POST /pharmacie/:structureId/credits/clients/:clientId/remboursements':
+      async (c) => [
+        await c
+          .en(
+            'post',
+            `/pharmacie/${S}/credits/clients/${id(c, 'clientCreditId')}/remboursements`,
+          )
+          .send({ montant: 1000 }),
+      ],
     'GET /pharmacie/:structureId/fournisseurs': async (c) => [
       await c.en('get', `/pharmacie/${S}/fournisseurs`),
     ],
@@ -589,6 +666,16 @@ describe('Étanchéité des coûts, sur base de test (PB16b, CA22)', () => {
       await c
         .en('patch', `/pharmacie/${S}/anomalies/${id(c, 'anomalieId')}`)
         .send({ commentaire: 'Écart vérifié en rayon' }),
+    ],
+    'GET /pharmacie/stock/:structureId/export': async (c) => [
+      await c
+        .en('get', `/pharmacie/stock/${S}/export`)
+        .buffer(true)
+        .parse((res, cb) => {
+          const morceaux: Buffer[] = [];
+          res.on('data', (m: Buffer) => morceaux.push(m));
+          res.on('end', () => cb(null, Buffer.concat(morceaux)));
+        }),
     ],
     'GET /pharmacie/stock/:structureId/import/modele': async (c) => [
       await c.en('get', `/pharmacie/stock/${S}/import/modele?mode=livraison`),
@@ -797,7 +884,7 @@ describe('Étanchéité des coûts, sur base de test (PB16b, CA22)', () => {
     const codes = PERMISSIONS_AUTORISEES_PHARMACIE.filter(
       (code) => code !== PERMISSIONS.MARGE_READ,
     );
-    expect(codes).toHaveLength(19);
+    expect(codes).toHaveLength(21);
     await sql(
       `INSERT INTO "AppRole" ("id", "nom", "structureId", "isSystem", "updatedAt") VALUES ('rol-p1-vendeur-etendu', 'Vendeur étendu (test)', $1, false, now())`,
       [S],
@@ -806,7 +893,7 @@ describe('Étanchéité des coûts, sur base de test (PB16b, CA22)', () => {
       `SELECT "id", "code" FROM "Permission" WHERE "code" = ANY($1)`,
       [codes],
     );
-    expect(permissionsBase.rows).toHaveLength(19);
+    expect(permissionsBase.rows).toHaveLength(21);
     for (const ligne of permissionsBase.rows) {
       await sql(
         `INSERT INTO "RolePermission" ("appRoleId", "permissionId") VALUES ('rol-p1-vendeur-etendu', $1)`,
@@ -845,6 +932,17 @@ describe('Étanchéité des coûts, sur base de test (PB16b, CA22)', () => {
     }
   });
 
+  it("l'export du stock : coûts remplis pour le titulaire (marge:read), vides pour le vendeur", async () => {
+    const titulaire = await jouer('titulaire');
+    const reponse = titulaire.find(
+      (j) => j.cle === 'GET /pharmacie/stock/:structureId/export',
+    )?.reponses[0];
+    expect(reponse?.status).toBe(200);
+    const { titres, lignes } = await lireClasseurStock(reponse?.body);
+    expect(titres).toEqual(ENTETES_LIVRAISON);
+    expect(lignes.some((l) => l.cout !== null)).toBe(true);
+  });
+
   it('CA22 : le vendeur ne reçoit aucune donnée de coût ni de marge, route par route', async () => {
     for (const { cle, reponses } of await jouer('vendeur')) {
       const route = ROUTES_PHARMACIE[cle];
@@ -864,6 +962,13 @@ describe('Étanchéité des coûts, sur base de test (PB16b, CA22)', () => {
             cle,
             coutDansTexte: MOTIF_CLE_COUT.test(r.text),
           }).toEqual({ cle, coutDansTexte: false });
+          continue;
+        }
+        if (route.classe === 'CLASSEUR_STOCK') {
+          expect(String(r.headers['content-type'])).toContain('spreadsheetml');
+          const { lignes } = await lireClasseurStock(r.body);
+          expect(lignes.length).toBeGreaterThan(0);
+          expect(lignes.filter((l) => l.cout !== null)).toEqual([]);
           continue;
         }
         if (route.classe === 'FICHIER') {
