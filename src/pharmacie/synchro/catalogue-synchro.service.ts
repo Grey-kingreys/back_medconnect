@@ -1,3 +1,5 @@
+import type { Prisma } from 'generated/prisma/client';
+import type { ResultatImportSynchro } from './synchro.service';
 import { CODE_CREDIT } from '../credit/credit-regles';
 import { ConflictException, Injectable, Optional } from '@nestjs/common';
 import { PermissionsService } from 'src/common/rbac/permissions.service';
@@ -252,6 +254,21 @@ export function bornerClientsCredit(
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
+/** Import Excel mis de côté par le poste : en attente de traitement, importé (avec son résultat) ou rejeté. */
+export interface ImportDiffereSynchro {
+  id: string;
+  evenementId: string;
+  mode: string | null;
+  nomFichier: string | null;
+  statut: 'EN_ATTENTE' | 'APPLIQUE' | 'REJETE';
+  code: string | null;
+  message: string | null;
+  importe: ResultatImportSynchro | null;
+}
+
+/** Nombre d'imports différés gardés dans la photographie. */
+export const IMPORTS_DIFFERES_PHOTOGRAPHIE_MAX = 20;
+
 /** Garde-fou du poids de la photographie. */
 export const RECEPTIONS_PHOTOGRAPHIE_MAX = 500;
 /** Garde-fou du poids de la photographie : le poste filtre lui-même les 30 derniers jours (D662, aucune heure ici). */
@@ -302,6 +319,8 @@ export interface CatalogueSynchro {
   receptions: ReceptionSynchro[];
   /** Les 200 derniers inventaires, les plus récents d'abord, sans filtre de date (D662) ni coût. */
   inventaires: InventaireSynchro[];
+  /** Les 20 derniers imports Excel mis de côté par ce poste et leur résultat, les plus récents d'abord (par séquence), sans coût ni heure. */
+  importsDifferes: ImportDiffereSynchro[];
   /** Clients du cahier de crédit, triés par identifiant, sans aucun coût ni donnée dépendant de l'heure. */
   clientsCredit: ClientCreditSynchro[];
   /** Catalogue global allégé, trié par identifiant (ordre stable, sans lien avec le stock : l'ETag ne bouge que si le catalogue change). */
@@ -567,6 +586,17 @@ export class CatalogueSynchroService {
             ordonnanceRequise: true,
           },
         });
+        // Colonnes lues une à une dans le JSON : jamais le contenu du fichier (corps) en entier
+        const importsDifferes = await tx.$queryRaw<
+          {
+            evenementId: string;
+            statut: 'EN_ATTENTE' | 'APPLIQUE' | 'REJETE';
+            id: string | null;
+            mode: string | null;
+            nomFichier: string | null;
+            resultat: Prisma.JsonValue | null;
+          }[]
+        >`SELECT "evenementId", "statut"::text AS "statut", "corps"->>'id' AS "id", "corps"->>'mode' AS "mode", left("corps"->>'nomFichier', 120) AS "nomFichier", "resultat" FROM "EvenementSynchro" WHERE "posteId" = ${posteLu.id} AND "type" = 'IMPORT_STOCK_FICHIER' ORDER BY "sequence" DESC LIMIT ${IMPORTS_DIFFERES_PHOTOGRAPHIE_MAX}`;
         const clientsCredit = peutLireCredit
           ? await tx.clientCredit.findMany({
               where: { structureId: structure.id },
@@ -626,6 +656,7 @@ export class CatalogueSynchroService {
           receptions,
           inventaires,
           auteursInventaires,
+          importsDifferes,
           anomalies,
           posteLu,
           sequenceMaxRecue,
@@ -722,6 +753,25 @@ export class CatalogueSynchroService {
       fiches: fichesSynchro,
       anomalies: lue.anomalies,
       fournisseurs: lue.fournisseurs,
+      importsDifferes: lue.importsDifferes.map((l): ImportDiffereSynchro => {
+        const r = (l.resultat ?? {}) as Record<string, unknown>;
+        return {
+          id: l.id ?? l.evenementId,
+          evenementId: l.evenementId,
+          mode: l.mode,
+          nomFichier: l.nomFichier,
+          statut: l.statut,
+          code: typeof r.code === 'string' ? r.code : null,
+          message:
+            l.statut === 'REJETE' && typeof r.message === 'string'
+              ? r.message
+              : null,
+          importe:
+            l.statut === 'APPLIQUE' && r.importe
+              ? (r.importe as ResultatImportSynchro)
+              : null,
+        };
+      }),
       clientsCredit: bornerClientsCredit(
         lue.clientsCredit.map((c): ClientCreditSynchro => {
           const e = lue.etatsCredit.get(c.id);

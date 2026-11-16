@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  BadRequestException,
   ConflictException,
   HttpException,
   Injectable,
@@ -63,6 +64,8 @@ import {
   CorpsFournisseurCreeDto,
   CorpsReceptionEnregistreeDto,
   CorpsInventaireEnregistreDto,
+  CorpsImportStockFichierDto,
+  TAILLE_MAX_FICHIER_DIFFERE,
   CorpsAnomalieTraiteeDto,
   CorpsCorrectionQuantiteDto,
   CorpsFicheCreeeDto,
@@ -116,6 +119,8 @@ import {
 import { CODE_CREDIT, estVenteACredit } from '../credit/credit-regles';
 import { lireEtatsCredit } from '../credit/credit.service';
 import { PERMISSIONS } from '../../common/rbac/permissions.constants';
+import { PharmacieService } from '../pharmacie.service';
+import type { FichierImport } from '../dto/pharmacie.dto';
 
 const OPTIONS_TRANSACTION = { maxWait: 5_000, timeout: 15_000 };
 const DELAI_SAUT_MS = 24 * 60 * 60 * 1000;
@@ -129,6 +134,7 @@ export interface ResultatEvenement {
   champs?: string[];
   differe?: true;
   horsOrdre?: true;
+  importe?: ResultatImportSynchro;
   anomalies?: { type: string; id: string }[];
   piece?: {
     type:
@@ -141,6 +147,7 @@ export interface ResultatEvenement {
       | 'CORRECTION_QUANTITE'
       | 'FOURNISSEUR'
       | 'INVENTAIRE'
+      | 'IMPORT_STOCK'
       | 'RECEPTION'
       | 'FICHE'
       | 'ANOMALIE'
@@ -199,8 +206,25 @@ interface EchecImprevu {
   nombre: number;
 }
 
+/** Résultat d'un import Excel mis de côté hors ligne : lignes et raisons, jamais un coût. */
+export type ResultatImportSynchro = {
+  mode: 'livraison' | 'inventaire';
+  nomFichier: string;
+  totalLignes: number;
+  importees: number;
+  rejetees: number;
+  receptionId: string | null;
+  inventaireId: string | null;
+  lignesRejetees: { ligne: number; nom: string; raison: string }[];
+};
+
+/** Nombre maximal de lignes rejetées gardées dans le résultat (poids de la photographie). */
+export const LIGNES_REJETEES_IMPORT_MAX = 50;
+
 interface ResultatApplication {
   code?: string;
+  /** Import Excel mis de côté : lignes importées et rejetées. */
+  importe?: ResultatImportSynchro;
   /** Opération déjà faite : le statut rendu est DEJA_APPLIQUE (l'événement est stocké APPLIQUE). */
   dejaApplique?: true;
   piece?: ResultatEvenement['piece'];
@@ -252,6 +276,8 @@ export class SynchroService {
     @Optional() private readonly receptions?: ReceptionsService,
     // Sert au rejeu des inventaires faits hors ligne ; sans service, ce type est rejeté.
     @Optional() private readonly inventaires?: InventairesService,
+    // Sert au rejeu des imports Excel mis de côté hors ligne ; sans service, ce type est rejeté.
+    @Optional() private readonly pharmacie?: PharmacieService,
   ) {}
 
   // ------------------------------------------------------------------ route
@@ -783,7 +809,8 @@ export class SynchroService {
       | 'RECEPTION_COEFFICIENT_DIFFERENT'
       | 'FICHE_MODIFIEE_ENTRETEMPS'
       | 'THEORIQUE_DIVERGENT'
-      | 'CREDIT_TROP_PERCU',
+      | 'CREDIT_TROP_PERCU'
+      | 'IMPORT_DIFFERE_PARTIEL',
     pieceType: string,
     pieceId: string,
     details: Prisma.InputJsonObject,
@@ -907,6 +934,13 @@ export class SynchroService {
           e.corps,
         );
         return this.appliquerInventaire(tx, ctx, corps, utilisateur, local);
+      }
+      case 'IMPORT_STOCK_FICHIER': {
+        const corps = await this.corpsValide(
+          CorpsImportStockFichierDto,
+          e.corps,
+        );
+        return this.appliquerImportStock(tx, ctx, corps, utilisateur, local);
       }
       case 'FICHE_MODIFIEE': {
         const corps = await this.corpsValide(CorpsFicheModifieeDto, e.corps);
@@ -1384,6 +1418,138 @@ export class SynchroService {
       );
     }
     return { piece, ...(anomalies.length > 0 ? { anomalies } : {}) };
+  }
+
+  // ------------------------------------------------- import Excel mis de côté hors ligne
+
+  private async appliquerImportStock(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    corps: CorpsImportStockFichierDto,
+    utilisateur: UtilisateurCharge,
+    local: Date,
+  ): Promise<ResultatApplication> {
+    // Sans service de stock, l'événement est rejeté proprement (type non pris en charge par ce serveur).
+    if (!this.pharmacie) throw new RejetSynchro('EVENEMENT_INVALIDE');
+    const piece = { type: 'IMPORT_STOCK' as const, id: corps.id };
+
+    // Droit propre au mode, comme la route en ligne : reception:write (livraison) ou inventaire:write (inventaire)
+    const droitMode =
+      corps.mode === 'livraison'
+        ? PERMISSIONS.RECEPTION_WRITE
+        : PERMISSIONS.INVENTAIRE_WRITE;
+    if (
+      !permissionsSuffisantes(
+        [droitMode],
+        await ctx.chargerPermissions(utilisateur.id),
+      )
+    ) {
+      throw new RejetSynchro('PERMISSION_INSUFFISANTE');
+    }
+
+    // Idempotence par identifiant : la réception ou l'inventaire du même identifiant existe déjà
+    const dejaFait =
+      corps.mode === 'livraison'
+        ? await tx.reception.findUnique({
+            where: { id: corps.id },
+            select: { id: true },
+          })
+        : await tx.inventaire.findUnique({
+            where: { id: corps.id },
+            select: { id: true },
+          });
+    if (dejaFait) return { piece, code: 'IMPORT_DEJA_ENREGISTRE' };
+
+    // Le contenu doit être du base64 valide, dans la taille qui passe par la synchro
+    const contenu = corps.contenuBase64;
+    if (contenu.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(contenu)) {
+      throw new RejetSynchro('FICHIER_INVALIDE');
+    }
+    const buffer = Buffer.from(contenu, 'base64');
+    if (buffer.length === 0 || buffer.length > TAILLE_MAX_FICHIER_DIFFERE) {
+      throw new RejetSynchro('FICHIER_INVALIDE');
+    }
+    const fichier: FichierImport = {
+      buffer,
+      size: buffer.length,
+      mimetype:
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      originalname: /\.xlsx$/i.test(corps.nomFichier)
+        ? corps.nomFichier
+        : `${corps.nomFichier}.xlsx`,
+    };
+    const acces = {
+      structure: ctx.structure,
+      user: utilisateur,
+    } as unknown as AccesPharmacie;
+
+    // Même code que l'import en ligne : un fichier illisible ou hors modèle (400) est rejeté en bloc
+    let ecrit: Awaited<ReturnType<PharmacieService['importerStockRejeu']>>;
+    try {
+      ecrit = await this.pharmacie.importerStockRejeu(
+        tx,
+        acces,
+        fichier,
+        corps.mode,
+        corps.id,
+      );
+    } catch (erreur) {
+      if (erreur instanceof BadRequestException) {
+        throw new RejetSynchro('FICHIER_INVALIDE');
+      }
+      throw erreur;
+    }
+
+    const data = ecrit.data as {
+      totalLignes: number;
+      importees: number;
+      receptionId: string | null;
+      inventaireId: string | null;
+      lignes: { ligne: number; nom: string; statut: string; raison?: string }[];
+    };
+    const lignesRejetees = data.lignes
+      .filter((l) => l.statut === 'rejetee')
+      .map((l) => ({ ligne: l.ligne, nom: l.nom, raison: l.raison ?? '' }));
+    const importe: ResultatImportSynchro = {
+      mode: corps.mode,
+      nomFichier: corps.nomFichier.slice(0, 120),
+      totalLignes: data.totalLignes,
+      importees: data.importees,
+      rejetees: data.totalLignes - data.importees,
+      receptionId: data.receptionId,
+      inventaireId: data.inventaireId,
+      lignesRejetees: lignesRejetees.slice(0, LIGNES_REJETEES_IMPORT_MAX),
+    };
+    const resultat: ResultatApplication = { piece, importe };
+    if (importe.rejetees > 0) {
+      const auteur = `${utilisateur.prenom} ${utilisateur.nom}`.trim();
+      const anomalie = await this.creerAnomalie(
+        tx,
+        ctx,
+        'IMPORT_DIFFERE_PARTIEL',
+        'IMPORT_STOCK',
+        corps.id,
+        {
+          mode: corps.mode,
+          nomFichier: importe.nomFichier,
+          totalLignes: importe.totalLignes,
+          importees: importe.importees,
+          rejetees: importe.rejetees,
+          lignesRejetees: importe.lignesRejetees,
+          receptionId: importe.receptionId,
+          inventaireId: importe.inventaireId,
+          posteCode: ctx.poste.code,
+          utilisateurId: utilisateur.id,
+          utilisateurNom: auteur,
+          jourMetier: jourConakry(local),
+          message: `Le fichier « ${importe.nomFichier} » mis de côté hors ligne (poste ${ctx.poste.code}, ${auteur}) a été importé : ${importe.importees} ligne(s) importée(s) sur ${importe.totalLignes}, ${importe.rejetees} refusée(s). Corrigez les lignes refusées dans le fichier, puis importez-les de nouveau.`,
+        },
+      );
+      resultat.anomalies = [
+        { type: 'IMPORT_DIFFERE_PARTIEL', id: anomalie.id },
+      ];
+    }
+    return resultat;
   }
 
   // ------------------------------------------------- fiches hors ligne (modification, création)

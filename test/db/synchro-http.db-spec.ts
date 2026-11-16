@@ -612,4 +612,37 @@ describe('Photographie du catalogue en HTTP, sur base de test (PB18a)', () => {
     });
     expect(synchro.status).toBe(200);
   });
+
+  it('12. un fichier Excel de 1,4 Mo mis de côté (base64, 1,9 Mo) passe dans un lot', async () => {
+    const poste = await enregistrerPoste('DESKTOP', 'desktop-synchro-import');
+    const contenuBase64 = Buffer.alloc(1_400_000, 7).toString('base64');
+    const r = await en(
+      'titulaire',
+      'post',
+      `/pharmacie/${S}/synchro/evenements`,
+    ).send({
+      ...battement(poste),
+      evenements: [
+        {
+          evenementId: randomUUID(),
+          // Séquence en avance : l'événement est seulement mis en attente, sans rejeu
+          sequence: 9000,
+          type: 'IMPORT_STOCK_FICHIER',
+          horodatageLocal: new Date().toISOString(),
+          utilisateurId: PROFILS.titulaire.userId,
+          corps: {
+            id: randomUUID(),
+            mode: 'livraison',
+            nomFichier: 'livraison.xlsx',
+            contenuBase64,
+          },
+        },
+      ],
+    });
+    expect(r.status).toBe(200);
+    expect(
+      (r.body as { data: { resultats: { statut: string }[] } }).data
+        .resultats[0].statut,
+    ).toBe('EN_ATTENTE');
+  });
 });

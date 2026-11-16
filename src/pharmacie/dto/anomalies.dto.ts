@@ -31,6 +31,7 @@ export const TYPES_ANOMALIE = [
   'FICHE_MODIFIEE_ENTRETEMPS',
   'THEORIQUE_DIVERGENT',
   'CREDIT_TROP_PERCU',
+  'IMPORT_DIFFERE_PARTIEL',
 ] as const;
 
 export class ListerAnomaliesDto {

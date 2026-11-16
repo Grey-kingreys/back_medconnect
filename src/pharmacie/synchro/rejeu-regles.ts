@@ -25,6 +25,7 @@ export type CodeRejet =
   | 'EVENEMENT_INAPPLICABLE'
   | 'PERMISSION_INSUFFISANTE'
   | 'ANOMALIE_INCONNUE'
+  | 'FICHIER_INVALIDE'
   | CodeMetier;
 
 /**
@@ -88,6 +89,8 @@ export const MESSAGES_REJET: Record<CodeRejet | CodeARenvoyer, string> = {
     "L'utilisateur de cette opération n'a pas le droit de la faire. L'opération a été mise de côté pour le responsable de la pharmacie.",
   ANOMALIE_INCONNUE:
     "L'anomalie que vous avez traitée sur le poste est introuvable. L'opération a été mise de côté pour le responsable de la pharmacie.",
+  FICHIER_INVALIDE:
+    "Le fichier Excel mis de côté hors ligne est illisible ou ne respecte pas le modèle d'import. Rien n'a été importé : le responsable de la pharmacie peut le retrouver dans les anomalies, puis refaire l'import avec un fichier corrigé.",
   LOT_INTROUVABLE:
     "Le lot de cette opération n'existe plus. L'opération a été mise de côté pour le responsable de la pharmacie.",
   LOT_REQUIS:
@@ -163,6 +166,7 @@ const CODES_HTTP_GARDES: readonly CodeRejet[] = [
   'SESSION_FERMEE',
   'STOCK_INTROUVABLE',
   'ANOMALIE_INCONNUE',
+  'FICHIER_INVALIDE',
   ...CODES_METIER,
 ];
 
@@ -425,6 +429,13 @@ export function resumeEvenement(type: unknown, corps: unknown): Resume {
       return {
         inventaireId: texteLisible(c.id),
         nombreLignes: Array.isArray(c.lignes) ? c.lignes.length : null,
+      };
+    // Import Excel mis de côté : jamais le contenu du fichier
+    case 'IMPORT_STOCK_FICHIER':
+      return {
+        importId: texteLisible(c.id),
+        mode: texteLisible(c.mode),
+        nomFichier: texteLisible(c.nomFichier),
       };
     case 'FICHE_MODIFIEE':
       return { stockId: texteLisible(c.stockId) };

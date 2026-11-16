@@ -20,6 +20,7 @@ export const LIBELLES_ANOMALIE: Record<TypeAnomalie, string> = {
     'Fiche modifiée hors ligne et ailleurs entre-temps',
   THEORIQUE_DIVERGENT: 'Inventaire hors ligne : stock différent du poste',
   CREDIT_TROP_PERCU: 'Crédit : trop-perçu sur un remboursement',
+  IMPORT_DIFFERE_PARTIEL: 'Import Excel hors ligne : lignes non importées',
 };
 
 export type EtatRattachement =

@@ -72,6 +72,7 @@ export const TYPES_EVENEMENT = [
   'CLIENT_CREDIT_MODIFIE',
   'REMBOURSEMENT_CREDIT',
   'DATE_LIMITE_MODIFIEE',
+  'IMPORT_STOCK_FICHIER',
 ] as const;
 
 export class EtatPosteDto {
@@ -744,4 +745,32 @@ export class CorpsDateLimiteModifieeDto {
   @ValidateIf((_o, v) => v !== null)
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
   dateLimite: string | null;
+}
+
+/**
+ * Taille maximale (octets) d'un fichier d'import mis de côté hors ligne. Le corps d'un lot de
+ * synchro est limité à 2 Mo (D663) et le fichier y voyage en base64 (+ un tiers) : 1,4 Mo de
+ * fichier donnent environ 1,9 Mo, ce qui laisse de la place à l'enveloppe de l'événement.
+ */
+export const TAILLE_MAX_FICHIER_DIFFERE = 1_400_000;
+
+/** Fichier Excel du stock mis de côté hors ligne : analysé et importé au rejeu, comme en ligne. */
+export class CorpsImportStockFichierDto {
+  @IsUUID('all')
+  id: string;
+
+  @IsIn(['livraison', 'inventaire'])
+  mode: 'livraison' | 'inventaire';
+
+  @IsString()
+  @IsNotEmpty()
+  @Transform(rognerTexte)
+  @MaxLength(255)
+  nomFichier: string;
+
+  /** Contenu du classeur .xlsx en base64 ; sa taille réelle est contrôlée au rejeu (FICHIER_INVALIDE). */
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(2_000_000)
+  contenuBase64: string;
 }
