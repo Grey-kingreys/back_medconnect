@@ -16,6 +16,8 @@ export const LIBELLES_ANOMALIE: Record<TypeAnomalie, string> = {
   SEQUENCE_MANQUANTE: 'Opération de caisse manquante',
   RECEPTION_COEFFICIENT_DIFFERENT:
     'Réception hors ligne : unités par boîte différentes',
+  FICHE_MODIFIEE_ENTRETEMPS:
+    'Fiche modifiée hors ligne et ailleurs entre-temps',
 };
 
 export type EtatRattachement =

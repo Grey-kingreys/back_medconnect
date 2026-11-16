@@ -63,6 +63,8 @@ export const TYPES_EVENEMENT = [
   'ANOMALIE_TRAITEE',
   'FOURNISSEUR_CREE',
   'RECEPTION_ENREGISTREE',
+  'FICHE_MODIFIEE',
+  'FICHE_CREEE',
 ] as const;
 
 export class EtatPosteDto {
@@ -468,4 +470,77 @@ export class CorpsReceptionEnregistreeDto extends OmitType(CreerReceptionDto, [
   @ValidateNested({ each: true })
   @Type(() => LigneReceptionRejeuDto)
   lignes: LigneReceptionRejeuDto[];
+}
+
+/** Plus grand entier enregistrable (colonne Int de PostgreSQL). */
+const ENTIER_MAX_FICHE = 2147483647;
+
+/** Champs « sûrs » d'une fiche modifiables hors ligne ; null efface la valeur. Les mêmes bornes que ModifierFicheDto. */
+export class ValeursFicheSuresDto {
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(ENTIER_MAX_FICHE)
+  prixUnitaire?: number | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(ENTIER_MAX_FICHE)
+  prixUnite?: number | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000)
+  toleranceInventaire?: number | null;
+
+  @IsOptional()
+  @IsString()
+  @Transform(rognerTexte)
+  @MaxLength(2000)
+  @Matches(SANS_NUL)
+  notes?: string | null;
+}
+
+/** Fiche modifiée hors ligne : les valeurs vues par le poste (avant) et voulues (apres), champ par champ. */
+export class CorpsFicheModifieeDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  stockId: string;
+
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => ValeursFicheSuresDto)
+  avant: ValeursFicheSuresDto;
+
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => ValeursFicheSuresDto)
+  apres: ValeursFicheSuresDto;
+}
+
+/** Fiche de stock créée hors ligne depuis le catalogue global : l'identifiant vient du poste, sans quantité. */
+export class CorpsFicheCreeeDto {
+  @IsUUID('all')
+  id: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  medicamentId: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(ENTIER_MAX_FICHE)
+  prixUnitaire?: number | null;
+
+  @IsOptional()
+  @IsString()
+  @Transform(rognerTexte)
+  @MaxLength(2000)
+  @Matches(SANS_NUL)
+  notes?: string | null;
 }

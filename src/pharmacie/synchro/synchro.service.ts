@@ -60,6 +60,8 @@ import {
   CorpsReceptionEnregistreeDto,
   CorpsAnomalieTraiteeDto,
   CorpsCorrectionQuantiteDto,
+  CorpsFicheCreeeDto,
+  CorpsFicheModifieeDto,
   TYPES_EVENEMENT,
   type RecevoirEvenementsDto,
 } from '../dto/synchro.dto';
@@ -95,6 +97,13 @@ import {
   motifDeSortieOuRefus,
 } from '../stock/operations-stock';
 import { validerCorps } from './valider-corps';
+import {
+  appliquerFicheCreee,
+  appliquerFicheModifiee,
+  corpsAvecFichesDuServeur,
+  LIBELLES_CHAMP_FICHE,
+  type ResultatFicheModifiee,
+} from './fiches-rejeu';
 import { CODE_CREDIT } from '../credit/credit-regles';
 
 const OPTIONS_TRANSACTION = { maxWait: 5_000, timeout: 15_000 };
@@ -121,6 +130,7 @@ export interface ResultatEvenement {
       | 'CORRECTION_QUANTITE'
       | 'FOURNISSEUR'
       | 'RECEPTION'
+      | 'FICHE'
       | 'ANOMALIE';
     id: string;
     numero?: string;
@@ -753,7 +763,8 @@ export class SynchroService {
       | 'CONDITIONNEMENT_CONCURRENT'
       | 'PLAGE_EPUISEE'
       | 'STOCK_NEGATIF'
-      | 'RECEPTION_COEFFICIENT_DIFFERENT',
+      | 'RECEPTION_COEFFICIENT_DIFFERENT'
+      | 'FICHE_MODIFIEE_ENTRETEMPS',
     pieceType: string,
     pieceId: string,
     details: Prisma.InputJsonObject,
@@ -825,6 +836,16 @@ export class SynchroService {
       throw new RejetSynchro('PERMISSION_INSUFFISANTE');
     }
     const borne = horodatageBorne(local, new Date());
+    // Une fiche créée sur le poste sous un autre identifiant que celle du serveur y est retrouvée par son alias.
+    e = {
+      ...e,
+      corps: await corpsAvecFichesDuServeur(
+        tx,
+        ctx.structure.id,
+        type,
+        e.corps,
+      ),
+    };
 
     switch (type) {
       case 'VENTE': {
@@ -860,6 +881,14 @@ export class SynchroService {
           e.corps,
         );
         return this.appliquerReception(tx, ctx, corps, utilisateur, local);
+      }
+      case 'FICHE_MODIFIEE': {
+        const corps = await this.corpsValide(CorpsFicheModifieeDto, e.corps);
+        return this.appliquerFicheModifiee(tx, ctx, corps, utilisateur, local);
+      }
+      case 'FICHE_CREEE': {
+        const corps = await this.corpsValide(CorpsFicheCreeeDto, e.corps);
+        return this.appliquerFicheCreee(tx, ctx, corps, utilisateur);
       }
       case 'ANOMALIE_TRAITEE': {
         const corps = await this.corpsValide(CorpsAnomalieTraiteeDto, e.corps);
@@ -1174,6 +1203,86 @@ export class SynchroService {
       piece,
       ...(fournisseurPerdu ? { code: 'FOURNISSEUR_INCONNU_IGNORE' } : {}),
       ...(anomalies.length > 0 ? { anomalies } : {}),
+    };
+  }
+
+  // ------------------------------------------------- fiches hors ligne (modification, création)
+
+  private async appliquerFicheModifiee(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    corps: CorpsFicheModifieeDto,
+    utilisateur: UtilisateurCharge,
+    local: Date,
+  ): Promise<ResultatApplication> {
+    const resultat: ResultatFicheModifiee = await appliquerFicheModifiee(tx, {
+      structureId: ctx.structure.id,
+      auteurId: utilisateur.id,
+      posteId: ctx.poste.id,
+      ip: ctx.ip ?? null,
+      corps,
+    });
+    const piece = { type: 'FICHE' as const, id: corps.stockId };
+    if (resultat.conflits.length === 0) return { piece };
+    const auteur = `${utilisateur.prenom} ${utilisateur.nom}`.trim();
+    const montrer = (champ: string, v: string | number | null) =>
+      champ === 'notes'
+        ? ''
+        : v === null
+          ? ' (aucune valeur)'
+          : ` (${String(v)})`;
+    const phrases = resultat.conflits.map(
+      (c) =>
+        `${LIBELLES_CHAMP_FICHE[c.champ]}${montrer(c.champ, c.valeurServeur)} a été changé ailleurs entre-temps et n'a pas été modifié`,
+    );
+    const anomalie = await this.creerAnomalie(
+      tx,
+      ctx,
+      'FICHE_MODIFIEE_ENTRETEMPS',
+      'FICHE',
+      corps.stockId,
+      {
+        stockId: corps.stockId,
+        nom: resultat.nom,
+        champs: resultat.conflits.map((c) =>
+          c.champ === 'notes'
+            ? { champ: c.champ }
+            : {
+                champ: c.champ,
+                avantPoste: c.avantPoste,
+                valeurServeur: c.valeurServeur,
+                valeurVoulue: c.valeurVoulue,
+              },
+        ),
+        appliques: resultat.appliques,
+        posteCode: ctx.poste.code,
+        utilisateurId: utilisateur.id,
+        utilisateurNom: auteur,
+        jourMetier: jourConakry(local),
+        message: `${resultat.nom} : la fiche modifiée hors ligne (poste ${ctx.poste.code}, ${auteur}) a changé ailleurs entre-temps : ${phrases.join(' ; ')}. Vérifiez la fiche et refaites la modification si elle est toujours voulue.`,
+      },
+    );
+    return { piece, anomalies: [anomalie] };
+  }
+
+  private async appliquerFicheCreee(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    corps: CorpsFicheCreeeDto,
+    utilisateur: UtilisateurCharge,
+  ): Promise<ResultatApplication> {
+    const f = await appliquerFicheCreee(tx, {
+      structureId: ctx.structure.id,
+      auteurId: utilisateur.id,
+      posteId: ctx.poste.id,
+      ip: ctx.ip ?? null,
+      corps,
+    });
+    // L'identifiant retenu est rendu dans la pièce : celui du poste, sauf fiche déjà existante (alias).
+    return {
+      piece: { type: 'FICHE', id: f.id },
+      ...(f.reutilisee ? { code: 'FICHE_EXISTANTE_REUTILISEE' } : {}),
+      ...(f.dejaApplique ? { dejaApplique: true as const } : {}),
     };
   }
 

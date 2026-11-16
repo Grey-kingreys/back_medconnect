@@ -42,6 +42,8 @@ export interface FicheSynchro {
   coefficientBoite: number;
   uniteMinimale: string;
   deconditionnable: boolean;
+  /** Écart d'inventaire toléré en unités minimales ; null = aucune tolérance (champ modifiable hors ligne). */
+  toleranceInventaire: number | null;
   /** Faux : la fiche reste à qualifier (filtre et export du stock hors ligne). */
   qualifie: boolean;
   notes: string | null;
@@ -93,6 +95,16 @@ export interface ReceptionSynchro {
   lots: LotReceptionSynchro[];
 }
 
+/** Médicament du catalogue global, allégé : seulement de quoi ajouter une fiche au stock hors ligne (Q4). */
+export interface MedicamentAllegeSynchro {
+  id: string;
+  nom: string;
+  nomGenerique: string | null;
+  categorie: string;
+  formes: string[];
+  ordonnanceRequise: boolean;
+}
+
 /** Garde-fou du poids de la photographie. */
 export const RECEPTIONS_PHOTOGRAPHIE_MAX = 500;
 
@@ -139,6 +151,8 @@ export interface CatalogueSynchro {
   fournisseurs: FournisseurSynchro[];
   /** Les 500 dernières réceptions, les plus récentes d'abord, sans filtre de date (D662) ni coût ni montant de facture. */
   receptions: ReceptionSynchro[];
+  /** Catalogue global allégé, trié par identifiant (ordre stable, sans lien avec le stock : l'ETag ne bouge que si le catalogue change). */
+  medicaments: MedicamentAllegeSynchro[];
 }
 
 function comparerLots(a: LotSynchro, b: LotSynchro): number {
@@ -250,6 +264,7 @@ export class CatalogueSynchroService {
             coefficientBoite: true,
             uniteMinimale: true,
             deconditionnable: true,
+            toleranceInventaire: true,
             qualifie: true,
             notes: true,
             medicament: {
@@ -334,7 +349,20 @@ export class CatalogueSynchroService {
             },
           },
         });
+        // Liste blanche : ni description, ni date, ni lien avec les stocks ou les prix des pharmacies.
+        const medicaments = await tx.medicament.findMany({
+          orderBy: { id: 'asc' },
+          select: {
+            id: true,
+            nom: true,
+            nomGenerique: true,
+            categorie: true,
+            formes: true,
+            ordonnanceRequise: true,
+          },
+        });
         return {
+          medicaments,
           fournisseurs,
           receptions,
           anomalies,
@@ -393,6 +421,7 @@ export class CatalogueSynchroService {
         coefficientBoite: f.coefficientBoite,
         uniteMinimale: f.uniteMinimale,
         deconditionnable: f.deconditionnable,
+        toleranceInventaire: f.toleranceInventaire ?? null,
         qualifie: f.qualifie,
         notes: f.notes ?? null,
         quantite: Math.max(0, agregat),
@@ -432,6 +461,7 @@ export class CatalogueSynchroService {
       fiches: fichesSynchro,
       anomalies: lue.anomalies,
       fournisseurs: lue.fournisseurs,
+      medicaments: lue.medicaments,
       receptions: lue.receptions.map((r) => ({
         id: r.id,
         reference: r.reference,

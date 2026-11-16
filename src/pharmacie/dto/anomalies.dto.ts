@@ -28,6 +28,7 @@ export const TYPES_ANOMALIE = [
   'EVENEMENT_REJETE',
   'SEQUENCE_MANQUANTE',
   'RECEPTION_COEFFICIENT_DIFFERENT',
+  'FICHE_MODIFIEE_ENTRETEMPS',
 ] as const;
 
 export class ListerAnomaliesDto {

@@ -46,6 +46,7 @@ export const CODES_METIER = [
   'FOURNISSEUR_EXISTANT',
   'ANOMALIE_DEJA_TRAITEE',
   'FICHE_MODIFIEE',
+  'MEDICAMENT_INCONNU',
   'PRIX_UNITE_SANS_DECONDITIONNEMENT',
   'CLIENT_CREDIT_INTROUVABLE',
   'PRISE_INTROUVABLE',
@@ -116,6 +117,8 @@ export const MESSAGES_REJET: Record<CodeRejet | CodeARenvoyer, string> = {
     "Cette anomalie a déjà été traitée par quelqu'un d'autre.",
   FICHE_MODIFIEE:
     'Cette fiche produit a été modifiée ailleurs entre-temps. Le changement a été mis de côté pour le responsable de la pharmacie.',
+  MEDICAMENT_INCONNU:
+    "Le médicament ajouté au stock sur le poste n'existe pas dans le catalogue. L'opération a été mise de côté pour le responsable de la pharmacie.",
   PRIX_UNITE_SANS_DECONDITIONNEMENT:
     "Un prix à l'unité a été donné pour un produit qui ne se vend pas à l'unité. L'opération a été mise de côté pour le responsable.",
   CLIENT_CREDIT_INTROUVABLE:
@@ -420,6 +423,13 @@ export function resumeEvenement(type: unknown, corps: unknown): Resume {
       return {
         receptionId: texteLisible(c.id),
         nombreLignes: Array.isArray(c.lignes) ? c.lignes.length : null,
+      };
+    case 'FICHE_MODIFIEE':
+      return { stockId: texteLisible(c.stockId) };
+    case 'FICHE_CREEE':
+      return {
+        stockId: texteLisible(c.id),
+        medicamentId: texteLisible(c.medicamentId),
       };
     case 'ANOMALIE_TRAITEE':
       return { anomalieId: texteLisible(c.anomalieId) };
