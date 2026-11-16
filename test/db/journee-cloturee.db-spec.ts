@@ -23,6 +23,7 @@ import { ReceptionsService } from 'src/pharmacie/receptions/receptions.service';
 import { jourVersDate } from 'src/pharmacie/stock/lecture-stock';
 import { MouvementsStockService } from 'src/pharmacie/stock/mouvements-stock.service';
 import { SynchroService } from 'src/pharmacie/synchro/synchro.service';
+import { CreditService } from 'src/pharmacie/credit/credit.service';
 import { VenteService } from 'src/pharmacie/vente.service';
 import {
   appliquerMigrations,
@@ -89,6 +90,7 @@ describe('Journée clôturée : verrou des écrivains, rattachement, CA20 et cou
   let receptions: ReceptionsService;
   let clotures: ClotureService;
   let synchro: SynchroService;
+  let credit: CreditService;
   let pv1: string;
   let compteurFiche = 0;
   const alertes = jest.fn().mockResolvedValue(undefined);
@@ -124,6 +126,7 @@ describe('Journée clôturée : verrou des écrivains, rattachement, CA20 et cou
                 'stock:read',
                 'stock:write',
                 'marge:read',
+                'credit:write',
               ]
             : ['vente:write', 'caisse:utiliser'],
         ),
@@ -142,7 +145,14 @@ describe('Journée clôturée : verrou des écrivains, rattachement, CA20 et cou
     postes = new PointsDeVenteService(prisma, acces);
     receptions = new ReceptionsService(prisma, acces, mouvements, permissions);
     clotures = new ClotureService(prisma, acces);
-    synchro = new SynchroService(prisma, acces, mouvements, sessions);
+    synchro = new SynchroService(
+      prisma,
+      acces,
+      mouvements,
+      sessions,
+      permissions,
+    );
+    credit = new CreditService(prisma, acces, sessions);
     const pvs = await sql(
       'SELECT "id" FROM "PointDeVente" WHERE "structureId" = $1 AND "ordre" = 1',
       [PHARMACIE],
@@ -689,7 +699,13 @@ describe('Journée clôturée : verrou des écrivains, rattachement, CA20 et cou
   it('11. chaque écrivain de caisse attend la clôture avant toute lecture', async () => {
     // Chaque appel échouerait (ou rejouerait) aussitôt sur sa première lecture :
     // s'il attend, c'est que le verrou de journée partagé est bien sa première
-    // instruction (D613, D629). Sept attentes simultanées sont exigées.
+    // instruction (D613, D629). Neuf attentes simultanées sont exigées.
+    const poste2 = (
+      await postes.enregistrerPoste(PHARMACIE, RESPONSABLE, {
+        type: 'DESKTOP',
+        appareilId: 'desktop-essai-credit',
+      })
+    ).data.id;
     const h = tenirJournees('exclusif');
     let tous: Promise<PromiseSettledResult<unknown>[]> | undefined;
     try {
@@ -741,8 +757,41 @@ describe('Journée clôturée : verrou des écrivains, rattachement, CA20 et cou
           },
           ip,
         ),
+        // Remboursement de crédit versé en caisse, rejoué depuis un poste puis saisi sur le web.
+        synchro.recevoir(
+          PHARMACIE,
+          RESPONSABLE,
+          {
+            posteId: poste2,
+            etat: { fileVide: true, sessionOuverte: true, versionApp: '0.1.0' },
+            evenements: [
+              {
+                evenementId: randomUUID(),
+                sequence: 1,
+                type: 'REMBOURSEMENT_CREDIT',
+                horodatageLocal: new Date().toISOString(),
+                utilisateurId: RESPONSABLE,
+                corps: {
+                  id: randomUUID(),
+                  clientId: randomUUID(),
+                  montant: 1000,
+                  verseEnCaisse: true,
+                  sessionId: randomUUID(),
+                },
+              },
+            ],
+          },
+          ip,
+        ),
+        credit.enregistrerRemboursement(
+          PHARMACIE,
+          RESPONSABLE,
+          randomUUID(),
+          { montant: 1000, verseEnCaisse: true },
+          ip,
+        ),
       ]);
-      await attendreAttentes(7);
+      await attendreAttentes(9);
     } finally {
       h.liberer();
       await h.fin;
@@ -755,6 +804,8 @@ describe('Journée clôturée : verrou des écrivains, rattachement, CA20 et cou
       mouvement,
       fermeture,
       rejeu,
+      rejeuCredit,
+      remboursementWeb,
     ] = await tous;
     const code = (r: PromiseSettledResult<unknown>) =>
       r.status === 'rejected' && r.reason instanceof HttpException
@@ -780,5 +831,14 @@ describe('Journée clôturée : verrou des écrivains, rattachement, CA20 et cou
       expect(data.resultats[0].statut).toBe('REJETE');
       expect(data.resultats[0].code).toBe('SESSION_INCONNUE');
     }
+    expect(rejeuCredit.status).toBe('fulfilled');
+    if (rejeuCredit.status === 'fulfilled') {
+      const { data } = rejeuCredit.value as {
+        data: { resultats: { statut: string; code?: string }[] };
+      };
+      expect(data.resultats[0].statut).toBe('REJETE');
+      expect(data.resultats[0].code).toBe('CLIENT_CREDIT_INTROUVABLE');
+    }
+    expect(code(remboursementWeb)).toBe('CLIENT_CREDIT_INTROUVABLE');
   });
 });

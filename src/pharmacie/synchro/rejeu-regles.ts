@@ -23,7 +23,6 @@ export type CodeRejet =
   | 'IDENTIFIANT_DEJA_UTILISE'
   | 'STOCK_INTROUVABLE'
   | 'EVENEMENT_INAPPLICABLE'
-  | 'CREDIT_HORS_LIGNE'
   | 'PERMISSION_INSUFFISANTE'
   | 'ANOMALIE_INCONNUE'
   | CodeMetier;
@@ -85,8 +84,6 @@ export const MESSAGES_REJET: Record<CodeRejet | CodeARenvoyer, string> = {
     "Un médicament de cette opération est inconnu de la pharmacie. L'opération a été mise de côté pour le responsable.",
   EVENEMENT_INAPPLICABLE:
     "Cette opération n'a pas pu être enregistrée après plusieurs essais. Elle a été mise de côté : le responsable de la pharmacie la retrouvera dans les anomalies.",
-  CREDIT_HORS_LIGNE:
-    'Le crédit demande une connexion. Cette vente à crédit a été mise de côté : le responsable de la pharmacie la retrouvera dans les anomalies.',
   PERMISSION_INSUFFISANTE:
     "L'utilisateur de cette opération n'a pas le droit de la faire. L'opération a été mise de côté pour le responsable de la pharmacie.",
   ANOMALIE_INCONNUE:
@@ -438,6 +435,18 @@ export function resumeEvenement(type: unknown, corps: unknown): Resume {
       };
     case 'ANOMALIE_TRAITEE':
       return { anomalieId: texteLisible(c.anomalieId) };
+    // Cahier de crédit : jamais de nom, de téléphone ni de note du client.
+    case 'CLIENT_CREDIT_CREE':
+    case 'CLIENT_CREDIT_MODIFIE':
+      return { clientId: texteLisible(c.id) };
+    case 'REMBOURSEMENT_CREDIT':
+      return {
+        remboursementId: texteLisible(c.id),
+        clientId: texteLisible(c.clientId),
+        montant: entierLisible(c.montant),
+      };
+    case 'DATE_LIMITE_MODIFIEE':
+      return { venteId: texteLisible(c.venteId) };
     default:
       return {};
   }

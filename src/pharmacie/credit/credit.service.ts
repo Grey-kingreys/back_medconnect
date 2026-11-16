@@ -64,7 +64,7 @@ const ORDRE_STATUT: Record<StatutCredit, number> = {
 };
 
 /** Une prise à crédit lue : vente rattachée, avec ses lignes (jamais de coût d'achat) et son éventuelle annulation. */
-const SELECT_PRISE = {
+export const SELECT_PRISE = {
   id: true,
   numero: true,
   clientCreditId: true,
@@ -85,9 +85,9 @@ const SELECT_PRISE = {
     select: { typePiece: true, motifAnnulation: true, createdAt: true },
   },
 } satisfies Prisma.VenteSelect;
-type PriseLue = Prisma.VenteGetPayload<{ select: typeof SELECT_PRISE }>;
+export type PriseLue = Prisma.VenteGetPayload<{ select: typeof SELECT_PRISE }>;
 
-type Client = PrismaService | Prisma.TransactionClient;
+export type Client = PrismaService | Prisma.TransactionClient;
 
 export interface ClientCreditResume {
   id: string;
@@ -163,6 +163,67 @@ function versPriseCalcul(
   };
 }
 
+/** Prises, dates limites et total remboursé de clients donnés ; calcule l'état de chacun (cahier en ligne et rejeu d'un poste). */
+export async function lireEtatsCredit(
+  client: Client,
+  structureId: string,
+  clientIds: string[],
+): Promise<
+  Map<
+    string,
+    { etat: EtatCredit; ventes: Map<string, PriseLue>; rembourse: number }
+  >
+> {
+  const resultat = new Map<
+    string,
+    { etat: EtatCredit; ventes: Map<string, PriseLue>; rembourse: number }
+  >();
+  if (clientIds.length === 0) return resultat;
+  const [ventes, remboursements] = await Promise.all([
+    client.vente.findMany({
+      where: {
+        structureId,
+        clientCreditId: { in: clientIds },
+        // Une prise remontée après une fermeture de caisse (REGULARISATION) compte comme une vente.
+        typePiece: { in: ['VENTE', 'REGULARISATION'] },
+      },
+      select: SELECT_PRISE,
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    }),
+    client.remboursementCredit.groupBy({
+      by: ['clientCreditId'],
+      where: { clientCreditId: { in: clientIds } },
+      _sum: { montant: true },
+    }),
+  ]);
+  const echeances = new Map(
+    (
+      await client.echeanceCredit.findMany({
+        where: { venteId: { in: ventes.map((v) => v.id) } },
+        select: { venteId: true, dateLimite: true },
+      })
+    ).map((e) => [e.venteId, dateVersJour(e.dateLimite)]),
+  );
+  const rembourseParClient = new Map(
+    remboursements.map((r) => [r.clientCreditId, r._sum.montant ?? 0]),
+  );
+  const aujourdhui = jourConakry(new Date());
+  for (const id of clientIds) {
+    const siennes = ventes.filter((v) => v.clientCreditId === id);
+    const rembourse = rembourseParClient.get(id) ?? 0;
+    resultat.set(id, {
+      etat: calculerEtatCredit(
+        siennes.map((v) => versPriseCalcul(v, echeances)),
+        rembourse,
+        aujourdhui,
+      ),
+      ventes: new Map(siennes.map((v) => [v.id, v])),
+      rembourse,
+    });
+  }
+  return resultat;
+}
+
 /** Cahier de crédit : clients, prises (ventes en mode CREDIT), remboursements. */
 @Injectable()
 export class CreditService {
@@ -173,66 +234,6 @@ export class CreditService {
   ) {}
 
   // ------------------------------------------------------------ lectures
-
-  /** Prises, dates limites et total remboursé de clients donnés ; calcule l'état de chacun. */
-  private async etatsDe(
-    client: Client,
-    structureId: string,
-    clientIds: string[],
-  ): Promise<
-    Map<
-      string,
-      { etat: EtatCredit; ventes: Map<string, PriseLue>; rembourse: number }
-    >
-  > {
-    const resultat = new Map<
-      string,
-      { etat: EtatCredit; ventes: Map<string, PriseLue>; rembourse: number }
-    >();
-    if (clientIds.length === 0) return resultat;
-    const [ventes, remboursements] = await Promise.all([
-      client.vente.findMany({
-        where: {
-          structureId,
-          clientCreditId: { in: clientIds },
-          typePiece: 'VENTE',
-        },
-        select: SELECT_PRISE,
-        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-      }),
-      client.remboursementCredit.groupBy({
-        by: ['clientCreditId'],
-        where: { clientCreditId: { in: clientIds } },
-        _sum: { montant: true },
-      }),
-    ]);
-    const echeances = new Map(
-      (
-        await client.echeanceCredit.findMany({
-          where: { venteId: { in: ventes.map((v) => v.id) } },
-          select: { venteId: true, dateLimite: true },
-        })
-      ).map((e) => [e.venteId, dateVersJour(e.dateLimite)]),
-    );
-    const rembourseParClient = new Map(
-      remboursements.map((r) => [r.clientCreditId, r._sum.montant ?? 0]),
-    );
-    const aujourdhui = jourConakry(new Date());
-    for (const id of clientIds) {
-      const siennes = ventes.filter((v) => v.clientCreditId === id);
-      const rembourse = rembourseParClient.get(id) ?? 0;
-      resultat.set(id, {
-        etat: calculerEtatCredit(
-          siennes.map((v) => versPriseCalcul(v, echeances)),
-          rembourse,
-          aujourdhui,
-        ),
-        ventes: new Map(siennes.map((v) => [v.id, v])),
-        rembourse,
-      });
-    }
-    return resultat;
-  }
 
   async lister(
     structureId: string,
@@ -254,7 +255,7 @@ export class CreditService {
       where: { structureId },
       select: { id: true, nomComplet: true, telephone: true },
     });
-    const etats = await this.etatsDe(
+    const etats = await lireEtatsCredit(
       this.prisma,
       structureId,
       clients.map((c) => c.id),
@@ -342,7 +343,7 @@ export class CreditService {
     clientId: string,
   ): Promise<FicheClientCredit> {
     const c = await this.lireClient(client, structureId, clientId);
-    const e = (await this.etatsDe(client, structureId, [c.id])).get(c.id);
+    const e = (await lireEtatsCredit(client, structureId, [c.id])).get(c.id);
     if (!e) throw new RangeError('État du client introuvable.');
     const remboursements = await client.remboursementCredit.findMany({
       where: { clientCreditId: c.id },
@@ -545,7 +546,7 @@ export class CreditService {
       where: {
         id: venteId,
         structureId,
-        typePiece: 'VENTE',
+        typePiece: { in: ['VENTE', 'REGULARISATION'] },
         clientCreditId: { not: null },
       },
       select: { id: true, clientCreditId: true },
@@ -559,7 +560,9 @@ export class CreditService {
     const clientId = vente.clientCreditId;
     await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "ClientCredit" WHERE "id" = ${clientId} FOR UPDATE`;
-      const e = (await this.etatsDe(tx, structureId, [clientId])).get(clientId);
+      const e = (await lireEtatsCredit(tx, structureId, [clientId])).get(
+        clientId,
+      );
       const prise = e?.etat.prises.find((p) => p.venteId === venteId);
       if (!prise) {
         throw new NotFoundException({
@@ -641,7 +644,9 @@ export class CreditService {
         await verrouillerJourneesPartage(tx, structureId);
         await tx.$queryRaw`SELECT "id" FROM "ClientCredit" WHERE "id" = ${clientId} AND "structureId" = ${structureId} FOR UPDATE`;
         const c = await this.lireClient(tx, structureId, clientId);
-        const avant = (await this.etatsDe(tx, structureId, [c.id])).get(c.id);
+        const avant = (await lireEtatsCredit(tx, structureId, [c.id])).get(
+          c.id,
+        );
         const reste = avant?.etat.resteAPayer ?? 0;
         if (reste <= 0) {
           throw new ConflictException({
@@ -730,7 +735,9 @@ export class CreditService {
             },
           },
         });
-        const apres = (await this.etatsDe(tx, structureId, [c.id])).get(c.id);
+        const apres = (await lireEtatsCredit(tx, structureId, [c.id])).get(
+          c.id,
+        );
         return {
           rembourse,
           resteAPayer: apres?.etat.resteAPayer ?? 0,

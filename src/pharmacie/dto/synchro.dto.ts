@@ -17,6 +17,7 @@ import {
   MaxLength,
   Min,
   NotEquals,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
@@ -32,6 +33,7 @@ import { RAISONS_SORTIE, type RaisonSortie } from '../domaine/sortie';
 import { CreerReceptionDto, LigneReceptionDto } from './receptions.dto';
 import {
   FORMAT_TELEPHONE_PRESCRIPTEUR,
+  NouveauClientCreditDto,
   nettoyerTelephonePrescripteur,
 } from './vente.dto';
 
@@ -66,6 +68,10 @@ export const TYPES_EVENEMENT = [
   'FICHE_MODIFIEE',
   'FICHE_CREEE',
   'INVENTAIRE_ENREGISTRE',
+  'CLIENT_CREDIT_CREE',
+  'CLIENT_CREDIT_MODIFIE',
+  'REMBOURSEMENT_CREDIT',
+  'DATE_LIMITE_MODIFIEE',
 ] as const;
 
 export class EtatPosteDto {
@@ -352,6 +358,13 @@ export class PaiementRejeuDto {
   montantRecu?: number;
 }
 
+/** Nouveau client de crédit d'une vente rejouée : l'identifiant du poste, s'il le donne, est gardé. */
+export class NouveauClientCreditRejeuDto extends NouveauClientCreditDto {
+  @IsOptional()
+  @IsUUID('all')
+  id?: string;
+}
+
 export class CorpsVenteDto {
   @IsUUID('all')
   venteId: string;
@@ -412,6 +425,22 @@ export class CorpsVenteDto {
   @MaxLength(30)
   @Matches(FORMAT_TELEPHONE_PRESCRIPTEUR)
   telephonePrescripteur?: string | null;
+
+  /** Vente à crédit : client du cahier (existant, ou créé par le poste sous son identifiant). */
+  @IsOptional()
+  @IsUUID('all')
+  clientCreditId?: string;
+
+  /** Vente à crédit : nouveau client créé avec la vente (identifiant du poste facultatif). Exclusif avec clientCreditId. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => NouveauClientCreditRejeuDto)
+  nouveauClientCredit?: NouveauClientCreditRejeuDto;
+
+  /** Vente à crédit : date limite convenue (AAAA-MM-JJ), jamais refusée au rejeu même si elle est passée. */
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  dateLimiteCredit?: string;
 }
 
 /** Traitement d'une anomalie fait hors ligne (le commentaire trop court donne le rejet MOTIF_REQUIS). */
@@ -612,4 +641,107 @@ export class CorpsInventaireEnregistreDto {
   @ValidateNested({ each: true })
   @Type(() => LigneInventaireRejeuDto)
   lignes: LigneInventaireRejeuDto[];
+}
+
+const viderEnNullCredit = ({ value }: { value: unknown }): unknown => {
+  if (typeof value !== 'string') return value;
+  const t = value.trim();
+  return t === '' ? null : t;
+};
+
+/** Client du cahier de crédit créé hors ligne : l'identifiant vient du poste (rejeu idempotent). */
+export class CorpsClientCreditCreeDto {
+  @IsUUID('all')
+  id: string;
+
+  @IsString()
+  @Transform(rognerTexte)
+  @Length(2, 100)
+  nomComplet: string;
+
+  @IsOptional()
+  @Transform(viderEnNullCredit)
+  @IsString()
+  @MaxLength(30)
+  @Matches(FORMAT_TELEPHONE_PRESCRIPTEUR)
+  telephone?: string | null;
+
+  @IsOptional()
+  @Transform(viderEnNullCredit)
+  @IsString()
+  @MaxLength(500)
+  @Matches(SANS_NUL)
+  note?: string | null;
+}
+
+/** Champs d'un client de crédit modifiables ; null efface le téléphone ou la note, absent laisse inchangé. */
+export class ChampsClientCreditDto {
+  @IsOptional()
+  @IsString()
+  @Transform(rognerTexte)
+  @Length(2, 100)
+  nomComplet?: string;
+
+  @IsOptional()
+  @Transform(viderEnNullCredit)
+  @IsString()
+  @MaxLength(30)
+  @Matches(FORMAT_TELEPHONE_PRESCRIPTEUR)
+  telephone?: string | null;
+
+  @IsOptional()
+  @Transform(viderEnNullCredit)
+  @IsString()
+  @MaxLength(500)
+  @Matches(SANS_NUL)
+  note?: string | null;
+}
+
+export class CorpsClientCreditModifieDto {
+  @IsUUID('all')
+  id: string;
+
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => ChampsClientCreditDto)
+  champs: ChampsClientCreditDto;
+}
+
+/** Remboursement de crédit encaissé hors ligne : l'identifiant du poste rend le rejeu idempotent. */
+export class CorpsRemboursementCreditDto {
+  @IsUUID('all')
+  id: string;
+
+  @IsUUID('all')
+  clientId: string;
+
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  montant: number;
+
+  @IsOptional()
+  @Transform(viderEnNullCredit)
+  @IsString()
+  @MaxLength(500)
+  @Matches(SANS_NUL)
+  note?: string | null;
+
+  @IsBoolean()
+  verseEnCaisse: boolean;
+
+  /** Caisse du poste où l'argent est entré ; obligatoire quand verseEnCaisse est vrai. */
+  @IsOptional()
+  @IsUUID('all')
+  sessionId?: string;
+}
+
+/** Date limite d'une prise à crédit modifiée hors ligne ; null la retire. */
+export class CorpsDateLimiteModifieeDto {
+  @IsUUID('all')
+  venteId: string;
+
+  @ValidateIf((_o, v) => v !== null)
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  dateLimite: string | null;
 }

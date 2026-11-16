@@ -1,5 +1,7 @@
 import { CODE_CREDIT } from '../credit/credit-regles';
-import { ConflictException, Injectable } from '@nestjs/common';
+import { ConflictException, Injectable, Optional } from '@nestjs/common';
+import { PermissionsService } from 'src/common/rbac/permissions.service';
+import { PERMISSIONS } from 'src/common/rbac/permissions.constants';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { StorageService } from 'src/storage/storage.service';
 import { AccesPharmacieService } from '../acces-pharmacie.service';
@@ -14,6 +16,7 @@ import {
   type ElementAnomalie,
 } from '../anomalies/anomalies.service';
 import { dateVersJour } from '../stock/lecture-stock';
+import { lireEtatsCredit } from '../credit/credit.service';
 import { lirePlagesNonEpuisees, type PlageLue } from './plages';
 
 export const MESSAGE_CATALOGUE_POSTE_WEB =
@@ -131,6 +134,124 @@ export interface MedicamentAllegeSynchro {
   ordonnanceRequise: boolean;
 }
 
+/** Médicament d'une prise à crédit : nom et montant, jamais de coût. */
+export interface LignePriseSynchro {
+  nomMedicament: string;
+  nombreAffiche: number;
+  uniteAffichee: 'BOITE' | 'UNITE';
+  sousTotal: number;
+}
+
+/** Prise à crédit d'un client (une vente en mode CREDIT) ; la date limite est envoyée telle quelle, le poste calcule le retard. */
+export interface PriseCreditSynchro {
+  venteId: string;
+  numero: string;
+  createdAt: string;
+  jourMetier: string;
+  vendeurNom: string;
+  total: number;
+  annulee: boolean;
+  motifAnnulation: string | null;
+  /** AAAA-MM-JJ ou null. */
+  dateLimite: string | null;
+  /** Ce qu'il reste à payer sur cette prise (remboursements imputés aux plus anciennes d'abord), 0 si annulée. */
+  resteSurPrise: number;
+  lignes: LignePriseSynchro[];
+}
+
+export interface RemboursementCreditSynchro {
+  id: string;
+  montant: number;
+  note: string | null;
+  verseEnCaisse: boolean;
+  auteurNom: string | null;
+  createdAt: string;
+}
+
+/**
+ * Client du cahier de crédit avec ses prises et ses remboursements (lecture et calcul hors ligne).
+ * `statut` ne vaut que EN_COURS ou SOLDE : EN_RETARD dépend de l'heure (D662), le poste le calcule
+ * avec son horloge à partir des dates limites des prises.
+ */
+export interface ClientCreditSynchro {
+  id: string;
+  nomComplet: string;
+  telephone: string | null;
+  note: string | null;
+  createdAt: string;
+  resteAPayer: number;
+  totalPris: number;
+  totalRembourse: number;
+  statut: 'EN_COURS' | 'SOLDE';
+  prises: PriseCreditSynchro[];
+  remboursements: RemboursementCreditSynchro[];
+  /**
+   * Ce que la borne de la photographie a retiré de l'historique de ce client (les plus anciennes prises et
+   * remboursements) : le poste en tient compte pour que le reste calculé reste exact. Zéros si rien n'est retiré.
+   */
+  anterieur: { totalPris: number; totalRembourse: number };
+}
+
+/** Clients soldés gardés dans la photographie (les plus récemment actifs) : tous les clients qui doivent encore de l'argent y sont toujours. */
+export const CLIENTS_SOLDES_PHOTOGRAPHIE_MAX = 200;
+/** Prises et remboursements gardés par client (les plus récents) ; le reste est résumé dans `anterieur`. */
+export const HISTORIQUE_CREDIT_PHOTOGRAPHIE_MAX = 100;
+
+/**
+ * Borne la part crédit de la photographie sans dépendre de l'heure : tous les clients non soldés, plus les
+ * CLIENTS_SOLDES_PHOTOGRAPHIE_MAX soldés dont la dernière activité est la plus récente ; par client, les
+ * HISTORIQUE_CREDIT_PHOTOGRAPHIE_MAX dernières prises et derniers remboursements. Résultat trié par identifiant.
+ */
+export function bornerClientsCredit(
+  clients: ClientCreditSynchro[],
+): ClientCreditSynchro[] {
+  const activite = (c: ClientCreditSynchro) =>
+    [
+      c.createdAt,
+      ...c.prises.map((p) => p.createdAt),
+      ...c.remboursements.map((r) => r.createdAt),
+    ].reduce((max, d) => (d > max ? d : max), '');
+  const soldes = clients
+    .filter((c) => c.resteAPayer <= 0)
+    .sort(
+      (a, b) =>
+        (activite(a) < activite(b) ? 1 : activite(a) > activite(b) ? -1 : 0) ||
+        (a.id < b.id ? -1 : 1),
+    )
+    .slice(0, CLIENTS_SOLDES_PHOTOGRAPHIE_MAX);
+  const gardes = new Set([
+    ...clients.filter((c) => c.resteAPayer > 0).map((c) => c.id),
+    ...soldes.map((c) => c.id),
+  ]);
+  return clients
+    .filter((c) => gardes.has(c.id))
+    .map((c) => {
+      const coupePrises = Math.max(
+        0,
+        c.prises.length - HISTORIQUE_CREDIT_PHOTOGRAPHIE_MAX,
+      );
+      const coupeRemb = Math.max(
+        0,
+        c.remboursements.length - HISTORIQUE_CREDIT_PHOTOGRAPHIE_MAX,
+      );
+      return {
+        ...c,
+        prises: c.prises.slice(coupePrises),
+        remboursements: c.remboursements.slice(coupeRemb),
+        anterieur: {
+          totalPris: c.prises
+            .slice(0, coupePrises)
+            .filter((p) => !p.annulee)
+            .reduce((s, p) => s + p.total, 0),
+          totalRembourse: c.remboursements
+            .slice(0, coupeRemb)
+            .reduce((s, r) => s + r.montant, 0),
+        },
+      };
+    })
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
 /** Garde-fou du poids de la photographie. */
 export const RECEPTIONS_PHOTOGRAPHIE_MAX = 500;
 /** Garde-fou du poids de la photographie : le poste filtre lui-même les 30 derniers jours (D662, aucune heure ici). */
@@ -181,6 +302,8 @@ export interface CatalogueSynchro {
   receptions: ReceptionSynchro[];
   /** Les 200 derniers inventaires, les plus récents d'abord, sans filtre de date (D662) ni coût. */
   inventaires: InventaireSynchro[];
+  /** Clients du cahier de crédit, triés par identifiant, sans aucun coût ni donnée dépendant de l'heure. */
+  clientsCredit: ClientCreditSynchro[];
   /** Catalogue global allégé, trié par identifiant (ordre stable, sans lien avec le stock : l'ETag ne bouge que si le catalogue change). */
   medicaments: MedicamentAllegeSynchro[];
 }
@@ -204,6 +327,8 @@ export class CatalogueSynchroService {
     private readonly accesPharmacie: AccesPharmacieService,
     private readonly storage: StorageService,
     private readonly anomalies: AnomaliesService,
+    // Sans service, aucun client de crédit n'est envoyé (jamais d'ouverture par défaut).
+    @Optional() private readonly permissions?: PermissionsService,
   ) {}
 
   async photographier(
@@ -215,6 +340,13 @@ export class CatalogueSynchroService {
       structureId,
       userId,
     );
+
+    // Noms et téléphones des clients : seulement pour qui a credit:read, jamais pour tout utilisateur de la caisse.
+    const peutLireCredit =
+      this.permissions !== undefined &&
+      (await this.permissions.getUserPermissions(userId)).includes(
+        PERMISSIONS.CREDIT_READ,
+      );
 
     const poste = await this.prisma.poste.findFirst({
       where: { id: posteId, pointDeVente: { structureId: structure.id } },
@@ -435,7 +567,60 @@ export class CatalogueSynchroService {
             ordonnanceRequise: true,
           },
         });
+        const clientsCredit = peutLireCredit
+          ? await tx.clientCredit.findMany({
+              where: { structureId: structure.id },
+              orderBy: { id: 'asc' },
+              select: {
+                id: true,
+                nomComplet: true,
+                telephone: true,
+                note: true,
+                createdAt: true,
+              },
+            })
+          : [];
+        const idsCredit = clientsCredit.map((c) => c.id);
+        const etatsCredit = await lireEtatsCredit(tx, structure.id, idsCredit);
+        const remboursementsCredit =
+          idsCredit.length === 0
+            ? []
+            : await tx.remboursementCredit.findMany({
+                where: { clientCreditId: { in: idsCredit } },
+                orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+              });
+        const echeancesCredit = new Map(
+          (
+            await tx.echeanceCredit.findMany({
+              where: {
+                venteId: {
+                  in: [...etatsCredit.values()].flatMap((e) => [
+                    ...e.ventes.keys(),
+                  ]),
+                },
+              },
+              select: { venteId: true, dateLimite: true },
+            })
+          ).map((e) => [e.venteId, dateVersJour(e.dateLimite)]),
+        );
+        const auteursCredit = new Map(
+          (
+            await tx.user.findMany({
+              where: {
+                id: {
+                  in: [...new Set(remboursementsCredit.map((r) => r.auteurId))],
+                },
+              },
+              select: { id: true, nom: true, prenom: true },
+            })
+          ).map((u) => [u.id, `${u.prenom} ${u.nom}`.trim()]),
+        );
         return {
+          clientsCredit,
+          etatsCredit,
+          remboursementsCredit,
+          echeancesCredit,
+          auteursCredit,
           medicaments,
           fournisseurs,
           receptions,
@@ -537,6 +722,69 @@ export class CatalogueSynchroService {
       fiches: fichesSynchro,
       anomalies: lue.anomalies,
       fournisseurs: lue.fournisseurs,
+      clientsCredit: bornerClientsCredit(
+        lue.clientsCredit.map((c): ClientCreditSynchro => {
+          const e = lue.etatsCredit.get(c.id);
+          const prises = (e?.etat.prises ?? [])
+            .map((p): PriseCreditSynchro => {
+              const v = e?.ventes.get(p.venteId);
+              return {
+                venteId: p.venteId,
+                numero: v?.numero ?? '',
+                createdAt: p.createdAt.toISOString(),
+                jourMetier: v ? dateVersJour(v.jourMetier) : '',
+                vendeurNom: v?.vendeurNom ?? '',
+                total: p.total,
+                annulee: p.annulee,
+                motifAnnulation: p.annulee
+                  ? (v?.pieceLiee?.motifAnnulation ?? null)
+                  : null,
+                dateLimite: lue.echeancesCredit.get(p.venteId) ?? null,
+                resteSurPrise: p.reste,
+                // Jamais de coût : seulement le nom, la quantité affichée et le montant de la ligne.
+                lignes: (v?.lignes ?? []).map((l) => ({
+                  nomMedicament: l.nomMedicament,
+                  nombreAffiche: l.nombreAffiche,
+                  uniteAffichee: l.uniteAffichee,
+                  sousTotal: l.sousTotal,
+                })),
+              };
+            })
+            .sort(
+              (a, b) =>
+                (a.createdAt < b.createdAt
+                  ? -1
+                  : a.createdAt > b.createdAt
+                    ? 1
+                    : 0) ||
+                (a.venteId < b.venteId ? -1 : a.venteId > b.venteId ? 1 : 0),
+            );
+          const reste = e?.etat.resteAPayer ?? 0;
+          return {
+            id: c.id,
+            nomComplet: c.nomComplet,
+            telephone: c.telephone,
+            note: c.note,
+            createdAt: c.createdAt.toISOString(),
+            resteAPayer: reste,
+            totalPris: e?.etat.totalPris ?? 0,
+            totalRembourse: e?.etat.totalRembourse ?? 0,
+            statut: reste > 0 ? 'EN_COURS' : 'SOLDE',
+            prises,
+            remboursements: lue.remboursementsCredit
+              .filter((r) => r.clientCreditId === c.id)
+              .map((r) => ({
+                id: r.id,
+                montant: r.montant,
+                note: r.note,
+                verseEnCaisse: r.verseEnCaisse,
+                auteurNom: lue.auteursCredit.get(r.auteurId) ?? null,
+                createdAt: r.createdAt.toISOString(),
+              })),
+            anterieur: { totalPris: 0, totalRembourse: 0 },
+          };
+        }),
+      ),
       medicaments: lue.medicaments,
       inventaires: lue.inventaires.map((i) => ({
         id: i.id,

@@ -55,7 +55,7 @@ describe('Rattachement des ventes sans stock', () => {
 
   it('un libellé par type', () => {
     const cles = Object.keys(LIBELLES_ANOMALIE);
-    expect(cles).toHaveLength(16);
+    expect(cles).toHaveLength(17);
     for (const valeur of Object.values(LIBELLES_ANOMALIE)) {
       expect(valeur.length).toBeGreaterThan(0);
     }
