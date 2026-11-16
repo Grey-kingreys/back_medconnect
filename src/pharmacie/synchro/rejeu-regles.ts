@@ -424,6 +424,11 @@ export function resumeEvenement(type: unknown, corps: unknown): Resume {
         receptionId: texteLisible(c.id),
         nombreLignes: Array.isArray(c.lignes) ? c.lignes.length : null,
       };
+    case 'INVENTAIRE_ENREGISTRE':
+      return {
+        inventaireId: texteLisible(c.id),
+        nombreLignes: Array.isArray(c.lignes) ? c.lignes.length : null,
+      };
     case 'FICHE_MODIFIEE':
       return { stockId: texteLisible(c.stockId) };
     case 'FICHE_CREEE':

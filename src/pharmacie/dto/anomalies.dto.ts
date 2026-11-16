@@ -29,6 +29,7 @@ export const TYPES_ANOMALIE = [
   'SEQUENCE_MANQUANTE',
   'RECEPTION_COEFFICIENT_DIFFERENT',
   'FICHE_MODIFIEE_ENTRETEMPS',
+  'THEORIQUE_DIVERGENT',
 ] as const;
 
 export class ListerAnomaliesDto {

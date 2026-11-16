@@ -40,6 +40,10 @@ import {
 } from '../stock/lecture-stock';
 import { MouvementsStockService } from '../stock/mouvements-stock.service';
 import {
+  InventairesService,
+  type InventaireEcrit,
+} from '../inventaires/inventaires.service';
+import {
   entreeDepuisDto,
   ReceptionsService,
 } from '../receptions/receptions.service';
@@ -58,6 +62,7 @@ import {
   CorpsSortieStockDto,
   CorpsFournisseurCreeDto,
   CorpsReceptionEnregistreeDto,
+  CorpsInventaireEnregistreDto,
   CorpsAnomalieTraiteeDto,
   CorpsCorrectionQuantiteDto,
   CorpsFicheCreeeDto,
@@ -129,6 +134,7 @@ export interface ResultatEvenement {
       | 'SORTIE_STOCK'
       | 'CORRECTION_QUANTITE'
       | 'FOURNISSEUR'
+      | 'INVENTAIRE'
       | 'RECEPTION'
       | 'FICHE'
       | 'ANOMALIE';
@@ -235,6 +241,8 @@ export class SynchroService {
     @Optional() private readonly permissions?: PermissionsService,
     // Sert au rejeu des fournisseurs et des réceptions faits hors ligne ; sans service, ces types sont rejetés.
     @Optional() private readonly receptions?: ReceptionsService,
+    // Sert au rejeu des inventaires faits hors ligne ; sans service, ce type est rejeté.
+    @Optional() private readonly inventaires?: InventairesService,
   ) {}
 
   // ------------------------------------------------------------------ route
@@ -764,7 +772,8 @@ export class SynchroService {
       | 'PLAGE_EPUISEE'
       | 'STOCK_NEGATIF'
       | 'RECEPTION_COEFFICIENT_DIFFERENT'
-      | 'FICHE_MODIFIEE_ENTRETEMPS',
+      | 'FICHE_MODIFIEE_ENTRETEMPS'
+      | 'THEORIQUE_DIVERGENT',
     pieceType: string,
     pieceId: string,
     details: Prisma.InputJsonObject,
@@ -881,6 +890,13 @@ export class SynchroService {
           e.corps,
         );
         return this.appliquerReception(tx, ctx, corps, utilisateur, local);
+      }
+      case 'INVENTAIRE_ENREGISTRE': {
+        const corps = await this.corpsValide(
+          CorpsInventaireEnregistreDto,
+          e.corps,
+        );
+        return this.appliquerInventaire(tx, ctx, corps, utilisateur, local);
       }
       case 'FICHE_MODIFIEE': {
         const corps = await this.corpsValide(CorpsFicheModifieeDto, e.corps);
@@ -1204,6 +1220,128 @@ export class SynchroService {
       ...(fournisseurPerdu ? { code: 'FOURNISSEUR_INCONNU_IGNORE' } : {}),
       ...(anomalies.length > 0 ? { anomalies } : {}),
     };
+  }
+
+  // ------------------------------------------------- inventaire hors ligne
+
+  private async appliquerInventaire(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    corps: CorpsInventaireEnregistreDto,
+    utilisateur: UtilisateurCharge,
+    local: Date,
+  ): Promise<ResultatApplication> {
+    // Sans service d'inventaire, l'événement est rejeté proprement (type non pris en charge par ce serveur).
+    if (!this.inventaires) throw new RejetSynchro('EVENEMENT_INVALIDE');
+    const piece = { type: 'INVENTAIRE' as const, id: corps.id };
+    const lignes = corps.lignes.map((l) => {
+      if (
+        l.nouveauLot?.dateExpiration &&
+        !jourValide(l.nouveauLot.dateExpiration)
+      ) {
+        throw new RejetSynchro('EVENEMENT_INVALIDE', {
+          champs: ['dateExpiration'],
+        });
+      }
+      if ((l.lotId === undefined) === (l.nouveauLot === undefined)) {
+        throw new RejetSynchro('EVENEMENT_INVALIDE', { champs: ['lotId'] });
+      }
+      return {
+        stockId: l.stockId,
+        lotId: l.lotId ?? null,
+        numeroLot: l.nouveauLot?.numeroLot?.trim()
+          ? l.nouveauLot.numeroLot.trim()
+          : null,
+        dateExpiration: l.nouveauLot?.dateExpiration ?? null,
+        sansPeremption: l.nouveauLot?.sansPeremption ?? false,
+        quantiteComptee: l.quantiteComptee,
+        nombreBoites: null,
+        unitesEnPlus: null,
+        ...(l.nouveauLot ? { nouveauLotId: l.nouveauLot.id } : {}),
+      };
+    });
+    const acces = {
+      structure: ctx.structure,
+      user: utilisateur,
+    } as unknown as AccesPharmacie;
+    // Le comptage fait foi : écart contre le théorique du serveur, jamais de refus parce qu'un lot a bougé (Q5).
+    const ecrit: InventaireEcrit =
+      await this.inventaires.enregistrerDansTransaction(
+        tx,
+        acces,
+        {
+          id: corps.id,
+          commentaire: corps.commentaire?.trim()
+            ? corps.commentaire.trim()
+            : null,
+          lignes,
+        },
+        ctx.ip ?? null,
+        { rejeterLignes: true },
+      );
+    if (ecrit.refusees.length > 0) {
+      // Rien n'est gardé (la transaction est annulée) : le poste est informé du premier motif.
+      const code = ecrit.refusees[0].code;
+      throw new RejetSynchro(
+        code === 'LOT_INCONNU_VIDE' ? 'EVENEMENT_INVALIDE' : code,
+      );
+    }
+    if (!ecrit.cree) return { piece, code: 'INVENTAIRE_DEJA_ENREGISTRE' };
+
+    const anomalies: { type: string; id: string }[] = ecrit.anomalies.map(
+      (a) => ({ type: 'ECART_INVENTAIRE', id: a.id }),
+    );
+    // Un autre mouvement a eu lieu depuis le comptage : le stock du lot est tout de même ce qui a été compté.
+    const divergents = ecrit.lignes
+      .map((l) => ({
+        ligne: l,
+        local: corps.lignes[l.index].theoriqueLocal,
+      }))
+      .filter((x) => Math.max(0, x.ligne.quantiteTheorique) !== x.local);
+    const auteur = `${utilisateur.prenom} ${utilisateur.nom}`.trim();
+    const parFiche = new Map<string, typeof divergents>();
+    for (const d of divergents) {
+      const liste = parFiche.get(d.ligne.stockId) ?? [];
+      liste.push(d);
+      parFiche.set(d.ligne.stockId, liste);
+    }
+    const noms = new Map(
+      (
+        await tx.stockMedicament.findMany({
+          where: { id: { in: [...parFiche.keys()] } },
+          select: { id: true, medicament: { select: { nom: true } } },
+        })
+      ).map((f) => [f.id, f.medicament.nom]),
+    );
+    for (const stockId of [...parFiche.keys()].sort()) {
+      const liste = parFiche.get(stockId) ?? [];
+      const nom = noms.get(stockId) ?? '';
+      anomalies.push(
+        await this.creerAnomalie(
+          tx,
+          ctx,
+          'THEORIQUE_DIVERGENT',
+          'INVENTAIRE',
+          corps.id,
+          {
+            stockId,
+            nom,
+            lignes: liste.map((d) => ({
+              lotId: d.ligne.lotId,
+              theoriquePoste: d.local,
+              theoriqueServeur: Math.max(0, d.ligne.quantiteTheorique),
+              quantiteComptee: d.ligne.quantiteComptee,
+            })),
+            posteCode: ctx.poste.code,
+            utilisateurId: utilisateur.id,
+            utilisateurNom: auteur,
+            jourMetier: jourConakry(local),
+            message: `${nom} : le stock de ce médicament a bougé ailleurs entre le comptage fait hors ligne (poste ${ctx.poste.code}, ${auteur}) et sa remontée. Le stock est maintenant exactement la quantité comptée : vérifiez qu'aucune vente ou sortie faite entre-temps n'est perdue.`,
+          },
+        ),
+      );
+    }
+    return { piece, ...(anomalies.length > 0 ? { anomalies } : {}) };
   }
 
   // ------------------------------------------------- fiches hors ligne (modification, création)

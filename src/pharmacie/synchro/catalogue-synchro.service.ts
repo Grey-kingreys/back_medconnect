@@ -95,6 +95,32 @@ export interface ReceptionSynchro {
   lots: LotReceptionSynchro[];
 }
 
+/** Ligne d'un inventaire récent : quantités en unités minimales, aucun coût. */
+export interface LigneInventaireSynchro {
+  id: string;
+  stockId: string;
+  nom: string;
+  lotId: string | null;
+  numeroLot: string | null;
+  dateExpiration: string | null;
+  lotTechnique: boolean;
+  quantiteTheorique: number;
+  quantiteARegulariser: number;
+  quantiteComptee: number;
+  ecart: number;
+  sousTolerance: boolean;
+  anomalieId: string | null;
+}
+
+/** Inventaire récent (le poste n'en montre que 30 jours, Q11), sans aucun coût. */
+export interface InventaireSynchro {
+  id: string;
+  createdAt: string;
+  commentaire: string | null;
+  auteur: { id: string; nom: string };
+  lignes: LigneInventaireSynchro[];
+}
+
 /** Médicament du catalogue global, allégé : seulement de quoi ajouter une fiche au stock hors ligne (Q4). */
 export interface MedicamentAllegeSynchro {
   id: string;
@@ -107,6 +133,8 @@ export interface MedicamentAllegeSynchro {
 
 /** Garde-fou du poids de la photographie. */
 export const RECEPTIONS_PHOTOGRAPHIE_MAX = 500;
+/** Garde-fou du poids de la photographie : le poste filtre lui-même les 30 derniers jours (D662, aucune heure ici). */
+export const INVENTAIRES_PHOTOGRAPHIE_MAX = 200;
 
 /**
  * Photographie complète du catalogue d'un poste desktop (D633). L'ordre des clés fixe l'ETag.
@@ -151,6 +179,8 @@ export interface CatalogueSynchro {
   fournisseurs: FournisseurSynchro[];
   /** Les 500 dernières réceptions, les plus récentes d'abord, sans filtre de date (D662) ni coût ni montant de facture. */
   receptions: ReceptionSynchro[];
+  /** Les 200 derniers inventaires, les plus récents d'abord, sans filtre de date (D662) ni coût. */
+  inventaires: InventaireSynchro[];
   /** Catalogue global allégé, trié par identifiant (ordre stable, sans lien avec le stock : l'ETag ne bouge que si le catalogue change). */
   medicaments: MedicamentAllegeSynchro[];
 }
@@ -349,6 +379,50 @@ export class CatalogueSynchroService {
             },
           },
         });
+        const inventaires = await tx.inventaire.findMany({
+          where: { pointDeVenteId: pointDeVente.id },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: INVENTAIRES_PHOTOGRAPHIE_MAX,
+          // Liste blanche : aucune colonne de coût n'est lue.
+          select: {
+            id: true,
+            createdAt: true,
+            commentaire: true,
+            auteurId: true,
+            lignes: {
+              select: {
+                id: true,
+                stockMedicamentId: true,
+                stockMedicament: {
+                  select: { medicament: { select: { nom: true } } },
+                },
+                lotId: true,
+                lot: {
+                  select: {
+                    numeroLot: true,
+                    dateExpiration: true,
+                    lotTechnique: true,
+                  },
+                },
+                quantiteTheorique: true,
+                quantiteComptee: true,
+                ecart: true,
+                sousTolerance: true,
+                anomalieId: true,
+              },
+            },
+          },
+        });
+        const auteursInventaires = new Map(
+          (
+            await tx.user.findMany({
+              where: {
+                id: { in: [...new Set(inventaires.map((i) => i.auteurId))] },
+              },
+              select: { id: true, nom: true, prenom: true },
+            })
+          ).map((u) => [u.id, `${u.prenom} ${u.nom}`.trim()]),
+        );
         // Liste blanche : ni description, ni date, ni lien avec les stocks ou les prix des pharmacies.
         const medicaments = await tx.medicament.findMany({
           orderBy: { id: 'asc' },
@@ -365,6 +439,8 @@ export class CatalogueSynchroService {
           medicaments,
           fournisseurs,
           receptions,
+          inventaires,
+          auteursInventaires,
           anomalies,
           posteLu,
           sequenceMaxRecue,
@@ -462,6 +538,39 @@ export class CatalogueSynchroService {
       anomalies: lue.anomalies,
       fournisseurs: lue.fournisseurs,
       medicaments: lue.medicaments,
+      inventaires: lue.inventaires.map((i) => ({
+        id: i.id,
+        createdAt: i.createdAt.toISOString(),
+        commentaire: i.commentaire,
+        auteur: {
+          id: i.auteurId,
+          nom: lue.auteursInventaires.get(i.auteurId) ?? '',
+        },
+        lignes: i.lignes
+          .map((l) => ({
+            id: l.id,
+            stockId: l.stockMedicamentId,
+            nom: l.stockMedicament.medicament.nom,
+            lotId: l.lotId,
+            numeroLot: l.lot?.numeroLot ?? null,
+            dateExpiration: l.lot?.dateExpiration
+              ? dateVersJour(l.lot.dateExpiration)
+              : null,
+            lotTechnique: l.lot?.lotTechnique ?? false,
+            // Jamais négatif en sortie ; l'écart reste signé (D717)
+            quantiteTheorique: Math.max(0, l.quantiteTheorique),
+            quantiteARegulariser: Math.max(0, -l.quantiteTheorique),
+            quantiteComptee: l.quantiteComptee,
+            ecart: l.ecart,
+            sousTolerance: l.sousTolerance,
+            anomalieId: l.anomalieId,
+          }))
+          .sort(
+            (a, b) =>
+              a.nom.localeCompare(b.nom, 'fr') ||
+              (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+          ),
+      })),
       receptions: lue.receptions.map((r) => ({
         id: r.id,
         reference: r.reference,

@@ -65,6 +65,7 @@ export const TYPES_EVENEMENT = [
   'RECEPTION_ENREGISTREE',
   'FICHE_MODIFIEE',
   'FICHE_CREEE',
+  'INVENTAIRE_ENREGISTRE',
 ] as const;
 
 export class EtatPosteDto {
@@ -543,4 +544,72 @@ export class CorpsFicheCreeeDto {
   @MaxLength(2000)
   @Matches(SANS_NUL)
   notes?: string | null;
+}
+
+/** Lot trouvé à l'inventaire et créé sur le poste : l'identifiant du poste est gardé par le serveur. */
+export class NouveauLotInventaireDto {
+  @IsUUID('all')
+  id: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(rognerTexte)
+  @MaxLength(64)
+  numeroLot?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  dateExpiration?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  sansPeremption?: boolean;
+}
+
+/** Ligne d'un inventaire fait hors ligne : quantité comptée en unités minimales et théorique que le poste affichait. */
+export class LigneInventaireRejeuDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  stockId: string;
+
+  @IsOptional()
+  @IsUUID('all')
+  lotId?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => NouveauLotInventaireDto)
+  nouveauLot?: NouveauLotInventaireDto;
+
+  @IsInt()
+  @Min(0)
+  @Max(ENTIER_MAX_FICHE)
+  quantiteComptee: number;
+
+  /** Stock du lot tel que le poste le montrait au moment du comptage (0 pour un nouveau lot). */
+  @IsInt()
+  @Min(0)
+  @Max(ENTIER_MAX_FICHE)
+  theoriqueLocal: number;
+}
+
+/** Inventaire fait hors ligne : le comptage fait foi, le stock des lots devient exactement ce qui a été compté. */
+export class CorpsInventaireEnregistreDto {
+  @IsUUID('all')
+  id: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(rognerTexte)
+  @MaxLength(500)
+  commentaire?: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => LigneInventaireRejeuDto)
+  lignes: LigneInventaireRejeuDto[];
 }

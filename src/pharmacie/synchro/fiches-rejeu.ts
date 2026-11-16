@@ -286,7 +286,9 @@ function idsStock(type: string, corps: unknown): string[] {
     return typeof c.stockId === 'string' ? [c.stockId] : [];
   }
   if (
-    (type === 'VENTE' || type === 'RECEPTION_ENREGISTREE') &&
+    (type === 'VENTE' ||
+      type === 'RECEPTION_ENREGISTREE' ||
+      type === 'INVENTAIRE_ENREGISTRE') &&
     Array.isArray(c.lignes)
   ) {
     return c.lignes.flatMap((l: unknown) =>
