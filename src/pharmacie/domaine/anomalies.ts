@@ -14,6 +14,13 @@ export const LIBELLES_ANOMALIE: Record<TypeAnomalie, string> = {
   PRODUIT_ARCHIVE: 'Médicament archivé vendu',
   EVENEMENT_REJETE: 'Opération de caisse rejetée',
   SEQUENCE_MANQUANTE: 'Opération de caisse manquante',
+  RECEPTION_COEFFICIENT_DIFFERENT:
+    'Réception hors ligne : unités par boîte différentes',
+  FICHE_MODIFIEE_ENTRETEMPS:
+    'Fiche modifiée hors ligne et ailleurs entre-temps',
+  THEORIQUE_DIVERGENT: 'Inventaire hors ligne : stock différent du poste',
+  CREDIT_TROP_PERCU: 'Crédit : trop-perçu sur un remboursement',
+  IMPORT_DIFFERE_PARTIEL: 'Import Excel hors ligne : lignes non importées',
 };
 
 export type EtatRattachement =

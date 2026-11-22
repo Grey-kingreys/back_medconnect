@@ -17,10 +17,11 @@ import {
   MaxLength,
   Min,
   NotEquals,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 import {
   ComptageOuvertureDto,
   MOMENTS_COMPTAGE,
@@ -29,8 +30,10 @@ import {
   TYPES_MOUVEMENT_CAISSE,
 } from './sessions-caisse.dto';
 import { RAISONS_SORTIE, type RaisonSortie } from '../domaine/sortie';
+import { CreerReceptionDto, LigneReceptionDto } from './receptions.dto';
 import {
   FORMAT_TELEPHONE_PRESCRIPTEUR,
+  NouveauClientCreditDto,
   nettoyerTelephonePrescripteur,
 } from './vente.dto';
 
@@ -60,6 +63,16 @@ export const TYPES_EVENEMENT = [
   'SORTIE_STOCK',
   'CORRECTION_QUANTITE',
   'ANOMALIE_TRAITEE',
+  'FOURNISSEUR_CREE',
+  'RECEPTION_ENREGISTREE',
+  'FICHE_MODIFIEE',
+  'FICHE_CREEE',
+  'INVENTAIRE_ENREGISTRE',
+  'CLIENT_CREDIT_CREE',
+  'CLIENT_CREDIT_MODIFIE',
+  'REMBOURSEMENT_CREDIT',
+  'DATE_LIMITE_MODIFIEE',
+  'IMPORT_STOCK_FICHIER',
 ] as const;
 
 export class EtatPosteDto {
@@ -346,6 +359,13 @@ export class PaiementRejeuDto {
   montantRecu?: number;
 }
 
+/** Nouveau client de crédit d'une vente rejouée : l'identifiant du poste, s'il le donne, est gardé. */
+export class NouveauClientCreditRejeuDto extends NouveauClientCreditDto {
+  @IsOptional()
+  @IsUUID('all')
+  id?: string;
+}
+
 export class CorpsVenteDto {
   @IsUUID('all')
   venteId: string;
@@ -406,6 +426,22 @@ export class CorpsVenteDto {
   @MaxLength(30)
   @Matches(FORMAT_TELEPHONE_PRESCRIPTEUR)
   telephonePrescripteur?: string | null;
+
+  /** Vente à crédit : client du cahier (existant, ou créé par le poste sous son identifiant). */
+  @IsOptional()
+  @IsUUID('all')
+  clientCreditId?: string;
+
+  /** Vente à crédit : nouveau client créé avec la vente (identifiant du poste facultatif). Exclusif avec clientCreditId. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => NouveauClientCreditRejeuDto)
+  nouveauClientCredit?: NouveauClientCreditRejeuDto;
+
+  /** Vente à crédit : date limite convenue (AAAA-MM-JJ), jamais refusée au rejeu même si elle est passée. */
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  dateLimiteCredit?: string;
 }
 
 /** Traitement d'une anomalie fait hors ligne (le commentaire trop court donne le rejet MOTIF_REQUIS). */
@@ -420,4 +456,321 @@ export class CorpsAnomalieTraiteeDto {
   @Transform(rognerTexte)
   @MaxLength(500)
   commentaire?: string;
+}
+
+/** Fournisseur créé hors ligne : l'identifiant vient du poste ; un fournisseur de même nom déjà là est réutilisé. */
+export class CorpsFournisseurCreeDto {
+  @IsUUID('all')
+  id: string;
+
+  @IsString()
+  @Transform(rognerTexte)
+  @Length(2, 100)
+  nom: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(rognerTexte)
+  @Matches(/^[0-9 +().-]{6,30}$/)
+  telephone?: string;
+}
+
+/** Ligne d'une réception faite hors ligne : le poste fournit l'identifiant du lot et le coefficient qu'il a utilisé. */
+export class LigneReceptionRejeuDto extends LigneReceptionDto {
+  @IsUUID('all')
+  lotId: string;
+
+  /** Unités par boîte de la fiche telle que le poste la voyait : la quantité en unités minimales en dépend. */
+  @IsInt()
+  @Min(1)
+  @Max(1_000_000)
+  coefficientLocal: number;
+}
+
+/** Réception faite hors ligne : le corps de CreerReceptionDto, avec identifiant obligatoire et lignes à lot stable. */
+export class CorpsReceptionEnregistreeDto extends OmitType(CreerReceptionDto, [
+  'id',
+  'lignes',
+] as const) {
+  @IsUUID('all')
+  id: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => LigneReceptionRejeuDto)
+  lignes: LigneReceptionRejeuDto[];
+}
+
+/** Plus grand entier enregistrable (colonne Int de PostgreSQL). */
+const ENTIER_MAX_FICHE = 2147483647;
+
+/** Champs « sûrs » d'une fiche modifiables hors ligne ; null efface la valeur. Les mêmes bornes que ModifierFicheDto. */
+export class ValeursFicheSuresDto {
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(ENTIER_MAX_FICHE)
+  prixUnitaire?: number | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(ENTIER_MAX_FICHE)
+  prixUnite?: number | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000)
+  toleranceInventaire?: number | null;
+
+  @IsOptional()
+  @IsString()
+  @Transform(rognerTexte)
+  @MaxLength(2000)
+  @Matches(SANS_NUL)
+  notes?: string | null;
+}
+
+/** Fiche modifiée hors ligne : les valeurs vues par le poste (avant) et voulues (apres), champ par champ. */
+export class CorpsFicheModifieeDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  stockId: string;
+
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => ValeursFicheSuresDto)
+  avant: ValeursFicheSuresDto;
+
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => ValeursFicheSuresDto)
+  apres: ValeursFicheSuresDto;
+}
+
+/** Fiche de stock créée hors ligne depuis le catalogue global : l'identifiant vient du poste, sans quantité. */
+export class CorpsFicheCreeeDto {
+  @IsUUID('all')
+  id: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  medicamentId: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(ENTIER_MAX_FICHE)
+  prixUnitaire?: number | null;
+
+  @IsOptional()
+  @IsString()
+  @Transform(rognerTexte)
+  @MaxLength(2000)
+  @Matches(SANS_NUL)
+  notes?: string | null;
+}
+
+/** Lot trouvé à l'inventaire et créé sur le poste : l'identifiant du poste est gardé par le serveur. */
+export class NouveauLotInventaireDto {
+  @IsUUID('all')
+  id: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(rognerTexte)
+  @MaxLength(64)
+  numeroLot?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  dateExpiration?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  sansPeremption?: boolean;
+}
+
+/** Ligne d'un inventaire fait hors ligne : quantité comptée en unités minimales et théorique que le poste affichait. */
+export class LigneInventaireRejeuDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  stockId: string;
+
+  @IsOptional()
+  @IsUUID('all')
+  lotId?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => NouveauLotInventaireDto)
+  nouveauLot?: NouveauLotInventaireDto;
+
+  @IsInt()
+  @Min(0)
+  @Max(ENTIER_MAX_FICHE)
+  quantiteComptee: number;
+
+  /** Stock du lot tel que le poste le montrait au moment du comptage (0 pour un nouveau lot). */
+  @IsInt()
+  @Min(0)
+  @Max(ENTIER_MAX_FICHE)
+  theoriqueLocal: number;
+}
+
+/** Inventaire fait hors ligne : le comptage fait foi, le stock des lots devient exactement ce qui a été compté. */
+export class CorpsInventaireEnregistreDto {
+  @IsUUID('all')
+  id: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(rognerTexte)
+  @MaxLength(500)
+  commentaire?: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => LigneInventaireRejeuDto)
+  lignes: LigneInventaireRejeuDto[];
+}
+
+const viderEnNullCredit = ({ value }: { value: unknown }): unknown => {
+  if (typeof value !== 'string') return value;
+  const t = value.trim();
+  return t === '' ? null : t;
+};
+
+/** Client du cahier de crédit créé hors ligne : l'identifiant vient du poste (rejeu idempotent). */
+export class CorpsClientCreditCreeDto {
+  @IsUUID('all')
+  id: string;
+
+  @IsString()
+  @Transform(rognerTexte)
+  @Length(2, 100)
+  nomComplet: string;
+
+  @IsOptional()
+  @Transform(viderEnNullCredit)
+  @IsString()
+  @MaxLength(30)
+  @Matches(FORMAT_TELEPHONE_PRESCRIPTEUR)
+  telephone?: string | null;
+
+  @IsOptional()
+  @Transform(viderEnNullCredit)
+  @IsString()
+  @MaxLength(500)
+  @Matches(SANS_NUL)
+  note?: string | null;
+}
+
+/** Champs d'un client de crédit modifiables ; null efface le téléphone ou la note, absent laisse inchangé. */
+export class ChampsClientCreditDto {
+  @IsOptional()
+  @IsString()
+  @Transform(rognerTexte)
+  @Length(2, 100)
+  nomComplet?: string;
+
+  @IsOptional()
+  @Transform(viderEnNullCredit)
+  @IsString()
+  @MaxLength(30)
+  @Matches(FORMAT_TELEPHONE_PRESCRIPTEUR)
+  telephone?: string | null;
+
+  @IsOptional()
+  @Transform(viderEnNullCredit)
+  @IsString()
+  @MaxLength(500)
+  @Matches(SANS_NUL)
+  note?: string | null;
+}
+
+export class CorpsClientCreditModifieDto {
+  @IsUUID('all')
+  id: string;
+
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => ChampsClientCreditDto)
+  champs: ChampsClientCreditDto;
+}
+
+/** Remboursement de crédit encaissé hors ligne : l'identifiant du poste rend le rejeu idempotent. */
+export class CorpsRemboursementCreditDto {
+  @IsUUID('all')
+  id: string;
+
+  @IsUUID('all')
+  clientId: string;
+
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  montant: number;
+
+  @IsOptional()
+  @Transform(viderEnNullCredit)
+  @IsString()
+  @MaxLength(500)
+  @Matches(SANS_NUL)
+  note?: string | null;
+
+  @IsBoolean()
+  verseEnCaisse: boolean;
+
+  /** Caisse du poste où l'argent est entré ; obligatoire quand verseEnCaisse est vrai. */
+  @IsOptional()
+  @IsUUID('all')
+  sessionId?: string;
+}
+
+/** Date limite d'une prise à crédit modifiée hors ligne ; null la retire. */
+export class CorpsDateLimiteModifieeDto {
+  @IsUUID('all')
+  venteId: string;
+
+  @ValidateIf((_o, v) => v !== null)
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  dateLimite: string | null;
+}
+
+/**
+ * Taille maximale (octets) d'un fichier d'import mis de côté hors ligne. Le corps d'un lot de
+ * synchro est limité à 2 Mo (D663) et le fichier y voyage en base64 (+ un tiers) : 1,4 Mo de
+ * fichier donnent environ 1,9 Mo, ce qui laisse de la place à l'enveloppe de l'événement.
+ */
+export const TAILLE_MAX_FICHIER_DIFFERE = 1_400_000;
+
+/** Fichier Excel du stock mis de côté hors ligne : analysé et importé au rejeu, comme en ligne. */
+export class CorpsImportStockFichierDto {
+  @IsUUID('all')
+  id: string;
+
+  @IsIn(['livraison', 'inventaire'])
+  mode: 'livraison' | 'inventaire';
+
+  @IsString()
+  @IsNotEmpty()
+  @Transform(rognerTexte)
+  @MaxLength(255)
+  nomFichier: string;
+
+  /** Contenu du classeur .xlsx en base64 ; sa taille réelle est contrôlée au rejeu (FICHIER_INVALIDE). */
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(2_000_000)
+  contenuBase64: string;
 }

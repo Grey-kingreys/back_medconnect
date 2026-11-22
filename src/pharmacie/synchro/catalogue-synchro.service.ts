@@ -1,5 +1,9 @@
+import type { Prisma } from 'generated/prisma/client';
+import type { ResultatImportSynchro } from './synchro.service';
 import { CODE_CREDIT } from '../credit/credit-regles';
-import { ConflictException, Injectable } from '@nestjs/common';
+import { ConflictException, Injectable, Optional } from '@nestjs/common';
+import { PermissionsService } from 'src/common/rbac/permissions.service';
+import { PERMISSIONS } from 'src/common/rbac/permissions.constants';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { StorageService } from 'src/storage/storage.service';
 import { AccesPharmacieService } from '../acces-pharmacie.service';
@@ -14,6 +18,7 @@ import {
   type ElementAnomalie,
 } from '../anomalies/anomalies.service';
 import { dateVersJour } from '../stock/lecture-stock';
+import { lireEtatsCredit } from '../credit/credit.service';
 import { lirePlagesNonEpuisees, type PlageLue } from './plages';
 
 export const MESSAGE_CATALOGUE_POSTE_WEB =
@@ -42,6 +47,8 @@ export interface FicheSynchro {
   coefficientBoite: number;
   uniteMinimale: string;
   deconditionnable: boolean;
+  /** Écart d'inventaire toléré en unités minimales ; null = aucune tolérance (champ modifiable hors ligne). */
+  toleranceInventaire: number | null;
   /** Faux : la fiche reste à qualifier (filtre et export du stock hors ligne). */
   qualifie: boolean;
   notes: string | null;
@@ -50,6 +57,222 @@ export interface FicheSynchro {
   quantiteARegulariser: number;
   lots: LotSynchro[];
 }
+
+export interface FournisseurSynchro {
+  id: string;
+  nom: string;
+  telephone: string | null;
+}
+
+/** Lot d'une réception récente, sans aucun coût ni montant de facture (Q8 : aucun prix d'achat sur le poste). */
+export interface LotReceptionSynchro {
+  id: string;
+  stockId: string;
+  nom: string;
+  numeroLot: string | null;
+  dateExpiration: string | null;
+  quantiteRecue: number;
+  coefficientReception: number;
+  solde: number;
+  codeArticleFournisseur: string | null;
+  codeBarres: string | null;
+  quantiteCommandee: number | null;
+  prixPublicBoite: number | null;
+  codeTva: string | null;
+  tauxTvaPourMille: number | null;
+  colisage: number | null;
+  tableau: string | null;
+  bonPreparation: string | null;
+}
+
+/** Réception récente (le poste n'en montre que 30 jours, Q11), sans montantHT, totalTva, montantTTC, netAPayer ni coût. */
+export interface ReceptionSynchro {
+  id: string;
+  reference: string | null;
+  recueLe: string;
+  createdAt: string;
+  auteurId: string;
+  numeroFacture: string | null;
+  referenceCommande: string | null;
+  dateFacture: string | null;
+  nombrePages: number | null;
+  fournisseur: { id: string; nom: string } | null;
+  lots: LotReceptionSynchro[];
+}
+
+/** Ligne d'un inventaire récent : quantités en unités minimales, aucun coût. */
+export interface LigneInventaireSynchro {
+  id: string;
+  stockId: string;
+  nom: string;
+  lotId: string | null;
+  numeroLot: string | null;
+  dateExpiration: string | null;
+  lotTechnique: boolean;
+  quantiteTheorique: number;
+  quantiteARegulariser: number;
+  quantiteComptee: number;
+  ecart: number;
+  sousTolerance: boolean;
+  anomalieId: string | null;
+}
+
+/** Inventaire récent (le poste n'en montre que 30 jours, Q11), sans aucun coût. */
+export interface InventaireSynchro {
+  id: string;
+  createdAt: string;
+  commentaire: string | null;
+  auteur: { id: string; nom: string };
+  lignes: LigneInventaireSynchro[];
+}
+
+/** Médicament du catalogue global, allégé : seulement de quoi ajouter une fiche au stock hors ligne (Q4). */
+export interface MedicamentAllegeSynchro {
+  id: string;
+  nom: string;
+  nomGenerique: string | null;
+  categorie: string;
+  formes: string[];
+  ordonnanceRequise: boolean;
+}
+
+/** Médicament d'une prise à crédit : nom et montant, jamais de coût. */
+export interface LignePriseSynchro {
+  nomMedicament: string;
+  nombreAffiche: number;
+  uniteAffichee: 'BOITE' | 'UNITE';
+  sousTotal: number;
+}
+
+/** Prise à crédit d'un client (une vente en mode CREDIT) ; la date limite est envoyée telle quelle, le poste calcule le retard. */
+export interface PriseCreditSynchro {
+  venteId: string;
+  numero: string;
+  createdAt: string;
+  jourMetier: string;
+  vendeurNom: string;
+  total: number;
+  annulee: boolean;
+  motifAnnulation: string | null;
+  /** AAAA-MM-JJ ou null. */
+  dateLimite: string | null;
+  /** Ce qu'il reste à payer sur cette prise (remboursements imputés aux plus anciennes d'abord), 0 si annulée. */
+  resteSurPrise: number;
+  lignes: LignePriseSynchro[];
+}
+
+export interface RemboursementCreditSynchro {
+  id: string;
+  montant: number;
+  note: string | null;
+  verseEnCaisse: boolean;
+  auteurNom: string | null;
+  createdAt: string;
+}
+
+/**
+ * Client du cahier de crédit avec ses prises et ses remboursements (lecture et calcul hors ligne).
+ * `statut` ne vaut que EN_COURS ou SOLDE : EN_RETARD dépend de l'heure (D662), le poste le calcule
+ * avec son horloge à partir des dates limites des prises.
+ */
+export interface ClientCreditSynchro {
+  id: string;
+  nomComplet: string;
+  telephone: string | null;
+  note: string | null;
+  createdAt: string;
+  resteAPayer: number;
+  totalPris: number;
+  totalRembourse: number;
+  statut: 'EN_COURS' | 'SOLDE';
+  prises: PriseCreditSynchro[];
+  remboursements: RemboursementCreditSynchro[];
+  /**
+   * Ce que la borne de la photographie a retiré de l'historique de ce client (les plus anciennes prises et
+   * remboursements) : le poste en tient compte pour que le reste calculé reste exact. Zéros si rien n'est retiré.
+   */
+  anterieur: { totalPris: number; totalRembourse: number };
+}
+
+/** Clients soldés gardés dans la photographie (les plus récemment actifs) : tous les clients qui doivent encore de l'argent y sont toujours. */
+export const CLIENTS_SOLDES_PHOTOGRAPHIE_MAX = 200;
+/** Prises et remboursements gardés par client (les plus récents) ; le reste est résumé dans `anterieur`. */
+export const HISTORIQUE_CREDIT_PHOTOGRAPHIE_MAX = 100;
+
+/**
+ * Borne la part crédit de la photographie sans dépendre de l'heure : tous les clients non soldés, plus les
+ * CLIENTS_SOLDES_PHOTOGRAPHIE_MAX soldés dont la dernière activité est la plus récente ; par client, les
+ * HISTORIQUE_CREDIT_PHOTOGRAPHIE_MAX dernières prises et derniers remboursements. Résultat trié par identifiant.
+ */
+export function bornerClientsCredit(
+  clients: ClientCreditSynchro[],
+): ClientCreditSynchro[] {
+  const activite = (c: ClientCreditSynchro) =>
+    [
+      c.createdAt,
+      ...c.prises.map((p) => p.createdAt),
+      ...c.remboursements.map((r) => r.createdAt),
+    ].reduce((max, d) => (d > max ? d : max), '');
+  const soldes = clients
+    .filter((c) => c.resteAPayer <= 0)
+    .sort(
+      (a, b) =>
+        (activite(a) < activite(b) ? 1 : activite(a) > activite(b) ? -1 : 0) ||
+        (a.id < b.id ? -1 : 1),
+    )
+    .slice(0, CLIENTS_SOLDES_PHOTOGRAPHIE_MAX);
+  const gardes = new Set([
+    ...clients.filter((c) => c.resteAPayer > 0).map((c) => c.id),
+    ...soldes.map((c) => c.id),
+  ]);
+  return clients
+    .filter((c) => gardes.has(c.id))
+    .map((c) => {
+      const coupePrises = Math.max(
+        0,
+        c.prises.length - HISTORIQUE_CREDIT_PHOTOGRAPHIE_MAX,
+      );
+      const coupeRemb = Math.max(
+        0,
+        c.remboursements.length - HISTORIQUE_CREDIT_PHOTOGRAPHIE_MAX,
+      );
+      return {
+        ...c,
+        prises: c.prises.slice(coupePrises),
+        remboursements: c.remboursements.slice(coupeRemb),
+        anterieur: {
+          totalPris: c.prises
+            .slice(0, coupePrises)
+            .filter((p) => !p.annulee)
+            .reduce((s, p) => s + p.total, 0),
+          totalRembourse: c.remboursements
+            .slice(0, coupeRemb)
+            .reduce((s, r) => s + r.montant, 0),
+        },
+      };
+    })
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+/** Import Excel mis de côté par le poste : en attente de traitement, importé (avec son résultat) ou rejeté. */
+export interface ImportDiffereSynchro {
+  id: string;
+  evenementId: string;
+  mode: string | null;
+  nomFichier: string | null;
+  statut: 'EN_ATTENTE' | 'APPLIQUE' | 'REJETE';
+  code: string | null;
+  message: string | null;
+  importe: ResultatImportSynchro | null;
+}
+
+/** Nombre d'imports différés gardés dans la photographie. */
+export const IMPORTS_DIFFERES_PHOTOGRAPHIE_MAX = 20;
+
+/** Garde-fou du poids de la photographie. */
+export const RECEPTIONS_PHOTOGRAPHIE_MAX = 500;
+/** Garde-fou du poids de la photographie : le poste filtre lui-même les 30 derniers jours (D662, aucune heure ici). */
+export const INVENTAIRES_PHOTOGRAPHIE_MAX = 200;
 
 /**
  * Photographie complète du catalogue d'un poste desktop (D633). L'ordre des clés fixe l'ETag.
@@ -90,6 +313,18 @@ export interface CatalogueSynchro {
   fiches: FicheSynchro[];
   /** Anomalies OUVERTES de la pharmacie, détails lisibles, sans aucun coût (lecture hors ligne). */
   anomalies: ElementAnomalie[];
+  /** Fournisseurs actifs de la pharmacie (réception hors ligne). */
+  fournisseurs: FournisseurSynchro[];
+  /** Les 500 dernières réceptions, les plus récentes d'abord, sans filtre de date (D662) ni coût ni montant de facture. */
+  receptions: ReceptionSynchro[];
+  /** Les 200 derniers inventaires, les plus récents d'abord, sans filtre de date (D662) ni coût. */
+  inventaires: InventaireSynchro[];
+  /** Les 20 derniers imports Excel mis de côté par ce poste et leur résultat, les plus récents d'abord (par séquence), sans coût ni heure. */
+  importsDifferes: ImportDiffereSynchro[];
+  /** Clients du cahier de crédit, triés par identifiant, sans aucun coût ni donnée dépendant de l'heure. */
+  clientsCredit: ClientCreditSynchro[];
+  /** Catalogue global allégé, trié par identifiant (ordre stable, sans lien avec le stock : l'ETag ne bouge que si le catalogue change). */
+  medicaments: MedicamentAllegeSynchro[];
 }
 
 function comparerLots(a: LotSynchro, b: LotSynchro): number {
@@ -111,6 +346,8 @@ export class CatalogueSynchroService {
     private readonly accesPharmacie: AccesPharmacieService,
     private readonly storage: StorageService,
     private readonly anomalies: AnomaliesService,
+    // Sans service, aucun client de crédit n'est envoyé (jamais d'ouverture par défaut).
+    @Optional() private readonly permissions?: PermissionsService,
   ) {}
 
   async photographier(
@@ -122,6 +359,13 @@ export class CatalogueSynchroService {
       structureId,
       userId,
     );
+
+    // Noms et téléphones des clients : seulement pour qui a credit:read, jamais pour tout utilisateur de la caisse.
+    const peutLireCredit =
+      this.permissions !== undefined &&
+      (await this.permissions.getUserPermissions(userId)).includes(
+        PERMISSIONS.CREDIT_READ,
+      );
 
     const poste = await this.prisma.poste.findFirst({
       where: { id: posteId, pointDeVente: { structureId: structure.id } },
@@ -201,6 +445,7 @@ export class CatalogueSynchroService {
             coefficientBoite: true,
             uniteMinimale: true,
             deconditionnable: true,
+            toleranceInventaire: true,
             qualifie: true,
             notes: true,
             medicament: {
@@ -239,7 +484,179 @@ export class CatalogueSynchroService {
           tx,
           pointDeVente.id,
         );
+        const fournisseurs = await tx.fournisseur.findMany({
+          where: { structureId: structure.id, actif: true },
+          orderBy: [{ nom: 'asc' }, { id: 'asc' }],
+          select: { id: true, nom: true, telephone: true },
+        });
+        const receptions = await tx.reception.findMany({
+          where: { pointDeVenteId: pointDeVente.id },
+          orderBy: [{ recueLe: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+          take: RECEPTIONS_PHOTOGRAPHIE_MAX,
+          // Liste blanche : aucune colonne de coût ni de montant de facture n'est lue.
+          select: {
+            id: true,
+            reference: true,
+            recueLe: true,
+            createdAt: true,
+            auteurId: true,
+            numeroFacture: true,
+            referenceCommande: true,
+            dateFacture: true,
+            nombrePages: true,
+            fournisseur: { select: { id: true, nom: true } },
+            lots: {
+              select: {
+                id: true,
+                stockMedicamentId: true,
+                stockMedicament: {
+                  select: { medicament: { select: { nom: true } } },
+                },
+                numeroLot: true,
+                dateExpiration: true,
+                quantiteRecue: true,
+                coefficientReception: true,
+                agregat: { select: { quantite: true } },
+                codeArticleFournisseur: true,
+                codeBarres: true,
+                quantiteCommandee: true,
+                prixPublicBoite: true,
+                codeTva: true,
+                tauxTvaPourMille: true,
+                colisage: true,
+                tableau: true,
+                bonPreparation: true,
+              },
+            },
+          },
+        });
+        const inventaires = await tx.inventaire.findMany({
+          where: { pointDeVenteId: pointDeVente.id },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: INVENTAIRES_PHOTOGRAPHIE_MAX,
+          // Liste blanche : aucune colonne de coût n'est lue.
+          select: {
+            id: true,
+            createdAt: true,
+            commentaire: true,
+            auteurId: true,
+            lignes: {
+              select: {
+                id: true,
+                stockMedicamentId: true,
+                stockMedicament: {
+                  select: { medicament: { select: { nom: true } } },
+                },
+                lotId: true,
+                lot: {
+                  select: {
+                    numeroLot: true,
+                    dateExpiration: true,
+                    lotTechnique: true,
+                  },
+                },
+                quantiteTheorique: true,
+                quantiteComptee: true,
+                ecart: true,
+                sousTolerance: true,
+                anomalieId: true,
+              },
+            },
+          },
+        });
+        const auteursInventaires = new Map(
+          (
+            await tx.user.findMany({
+              where: {
+                id: { in: [...new Set(inventaires.map((i) => i.auteurId))] },
+              },
+              select: { id: true, nom: true, prenom: true },
+            })
+          ).map((u) => [u.id, `${u.prenom} ${u.nom}`.trim()]),
+        );
+        // Liste blanche : ni description, ni date, ni lien avec les stocks ou les prix des pharmacies.
+        const medicaments = await tx.medicament.findMany({
+          orderBy: { id: 'asc' },
+          select: {
+            id: true,
+            nom: true,
+            nomGenerique: true,
+            categorie: true,
+            formes: true,
+            ordonnanceRequise: true,
+          },
+        });
+        // Colonnes lues une à une dans le JSON : jamais le contenu du fichier (corps) en entier
+        const importsDifferes = await tx.$queryRaw<
+          {
+            evenementId: string;
+            statut: 'EN_ATTENTE' | 'APPLIQUE' | 'REJETE';
+            id: string | null;
+            mode: string | null;
+            nomFichier: string | null;
+            resultat: Prisma.JsonValue | null;
+          }[]
+        >`SELECT "evenementId", "statut"::text AS "statut", "corps"->>'id' AS "id", "corps"->>'mode' AS "mode", left("corps"->>'nomFichier', 120) AS "nomFichier", "resultat" FROM "EvenementSynchro" WHERE "posteId" = ${posteLu.id} AND "type" = 'IMPORT_STOCK_FICHIER' ORDER BY "sequence" DESC LIMIT ${IMPORTS_DIFFERES_PHOTOGRAPHIE_MAX}`;
+        const clientsCredit = peutLireCredit
+          ? await tx.clientCredit.findMany({
+              where: { structureId: structure.id },
+              orderBy: { id: 'asc' },
+              select: {
+                id: true,
+                nomComplet: true,
+                telephone: true,
+                note: true,
+                createdAt: true,
+              },
+            })
+          : [];
+        const idsCredit = clientsCredit.map((c) => c.id);
+        const etatsCredit = await lireEtatsCredit(tx, structure.id, idsCredit);
+        const remboursementsCredit =
+          idsCredit.length === 0
+            ? []
+            : await tx.remboursementCredit.findMany({
+                where: { clientCreditId: { in: idsCredit } },
+                orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+              });
+        const echeancesCredit = new Map(
+          (
+            await tx.echeanceCredit.findMany({
+              where: {
+                venteId: {
+                  in: [...etatsCredit.values()].flatMap((e) => [
+                    ...e.ventes.keys(),
+                  ]),
+                },
+              },
+              select: { venteId: true, dateLimite: true },
+            })
+          ).map((e) => [e.venteId, dateVersJour(e.dateLimite)]),
+        );
+        const auteursCredit = new Map(
+          (
+            await tx.user.findMany({
+              where: {
+                id: {
+                  in: [...new Set(remboursementsCredit.map((r) => r.auteurId))],
+                },
+              },
+              select: { id: true, nom: true, prenom: true },
+            })
+          ).map((u) => [u.id, `${u.prenom} ${u.nom}`.trim()]),
+        );
         return {
+          clientsCredit,
+          etatsCredit,
+          remboursementsCredit,
+          echeancesCredit,
+          auteursCredit,
+          medicaments,
+          fournisseurs,
+          receptions,
+          inventaires,
+          auteursInventaires,
+          importsDifferes,
           anomalies,
           posteLu,
           sequenceMaxRecue,
@@ -296,6 +713,7 @@ export class CatalogueSynchroService {
         coefficientBoite: f.coefficientBoite,
         uniteMinimale: f.uniteMinimale,
         deconditionnable: f.deconditionnable,
+        toleranceInventaire: f.toleranceInventaire ?? null,
         qualifie: f.qualifie,
         notes: f.notes ?? null,
         quantite: Math.max(0, agregat),
@@ -334,6 +752,162 @@ export class CatalogueSynchroService {
       coupures: lue.coupures,
       fiches: fichesSynchro,
       anomalies: lue.anomalies,
+      fournisseurs: lue.fournisseurs,
+      importsDifferes: lue.importsDifferes.map((l): ImportDiffereSynchro => {
+        const r = (l.resultat ?? {}) as Record<string, unknown>;
+        return {
+          id: l.id ?? l.evenementId,
+          evenementId: l.evenementId,
+          mode: l.mode,
+          nomFichier: l.nomFichier,
+          statut: l.statut,
+          code: typeof r.code === 'string' ? r.code : null,
+          message:
+            l.statut === 'REJETE' && typeof r.message === 'string'
+              ? r.message
+              : null,
+          importe:
+            l.statut === 'APPLIQUE' && r.importe
+              ? (r.importe as ResultatImportSynchro)
+              : null,
+        };
+      }),
+      clientsCredit: bornerClientsCredit(
+        lue.clientsCredit.map((c): ClientCreditSynchro => {
+          const e = lue.etatsCredit.get(c.id);
+          const prises = (e?.etat.prises ?? [])
+            .map((p): PriseCreditSynchro => {
+              const v = e?.ventes.get(p.venteId);
+              return {
+                venteId: p.venteId,
+                numero: v?.numero ?? '',
+                createdAt: p.createdAt.toISOString(),
+                jourMetier: v ? dateVersJour(v.jourMetier) : '',
+                vendeurNom: v?.vendeurNom ?? '',
+                total: p.total,
+                annulee: p.annulee,
+                motifAnnulation: p.annulee
+                  ? (v?.pieceLiee?.motifAnnulation ?? null)
+                  : null,
+                dateLimite: lue.echeancesCredit.get(p.venteId) ?? null,
+                resteSurPrise: p.reste,
+                // Jamais de coût : seulement le nom, la quantité affichée et le montant de la ligne.
+                lignes: (v?.lignes ?? []).map((l) => ({
+                  nomMedicament: l.nomMedicament,
+                  nombreAffiche: l.nombreAffiche,
+                  uniteAffichee: l.uniteAffichee,
+                  sousTotal: l.sousTotal,
+                })),
+              };
+            })
+            .sort(
+              (a, b) =>
+                (a.createdAt < b.createdAt
+                  ? -1
+                  : a.createdAt > b.createdAt
+                    ? 1
+                    : 0) ||
+                (a.venteId < b.venteId ? -1 : a.venteId > b.venteId ? 1 : 0),
+            );
+          const reste = e?.etat.resteAPayer ?? 0;
+          return {
+            id: c.id,
+            nomComplet: c.nomComplet,
+            telephone: c.telephone,
+            note: c.note,
+            createdAt: c.createdAt.toISOString(),
+            resteAPayer: reste,
+            totalPris: e?.etat.totalPris ?? 0,
+            totalRembourse: e?.etat.totalRembourse ?? 0,
+            statut: reste > 0 ? 'EN_COURS' : 'SOLDE',
+            prises,
+            remboursements: lue.remboursementsCredit
+              .filter((r) => r.clientCreditId === c.id)
+              .map((r) => ({
+                id: r.id,
+                montant: r.montant,
+                note: r.note,
+                verseEnCaisse: r.verseEnCaisse,
+                auteurNom: lue.auteursCredit.get(r.auteurId) ?? null,
+                createdAt: r.createdAt.toISOString(),
+              })),
+            anterieur: { totalPris: 0, totalRembourse: 0 },
+          };
+        }),
+      ),
+      medicaments: lue.medicaments,
+      inventaires: lue.inventaires.map((i) => ({
+        id: i.id,
+        createdAt: i.createdAt.toISOString(),
+        commentaire: i.commentaire,
+        auteur: {
+          id: i.auteurId,
+          nom: lue.auteursInventaires.get(i.auteurId) ?? '',
+        },
+        lignes: i.lignes
+          .map((l) => ({
+            id: l.id,
+            stockId: l.stockMedicamentId,
+            nom: l.stockMedicament.medicament.nom,
+            lotId: l.lotId,
+            numeroLot: l.lot?.numeroLot ?? null,
+            dateExpiration: l.lot?.dateExpiration
+              ? dateVersJour(l.lot.dateExpiration)
+              : null,
+            lotTechnique: l.lot?.lotTechnique ?? false,
+            // Jamais négatif en sortie ; l'écart reste signé (D717)
+            quantiteTheorique: Math.max(0, l.quantiteTheorique),
+            quantiteARegulariser: Math.max(0, -l.quantiteTheorique),
+            quantiteComptee: l.quantiteComptee,
+            ecart: l.ecart,
+            sousTolerance: l.sousTolerance,
+            anomalieId: l.anomalieId,
+          }))
+          .sort(
+            (a, b) =>
+              a.nom.localeCompare(b.nom, 'fr') ||
+              (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+          ),
+      })),
+      receptions: lue.receptions.map((r) => ({
+        id: r.id,
+        reference: r.reference,
+        recueLe: r.recueLe.toISOString(),
+        createdAt: r.createdAt.toISOString(),
+        auteurId: r.auteurId,
+        numeroFacture: r.numeroFacture,
+        referenceCommande: r.referenceCommande,
+        dateFacture: r.dateFacture ? dateVersJour(r.dateFacture) : null,
+        nombrePages: r.nombrePages,
+        fournisseur: r.fournisseur,
+        lots: r.lots
+          .map((l) => ({
+            id: l.id,
+            stockId: l.stockMedicamentId,
+            nom: l.stockMedicament.medicament.nom,
+            numeroLot: l.numeroLot,
+            dateExpiration: l.dateExpiration
+              ? dateVersJour(l.dateExpiration)
+              : null,
+            quantiteRecue: l.quantiteRecue,
+            coefficientReception: l.coefficientReception,
+            solde: Math.max(0, l.agregat?.quantite ?? 0),
+            codeArticleFournisseur: l.codeArticleFournisseur,
+            codeBarres: l.codeBarres,
+            quantiteCommandee: l.quantiteCommandee,
+            prixPublicBoite: l.prixPublicBoite,
+            codeTva: l.codeTva,
+            tauxTvaPourMille: l.tauxTvaPourMille,
+            colisage: l.colisage,
+            tableau: l.tableau,
+            bonPreparation: l.bonPreparation,
+          }))
+          .sort(
+            (a, b) =>
+              a.nom.localeCompare(b.nom, 'fr') ||
+              (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+          ),
+      })),
     };
   }
 }

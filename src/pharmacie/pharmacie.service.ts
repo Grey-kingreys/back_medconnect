@@ -35,7 +35,10 @@ import {
   lireEtatsStock,
   type EtatStockFiche,
 } from './stock/lecture-stock';
-import { AccesPharmacieService } from './acces-pharmacie.service';
+import {
+  AccesPharmacieService,
+  type AccesPharmacie,
+} from './acces-pharmacie.service';
 import {
   CreateMedicamentDto,
   UpdateMedicamentDto,
@@ -1447,10 +1450,61 @@ export class PharmacieService {
     await this.verifierModeImport(adminUserId, mode);
     const jour = jourConakry(new Date());
     const analyse = await this.analyserImportStock(fichier, jour, mode);
+    return this.ecrireImportStock(
+      structureId,
+      adminUserId,
+      acces,
+      analyse,
+      mode,
+      (fn) => this.prisma.$transaction(fn, OPTIONS_TRANSACTION_IMPORT),
+    );
+  }
 
+  /**
+   * Import d'un fichier mis de côté hors ligne, rejoué dans la transaction de l'événement
+   * de synchro : même analyse, mêmes écritures que l'import en ligne. Les droits propres au
+   * mode sont contrôlés par l'appelant (permissions de l'auteur de l'événement). Aucune alerte
+   * de stock n'est envoyée ici (la notification ne se défait pas avec la transaction).
+   */
+  async importerStockRejeu(
+    tx: Prisma.TransactionClient,
+    acces: AccesPharmacie,
+    fichier: FichierImport,
+    mode: ModeImportStock,
+    idImport: string,
+  ) {
+    const jour = jourConakry(new Date());
+    const analyse = await this.analyserImportStock(fichier, jour, mode);
+    return this.ecrireImportStock(
+      acces.structure.id,
+      acces.user.id,
+      acces,
+      analyse,
+      mode,
+      (fn) => fn(tx),
+      idImport,
+    );
+  }
+
+  /**
+   * Écriture de l'import, commune à la route et au rejeu. `executer` ouvre la transaction
+   * (en ligne) ou réutilise celle de l'appelant (rejeu, `idImport` : identifiant de la
+   * réception ou de l'inventaire créé, qui rend le rejeu idempotent).
+   */
+  private async ecrireImportStock(
+    structureId: string,
+    adminUserId: string,
+    acces: AccesPharmacie,
+    analyse: RapportImportStock,
+    mode: ModeImportStock,
+    executer: <T>(
+      fn: (tx: Prisma.TransactionClient) => Promise<T>,
+    ) => Promise<T>,
+    idImport?: string,
+  ) {
     if (mode === 'inventaire') {
-      const { rapport, inventaireId, nombreAnomalies } =
-        await this.prisma.$transaction(async (tx) => {
+      const { rapport, inventaireId, nombreAnomalies } = await executer(
+        async (tx) => {
           const acceptees = analyse.lignes.filter(
             (l) => l.statut === 'acceptee',
           );
@@ -1495,6 +1549,7 @@ export class PharmacieService {
             tx,
             acces,
             {
+              ...(idImport ? { id: idImport } : {}),
               commentaire: 'Import Excel',
               lignes: this.lignesInventaire(retenues, ficheDe),
             },
@@ -1512,7 +1567,8 @@ export class PharmacieService {
             inventaireId: ecrit.inventaireId,
             nombreAnomalies: ecrit.anomalies.length,
           };
-        }, OPTIONS_TRANSACTION_IMPORT);
+        },
+      );
 
       return {
         data: {
@@ -1532,93 +1588,87 @@ export class PharmacieService {
     }
 
     // Lecture du stock, calcul et réception dans la même transaction
-    const { rapport, receptionId, enStock } = await this.prisma.$transaction(
-      async (tx) => {
-        const enStock = await this.lireQuantitesEnStock(
-          tx,
-          structureId,
-          analyse,
-        );
-        const calcule = this.calculerQuantitesImport(analyse, enStock);
-        const acceptees = calcule.lignes.filter((l) => l.statut === 'acceptee');
-        if (acceptees.length === 0) {
-          return { rapport: calcule, receptionId: null, enStock };
-        }
+    const { rapport, receptionId, enStock } = await executer(async (tx) => {
+      const enStock = await this.lireQuantitesEnStock(tx, structureId, analyse);
+      const calcule = this.calculerQuantitesImport(analyse, enStock);
+      const acceptees = calcule.lignes.filter((l) => l.statut === 'acceptee');
+      if (acceptees.length === 0) {
+        return { rapport: calcule, receptionId: null, enStock };
+      }
 
-        // Médicaments absents du stock : fiche créée à quantité nulle (D493)
-        const absents = acceptees
-          .map((l) => l.medicamentId as string)
-          .filter((id) => !enStock.has(id));
-        if (absents.length > 0) {
-          await tx.stockMedicament.createMany({
-            data: absents.map((medicamentId) => ({
-              medicamentId,
-              structureId,
-            })),
-            skipDuplicates: true,
-          });
-        }
-        const fiches = await tx.stockMedicament.findMany({
-          where: {
+      // Médicaments absents du stock : fiche créée à quantité nulle (D493)
+      const absents = acceptees
+        .map((l) => l.medicamentId as string)
+        .filter((id) => !enStock.has(id));
+      if (absents.length > 0) {
+        await tx.stockMedicament.createMany({
+          data: absents.map((medicamentId) => ({
+            medicamentId,
             structureId,
-            medicamentId: {
-              in: acceptees.map((l) => l.medicamentId as string),
+          })),
+          skipDuplicates: true,
+        });
+      }
+      const fiches = await tx.stockMedicament.findMany({
+        where: {
+          structureId,
+          medicamentId: {
+            in: acceptees.map((l) => l.medicamentId as string),
+          },
+        },
+        select: { id: true, medicamentId: true },
+      });
+      const ficheDe = new Map(fiches.map((f) => [f.medicamentId, f.id]));
+
+      const ecrite = await this.receptions.enregistrerDansTransaction(
+        tx,
+        acces,
+        {
+          ...(idImport ? { id: idImport } : {}),
+          fournisseurId: null,
+          reference: null,
+          recueLe: new Date(),
+          lignes: acceptees.map((l) => ({
+            stockId: ficheDe.get(l.medicamentId as string) as string,
+            numeroLot: l.numeroLot ?? null,
+            dateExpiration: l.dateExpiration
+              ? dateVersJour(new Date(l.dateExpiration))
+              : null,
+            sansPeremption: l.sansPeremption === true,
+            nombreBoites: l.quantite as number,
+            quantiteUnites: null,
+            coutAchatBoite: l.coutAchatBoite ?? null,
+            majFiche: {
+              prixUnitaire: l.prixUnitaire,
+              notes: l.notes?.trim(),
             },
-          },
-          select: { id: true, medicamentId: true },
-        });
-        const ficheDe = new Map(fiches.map((f) => [f.medicamentId, f.id]));
+          })),
+        },
+      );
 
-        const ecrite = await this.receptions.enregistrerDansTransaction(
-          tx,
-          acces,
-          {
-            fournisseurId: null,
-            reference: null,
-            recueLe: new Date(),
-            lignes: acceptees.map((l) => ({
-              stockId: ficheDe.get(l.medicamentId as string) as string,
-              numeroLot: l.numeroLot ?? null,
-              dateExpiration: l.dateExpiration
-                ? dateVersJour(new Date(l.dateExpiration))
-                : null,
-              sansPeremption: l.sansPeremption === true,
-              nombreBoites: l.quantite as number,
-              quantiteUnites: null,
-              coutAchatBoite: l.coutAchatBoite ?? null,
-              majFiche: {
-                prixUnitaire: l.prixUnitaire,
-                notes: l.notes?.trim(),
-              },
-            })),
-          },
-        );
-
-        // Le stock relu sous verrou fait foi : un import simultané est compté
-        let k = 0;
-        const lignes = calcule.lignes.map((l): LigneImportStock => {
-          if (l.statut !== 'acceptee') return l;
-          const ecriteK = ecrite.lignes[k++];
-          return {
-            ...l,
-            lotId: ecriteK.lotId,
-            unitesRecues: ecriteK.quantiteUm,
-            quantiteAvant: ecriteK.soldeProduitApres - ecriteK.quantiteUm,
-            quantiteApres: ecriteK.soldeProduitApres,
-          };
-        });
+      // Le stock relu sous verrou fait foi : un import simultané est compté
+      let k = 0;
+      const lignes = calcule.lignes.map((l): LigneImportStock => {
+        if (l.statut !== 'acceptee') return l;
+        const ecriteK = ecrite.lignes[k++];
         return {
-          rapport: { ...calcule, lignes },
-          receptionId: ecrite.receptionId,
-          enStock,
+          ...l,
+          lotId: ecriteK.lotId,
+          unitesRecues: ecriteK.quantiteUm,
+          quantiteAvant: ecriteK.soldeProduitApres - ecriteK.quantiteUm,
+          quantiteApres: ecriteK.soldeProduitApres,
         };
-      },
-      OPTIONS_TRANSACTION_IMPORT,
-    );
+      });
+      return {
+        rapport: { ...calcule, lignes },
+        receptionId: ecrite.receptionId,
+        enStock,
+      };
+    });
     const aEcrire = rapport.lignes.filter((l) => l.statut === 'acceptee');
 
-    // Une seule alerte groupée pour tout l'import (A4, D476)
-    if (aEcrire.length > 0) {
+    // Une seule alerte groupée pour tout l'import (A4, D476) ; jamais au rejeu (idImport)
+    if (aEcrire.length > 0 && !idImport) {
       const parametres = await this.prisma.parametresPharmacie.findUnique({
         where: { structureId },
         select: { seuilStockBas: true },

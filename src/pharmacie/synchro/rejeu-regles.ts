@@ -23,9 +23,9 @@ export type CodeRejet =
   | 'IDENTIFIANT_DEJA_UTILISE'
   | 'STOCK_INTROUVABLE'
   | 'EVENEMENT_INAPPLICABLE'
-  | 'CREDIT_HORS_LIGNE'
   | 'PERMISSION_INSUFFISANTE'
   | 'ANOMALIE_INCONNUE'
+  | 'FICHIER_INVALIDE'
   | CodeMetier;
 
 /**
@@ -46,6 +46,7 @@ export const CODES_METIER = [
   'FOURNISSEUR_EXISTANT',
   'ANOMALIE_DEJA_TRAITEE',
   'FICHE_MODIFIEE',
+  'MEDICAMENT_INCONNU',
   'PRIX_UNITE_SANS_DECONDITIONNEMENT',
   'CLIENT_CREDIT_INTROUVABLE',
   'PRISE_INTROUVABLE',
@@ -84,12 +85,12 @@ export const MESSAGES_REJET: Record<CodeRejet | CodeARenvoyer, string> = {
     "Un médicament de cette opération est inconnu de la pharmacie. L'opération a été mise de côté pour le responsable.",
   EVENEMENT_INAPPLICABLE:
     "Cette opération n'a pas pu être enregistrée après plusieurs essais. Elle a été mise de côté : le responsable de la pharmacie la retrouvera dans les anomalies.",
-  CREDIT_HORS_LIGNE:
-    'Le crédit demande une connexion. Cette vente à crédit a été mise de côté : le responsable de la pharmacie la retrouvera dans les anomalies.',
   PERMISSION_INSUFFISANTE:
     "L'utilisateur de cette opération n'a pas le droit de la faire. L'opération a été mise de côté pour le responsable de la pharmacie.",
   ANOMALIE_INCONNUE:
     "L'anomalie que vous avez traitée sur le poste est introuvable. L'opération a été mise de côté pour le responsable de la pharmacie.",
+  FICHIER_INVALIDE:
+    "Le fichier Excel mis de côté hors ligne est illisible ou ne respecte pas le modèle d'import. Rien n'a été importé : le responsable de la pharmacie peut le retrouver dans les anomalies, puis refaire l'import avec un fichier corrigé.",
   LOT_INTROUVABLE:
     "Le lot de cette opération n'existe plus. L'opération a été mise de côté pour le responsable de la pharmacie.",
   LOT_REQUIS:
@@ -116,6 +117,8 @@ export const MESSAGES_REJET: Record<CodeRejet | CodeARenvoyer, string> = {
     "Cette anomalie a déjà été traitée par quelqu'un d'autre.",
   FICHE_MODIFIEE:
     'Cette fiche produit a été modifiée ailleurs entre-temps. Le changement a été mis de côté pour le responsable de la pharmacie.',
+  MEDICAMENT_INCONNU:
+    "Le médicament ajouté au stock sur le poste n'existe pas dans le catalogue. L'opération a été mise de côté pour le responsable de la pharmacie.",
   PRIX_UNITE_SANS_DECONDITIONNEMENT:
     "Un prix à l'unité a été donné pour un produit qui ne se vend pas à l'unité. L'opération a été mise de côté pour le responsable.",
   CLIENT_CREDIT_INTROUVABLE:
@@ -163,6 +166,7 @@ const CODES_HTTP_GARDES: readonly CodeRejet[] = [
   'SESSION_FERMEE',
   'STOCK_INTROUVABLE',
   'ANOMALIE_INCONNUE',
+  'FICHIER_INVALIDE',
   ...CODES_METIER,
 ];
 
@@ -414,8 +418,46 @@ export function resumeEvenement(type: unknown, corps: unknown): Resume {
         stockId: texteLisible(c.stockId),
         variation: entierLisible(c.variation),
       };
+    case 'FOURNISSEUR_CREE':
+      return { fournisseurId: texteLisible(c.id) };
+    case 'RECEPTION_ENREGISTREE':
+      return {
+        receptionId: texteLisible(c.id),
+        nombreLignes: Array.isArray(c.lignes) ? c.lignes.length : null,
+      };
+    case 'INVENTAIRE_ENREGISTRE':
+      return {
+        inventaireId: texteLisible(c.id),
+        nombreLignes: Array.isArray(c.lignes) ? c.lignes.length : null,
+      };
+    // Import Excel mis de côté : jamais le contenu du fichier
+    case 'IMPORT_STOCK_FICHIER':
+      return {
+        importId: texteLisible(c.id),
+        mode: texteLisible(c.mode),
+        nomFichier: texteLisible(c.nomFichier),
+      };
+    case 'FICHE_MODIFIEE':
+      return { stockId: texteLisible(c.stockId) };
+    case 'FICHE_CREEE':
+      return {
+        stockId: texteLisible(c.id),
+        medicamentId: texteLisible(c.medicamentId),
+      };
     case 'ANOMALIE_TRAITEE':
       return { anomalieId: texteLisible(c.anomalieId) };
+    // Cahier de crédit : jamais de nom, de téléphone ni de note du client.
+    case 'CLIENT_CREDIT_CREE':
+    case 'CLIENT_CREDIT_MODIFIE':
+      return { clientId: texteLisible(c.id) };
+    case 'REMBOURSEMENT_CREDIT':
+      return {
+        remboursementId: texteLisible(c.id),
+        clientId: texteLisible(c.clientId),
+        montant: entierLisible(c.montant),
+      };
+    case 'DATE_LIMITE_MODIFIEE':
+      return { venteId: texteLisible(c.venteId) };
     default:
       return {};
   }

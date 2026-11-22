@@ -14,6 +14,7 @@ import { assurerPointDeVente } from '../point-de-vente';
 import { jourConakry } from '../jour-metier';
 import {
   ciblerLot,
+  type CibleLot,
   lotsEnStockFefo,
   normaliserNumeroLot,
   planifierInventaireFiche,
@@ -98,6 +99,8 @@ export interface LigneInventaireAEnregistrer {
   quantiteComptee: number | null;
   nombreBoites: number | null;
   unitesEnPlus: number | null;
+  /** Rejeu d'un poste : identifiant du lot créé sur le poste (nouveau lot), gardé par le serveur. */
+  nouveauLotId?: string;
 }
 export interface InventaireAEnregistrer {
   id?: string;
@@ -318,16 +321,29 @@ export class InventairesService {
       }
       const lots = lotsParFiche.get(l.stockId) ?? [];
       const nul = quantiteNulle(l);
-      const cible = ciblerLot(
-        {
-          lotId: l.lotId,
-          numeroLot: l.numeroLot?.trim() ? l.numeroLot.trim() : null,
-          dateExpiration: l.dateExpiration,
-          sansPeremption: l.sansPeremption,
-          quantiteNulle: nul,
-        },
-        lots,
-      );
+      const cible: CibleLot =
+        l.nouveauLotId && l.lotId === null
+          ? lots.some((x) => x.id === l.nouveauLotId)
+            ? { type: 'LOT', lotId: l.nouveauLotId }
+            : nul
+              ? { type: 'REFUS', code: 'LOT_INCONNU_VIDE' }
+              : l.dateExpiration === null && !l.sansPeremption
+                ? { type: 'REFUS', code: 'DATE_PEREMPTION_REQUISE' }
+                : {
+                    type: 'NOUVEAU',
+                    numeroLot: l.numeroLot?.trim() ? l.numeroLot.trim() : null,
+                    dateExpiration: l.dateExpiration,
+                  }
+          : ciblerLot(
+              {
+                lotId: l.lotId,
+                numeroLot: l.numeroLot?.trim() ? l.numeroLot.trim() : null,
+                dateExpiration: l.dateExpiration,
+                sansPeremption: l.sansPeremption,
+                quantiteNulle: nul,
+              },
+              lots,
+            );
       if (cible.type === 'REFUS') {
         refus.push({
           index,
@@ -657,6 +673,9 @@ export class InventairesService {
             pieceOrigineId: inventaireId,
             motif: null,
             evenementId,
+            ...(entree.lignes[l.index].nouveauLotId
+              ? { lotId: entree.lignes[l.index].nouveauLotId }
+              : {}),
             dateReception: new Date(evaluation.dateReceptionNouveaux),
             typeMouvement: 'INVENTAIRE',
           });

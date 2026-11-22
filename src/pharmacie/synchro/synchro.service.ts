@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  BadRequestException,
   ConflictException,
   HttpException,
   Injectable,
@@ -10,7 +11,10 @@ import type { Prisma } from 'generated/prisma/client';
 import { isISO8601 } from 'class-validator';
 import { PrismaService } from 'src/common/services/prisma.service';
 import { PermissionsService } from 'src/common/rbac/permissions.service';
-import { AccesPharmacieService } from '../acces-pharmacie.service';
+import {
+  AccesPharmacieService,
+  type AccesPharmacie,
+} from '../acces-pharmacie.service';
 import {
   estJourCloture,
   jourDeRattachement,
@@ -25,6 +29,7 @@ import {
 } from '../caisse/sessions-caisse.service';
 import { CODE_ESPECES } from '../domaine/caisse';
 import { reliquatLot } from '../domaine/quantites';
+import { jourValide } from '../domaine/reception';
 import { estPerime } from '../domaine/selection-lots';
 import { ecrirePieceVente } from '../ecriture-vente';
 import { jourConakry, jourLisible } from '../jour-metier';
@@ -35,6 +40,14 @@ import {
   lireLotsCandidats,
 } from '../stock/lecture-stock';
 import { MouvementsStockService } from '../stock/mouvements-stock.service';
+import {
+  InventairesService,
+  type InventaireEcrit,
+} from '../inventaires/inventaires.service';
+import {
+  entreeDepuisDto,
+  ReceptionsService,
+} from '../receptions/receptions.service';
 import {
   allouerLignes,
   formaterNumeroTicket,
@@ -48,8 +61,19 @@ import {
   CorpsSessionOuverteDto,
   CorpsVenteDto,
   CorpsSortieStockDto,
+  CorpsFournisseurCreeDto,
+  CorpsReceptionEnregistreeDto,
+  CorpsInventaireEnregistreDto,
+  CorpsImportStockFichierDto,
+  TAILLE_MAX_FICHIER_DIFFERE,
   CorpsAnomalieTraiteeDto,
   CorpsCorrectionQuantiteDto,
+  CorpsFicheCreeeDto,
+  CorpsFicheModifieeDto,
+  CorpsClientCreditCreeDto,
+  CorpsClientCreditModifieDto,
+  CorpsRemboursementCreditDto,
+  CorpsDateLimiteModifieeDto,
   TYPES_EVENEMENT,
   type RecevoirEvenementsDto,
 } from '../dto/synchro.dto';
@@ -85,7 +109,18 @@ import {
   motifDeSortieOuRefus,
 } from '../stock/operations-stock';
 import { validerCorps } from './valider-corps';
-import { CODE_CREDIT } from '../credit/credit-regles';
+import {
+  appliquerFicheCreee,
+  appliquerFicheModifiee,
+  corpsAvecFichesDuServeur,
+  LIBELLES_CHAMP_FICHE,
+  type ResultatFicheModifiee,
+} from './fiches-rejeu';
+import { CODE_CREDIT, estVenteACredit } from '../credit/credit-regles';
+import { lireEtatsCredit } from '../credit/credit.service';
+import { PERMISSIONS } from '../../common/rbac/permissions.constants';
+import { PharmacieService } from '../pharmacie.service';
+import type { FichierImport } from '../dto/pharmacie.dto';
 
 const OPTIONS_TRANSACTION = { maxWait: 5_000, timeout: 15_000 };
 const DELAI_SAUT_MS = 24 * 60 * 60 * 1000;
@@ -99,6 +134,7 @@ export interface ResultatEvenement {
   champs?: string[];
   differe?: true;
   horsOrdre?: true;
+  importe?: ResultatImportSynchro;
   anomalies?: { type: string; id: string }[];
   piece?: {
     type:
@@ -109,7 +145,15 @@ export interface ResultatEvenement {
       | 'REGULARISATION'
       | 'SORTIE_STOCK'
       | 'CORRECTION_QUANTITE'
-      | 'ANOMALIE';
+      | 'FOURNISSEUR'
+      | 'INVENTAIRE'
+      | 'IMPORT_STOCK'
+      | 'RECEPTION'
+      | 'FICHE'
+      | 'ANOMALIE'
+      | 'CLIENT_CREDIT'
+      | 'REMBOURSEMENT_CREDIT'
+      | 'ECHEANCE_CREDIT';
     id: string;
     numero?: string;
   };
@@ -162,8 +206,25 @@ interface EchecImprevu {
   nombre: number;
 }
 
+/** Résultat d'un import Excel mis de côté hors ligne : lignes et raisons, jamais un coût. */
+export type ResultatImportSynchro = {
+  mode: 'livraison' | 'inventaire';
+  nomFichier: string;
+  totalLignes: number;
+  importees: number;
+  rejetees: number;
+  receptionId: string | null;
+  inventaireId: string | null;
+  lignesRejetees: { ligne: number; nom: string; raison: string }[];
+};
+
+/** Nombre maximal de lignes rejetées gardées dans le résultat (poids de la photographie). */
+export const LIGNES_REJETEES_IMPORT_MAX = 50;
+
 interface ResultatApplication {
   code?: string;
+  /** Import Excel mis de côté : lignes importées et rejetées. */
+  importe?: ResultatImportSynchro;
   /** Opération déjà faite : le statut rendu est DEJA_APPLIQUE (l'événement est stocké APPLIQUE). */
   dejaApplique?: true;
   piece?: ResultatEvenement['piece'];
@@ -211,6 +272,12 @@ export class SynchroService {
     private readonly sessionsCaisse: SessionsCaisseService,
     // Droits au rejeu des types d'événements qui exigent une permission ; sans service, ces types sont refusés.
     @Optional() private readonly permissions?: PermissionsService,
+    // Sert au rejeu des fournisseurs et des réceptions faits hors ligne ; sans service, ces types sont rejetés.
+    @Optional() private readonly receptions?: ReceptionsService,
+    // Sert au rejeu des inventaires faits hors ligne ; sans service, ce type est rejeté.
+    @Optional() private readonly inventaires?: InventairesService,
+    // Sert au rejeu des imports Excel mis de côté hors ligne ; sans service, ce type est rejeté.
+    @Optional() private readonly pharmacie?: PharmacieService,
   ) {}
 
   // ------------------------------------------------------------------ route
@@ -738,7 +805,12 @@ export class SynchroService {
       | 'PRODUIT_ARCHIVE'
       | 'CONDITIONNEMENT_CONCURRENT'
       | 'PLAGE_EPUISEE'
-      | 'STOCK_NEGATIF',
+      | 'STOCK_NEGATIF'
+      | 'RECEPTION_COEFFICIENT_DIFFERENT'
+      | 'FICHE_MODIFIEE_ENTRETEMPS'
+      | 'THEORIQUE_DIVERGENT'
+      | 'CREDIT_TROP_PERCU'
+      | 'IMPORT_DIFFERE_PARTIEL',
     pieceType: string,
     pieceId: string,
     details: Prisma.InputJsonObject,
@@ -810,6 +882,16 @@ export class SynchroService {
       throw new RejetSynchro('PERMISSION_INSUFFISANTE');
     }
     const borne = horodatageBorne(local, new Date());
+    // Une fiche créée sur le poste sous un autre identifiant que celle du serveur y est retrouvée par son alias.
+    e = {
+      ...e,
+      corps: await corpsAvecFichesDuServeur(
+        tx,
+        ctx.structure.id,
+        type,
+        e.corps,
+      ),
+    };
 
     switch (type) {
       case 'VENTE': {
@@ -835,6 +917,39 @@ export class SynchroService {
         );
         return this.appliquerCorrection(tx, ctx, e, corps, utilisateur, local);
       }
+      case 'FOURNISSEUR_CREE': {
+        const corps = await this.corpsValide(CorpsFournisseurCreeDto, e.corps);
+        return this.appliquerFournisseur(tx, ctx, corps, utilisateur);
+      }
+      case 'RECEPTION_ENREGISTREE': {
+        const corps = await this.corpsValide(
+          CorpsReceptionEnregistreeDto,
+          e.corps,
+        );
+        return this.appliquerReception(tx, ctx, corps, utilisateur, local);
+      }
+      case 'INVENTAIRE_ENREGISTRE': {
+        const corps = await this.corpsValide(
+          CorpsInventaireEnregistreDto,
+          e.corps,
+        );
+        return this.appliquerInventaire(tx, ctx, corps, utilisateur, local);
+      }
+      case 'IMPORT_STOCK_FICHIER': {
+        const corps = await this.corpsValide(
+          CorpsImportStockFichierDto,
+          e.corps,
+        );
+        return this.appliquerImportStock(tx, ctx, corps, utilisateur, local);
+      }
+      case 'FICHE_MODIFIEE': {
+        const corps = await this.corpsValide(CorpsFicheModifieeDto, e.corps);
+        return this.appliquerFicheModifiee(tx, ctx, corps, utilisateur, local);
+      }
+      case 'FICHE_CREEE': {
+        const corps = await this.corpsValide(CorpsFicheCreeeDto, e.corps);
+        return this.appliquerFicheCreee(tx, ctx, corps, utilisateur);
+      }
       case 'ANOMALIE_TRAITEE': {
         const corps = await this.corpsValide(CorpsAnomalieTraiteeDto, e.corps);
         return this.appliquerAnomalieTraitee(
@@ -844,6 +959,38 @@ export class SynchroService {
           utilisateur,
           local,
         );
+      }
+      case 'CLIENT_CREDIT_CREE': {
+        const corps = await this.corpsValide(CorpsClientCreditCreeDto, e.corps);
+        return this.appliquerClientCreditCree(tx, ctx, corps, utilisateur);
+      }
+      case 'CLIENT_CREDIT_MODIFIE': {
+        const corps = await this.corpsValide(
+          CorpsClientCreditModifieDto,
+          e.corps,
+        );
+        return this.appliquerClientCreditModifie(tx, ctx, corps, utilisateur);
+      }
+      case 'REMBOURSEMENT_CREDIT': {
+        const corps = await this.corpsValide(
+          CorpsRemboursementCreditDto,
+          e.corps,
+        );
+        return this.appliquerRemboursementCredit(
+          tx,
+          ctx,
+          corps,
+          utilisateur,
+          local,
+          borne,
+        );
+      }
+      case 'DATE_LIMITE_MODIFIEE': {
+        const corps = await this.corpsValide(
+          CorpsDateLimiteModifieeDto,
+          e.corps,
+        );
+        return this.appliquerDateLimite(tx, ctx, corps, utilisateur);
       }
       case 'SESSION_OUVERTE': {
         const corps = await this.corpsValide(CorpsSessionOuverteDto, e.corps);
@@ -1037,6 +1184,454 @@ export class SynchroService {
     return { piece, ...(anomalies.length > 0 ? { anomalies } : {}) };
   }
 
+  // ------------------------------------------------- réception hors ligne (fournisseur, réception)
+
+  private serviceReceptions(): ReceptionsService {
+    // Sans service de réception, l'événement est rejeté proprement (type non pris en charge par ce serveur).
+    if (!this.receptions) throw new RejetSynchro('EVENEMENT_INVALIDE');
+    return this.receptions;
+  }
+
+  private async appliquerFournisseur(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    corps: CorpsFournisseurCreeDto,
+    utilisateur: UtilisateurCharge,
+  ): Promise<ResultatApplication> {
+    const f = await this.serviceReceptions().creerFournisseurRejeu(
+      tx,
+      ctx.structure.id,
+      utilisateur.id,
+      corps,
+      { ip: ctx.ip ?? null, posteId: ctx.poste.id },
+    );
+    // L'identifiant retenu par le serveur est rendu dans la pièce : égal à celui du poste, sauf nom déjà pris.
+    return {
+      piece: { type: 'FOURNISSEUR', id: f.id },
+      ...(f.cree
+        ? {}
+        : {
+            code: f.reutilise
+              ? 'FOURNISSEUR_EXISTANT_REUTILISE'
+              : 'FOURNISSEUR_DEJA_ENREGISTRE',
+          }),
+      ...(f.cree || f.reutilise ? {} : { dejaApplique: true as const }),
+    };
+  }
+
+  private async appliquerReception(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    corps: CorpsReceptionEnregistreeDto,
+    utilisateur: UtilisateurCharge,
+    local: Date,
+  ): Promise<ResultatApplication> {
+    const service = this.serviceReceptions();
+    const piece = { type: 'RECEPTION' as const, id: corps.id };
+    if (corps.dateFacture && !jourValide(corps.dateFacture)) {
+      throw new RejetSynchro('EVENEMENT_INVALIDE', { champs: ['dateFacture'] });
+    }
+    const idsLots = corps.lignes.map((l) => l.lotId);
+    if (new Set(idsLots).size !== idsLots.length) {
+      throw new RejetSynchro('LOT_EN_DOUBLE');
+    }
+    // Un fournisseur du poste devenu inconnu ne bloque pas la réception : la marchandise est là.
+    let fournisseurId: string | null = null;
+    let fournisseurPerdu = false;
+    if (corps.fournisseurId) {
+      fournisseurId = await service.fournisseurDuPoste(
+        tx,
+        ctx.structure.id,
+        corps.fournisseurId,
+      );
+      fournisseurPerdu = fournisseurId === null;
+    }
+    const entree = entreeDepuisDto(corps);
+    entree.fournisseurId = fournisseurId;
+    entree.recueLe = corps.recueLe ? new Date(corps.recueLe) : local;
+    entree.rejeu = {
+      posteId: ctx.poste.id,
+      horodatageLocal: local,
+      lotIds: corps.lignes.map((l) => l.lotId),
+      coefficientsLocaux: corps.lignes.map((l) => l.coefficientLocal),
+    };
+    const acces = {
+      structure: ctx.structure,
+      user: utilisateur,
+    } as unknown as AccesPharmacie;
+    const ecrite = await service.enregistrerDansTransaction(
+      tx,
+      acces,
+      entree,
+      ctx.ip ?? null,
+    );
+    if (!ecrite.cree) return { piece, code: 'RECEPTION_DEJA_ENREGISTREE' };
+    const anomalies: { type: string; id: string }[] = [];
+    const auteur = `${utilisateur.prenom} ${utilisateur.nom}`.trim();
+    for (const ecart of ecrite.ecartsCoefficient ?? []) {
+      anomalies.push(
+        await this.creerAnomalie(
+          tx,
+          ctx,
+          'RECEPTION_COEFFICIENT_DIFFERENT',
+          'RECEPTION',
+          corps.id,
+          {
+            stockId: ecart.stockId,
+            nom: ecart.nom,
+            coefficientLocal: ecart.coefficientLocal,
+            coefficientServeur: ecart.coefficientServeur,
+            quantiteUm: ecart.quantiteUm,
+            posteCode: ctx.poste.code,
+            utilisateurId: utilisateur.id,
+            utilisateurNom: auteur,
+            jourMetier: jourConakry(local),
+            message: `${ecart.nom} : la réception faite hors ligne (poste ${ctx.poste.code}, ${auteur}) comptait ${ecart.coefficientLocal} unité(s) par boîte, la fiche en compte maintenant ${ecart.coefficientServeur}. Les ${ecart.quantiteUm} unité(s) reçues ont été ajoutées au stock telles que le poste les a comptées : vérifiez la fiche et, au besoin, faites un inventaire de ce médicament.`,
+          },
+        ),
+      );
+    }
+    return {
+      piece,
+      ...(fournisseurPerdu ? { code: 'FOURNISSEUR_INCONNU_IGNORE' } : {}),
+      ...(anomalies.length > 0 ? { anomalies } : {}),
+    };
+  }
+
+  // ------------------------------------------------- inventaire hors ligne
+
+  private async appliquerInventaire(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    corps: CorpsInventaireEnregistreDto,
+    utilisateur: UtilisateurCharge,
+    local: Date,
+  ): Promise<ResultatApplication> {
+    // Sans service d'inventaire, l'événement est rejeté proprement (type non pris en charge par ce serveur).
+    if (!this.inventaires) throw new RejetSynchro('EVENEMENT_INVALIDE');
+    const piece = { type: 'INVENTAIRE' as const, id: corps.id };
+    const lignes = corps.lignes.map((l) => {
+      if (
+        l.nouveauLot?.dateExpiration &&
+        !jourValide(l.nouveauLot.dateExpiration)
+      ) {
+        throw new RejetSynchro('EVENEMENT_INVALIDE', {
+          champs: ['dateExpiration'],
+        });
+      }
+      if ((l.lotId === undefined) === (l.nouveauLot === undefined)) {
+        throw new RejetSynchro('EVENEMENT_INVALIDE', { champs: ['lotId'] });
+      }
+      return {
+        stockId: l.stockId,
+        lotId: l.lotId ?? null,
+        numeroLot: l.nouveauLot?.numeroLot?.trim()
+          ? l.nouveauLot.numeroLot.trim()
+          : null,
+        dateExpiration: l.nouveauLot?.dateExpiration ?? null,
+        sansPeremption: l.nouveauLot?.sansPeremption ?? false,
+        quantiteComptee: l.quantiteComptee,
+        nombreBoites: null,
+        unitesEnPlus: null,
+        ...(l.nouveauLot ? { nouveauLotId: l.nouveauLot.id } : {}),
+      };
+    });
+    const acces = {
+      structure: ctx.structure,
+      user: utilisateur,
+    } as unknown as AccesPharmacie;
+    // Le comptage fait foi : écart contre le théorique du serveur, jamais de refus parce qu'un lot a bougé (Q5).
+    const ecrit: InventaireEcrit =
+      await this.inventaires.enregistrerDansTransaction(
+        tx,
+        acces,
+        {
+          id: corps.id,
+          commentaire: corps.commentaire?.trim()
+            ? corps.commentaire.trim()
+            : null,
+          lignes,
+        },
+        ctx.ip ?? null,
+        { rejeterLignes: true },
+      );
+    if (ecrit.refusees.length > 0) {
+      // Rien n'est gardé (la transaction est annulée) : le poste est informé du premier motif.
+      const code = ecrit.refusees[0].code;
+      throw new RejetSynchro(
+        code === 'LOT_INCONNU_VIDE' ? 'EVENEMENT_INVALIDE' : code,
+      );
+    }
+    if (!ecrit.cree) return { piece, code: 'INVENTAIRE_DEJA_ENREGISTRE' };
+
+    const anomalies: { type: string; id: string }[] = ecrit.anomalies.map(
+      (a) => ({ type: 'ECART_INVENTAIRE', id: a.id }),
+    );
+    // Un autre mouvement a eu lieu depuis le comptage : le stock du lot est tout de même ce qui a été compté.
+    const divergents = ecrit.lignes
+      .map((l) => ({
+        ligne: l,
+        local: corps.lignes[l.index].theoriqueLocal,
+      }))
+      .filter((x) => Math.max(0, x.ligne.quantiteTheorique) !== x.local);
+    const auteur = `${utilisateur.prenom} ${utilisateur.nom}`.trim();
+    const parFiche = new Map<string, typeof divergents>();
+    for (const d of divergents) {
+      const liste = parFiche.get(d.ligne.stockId) ?? [];
+      liste.push(d);
+      parFiche.set(d.ligne.stockId, liste);
+    }
+    const noms = new Map(
+      (
+        await tx.stockMedicament.findMany({
+          where: { id: { in: [...parFiche.keys()] } },
+          select: { id: true, medicament: { select: { nom: true } } },
+        })
+      ).map((f) => [f.id, f.medicament.nom]),
+    );
+    for (const stockId of [...parFiche.keys()].sort()) {
+      const liste = parFiche.get(stockId) ?? [];
+      const nom = noms.get(stockId) ?? '';
+      anomalies.push(
+        await this.creerAnomalie(
+          tx,
+          ctx,
+          'THEORIQUE_DIVERGENT',
+          'INVENTAIRE',
+          corps.id,
+          {
+            stockId,
+            nom,
+            lignes: liste.map((d) => ({
+              lotId: d.ligne.lotId,
+              theoriquePoste: d.local,
+              theoriqueServeur: Math.max(0, d.ligne.quantiteTheorique),
+              quantiteComptee: d.ligne.quantiteComptee,
+            })),
+            posteCode: ctx.poste.code,
+            utilisateurId: utilisateur.id,
+            utilisateurNom: auteur,
+            jourMetier: jourConakry(local),
+            message: `${nom} : le stock de ce médicament a bougé ailleurs entre le comptage fait hors ligne (poste ${ctx.poste.code}, ${auteur}) et sa remontée. Le stock est maintenant exactement la quantité comptée : vérifiez qu'aucune vente ou sortie faite entre-temps n'est perdue.`,
+          },
+        ),
+      );
+    }
+    return { piece, ...(anomalies.length > 0 ? { anomalies } : {}) };
+  }
+
+  // ------------------------------------------------- import Excel mis de côté hors ligne
+
+  private async appliquerImportStock(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    corps: CorpsImportStockFichierDto,
+    utilisateur: UtilisateurCharge,
+    local: Date,
+  ): Promise<ResultatApplication> {
+    // Sans service de stock, l'événement est rejeté proprement (type non pris en charge par ce serveur).
+    if (!this.pharmacie) throw new RejetSynchro('EVENEMENT_INVALIDE');
+    const piece = { type: 'IMPORT_STOCK' as const, id: corps.id };
+
+    // Droit propre au mode, comme la route en ligne : reception:write (livraison) ou inventaire:write (inventaire)
+    const droitMode =
+      corps.mode === 'livraison'
+        ? PERMISSIONS.RECEPTION_WRITE
+        : PERMISSIONS.INVENTAIRE_WRITE;
+    if (
+      !permissionsSuffisantes(
+        [droitMode],
+        await ctx.chargerPermissions(utilisateur.id),
+      )
+    ) {
+      throw new RejetSynchro('PERMISSION_INSUFFISANTE');
+    }
+
+    // Idempotence par identifiant : la réception ou l'inventaire du même identifiant existe déjà
+    const dejaFait =
+      corps.mode === 'livraison'
+        ? await tx.reception.findUnique({
+            where: { id: corps.id },
+            select: { id: true },
+          })
+        : await tx.inventaire.findUnique({
+            where: { id: corps.id },
+            select: { id: true },
+          });
+    if (dejaFait) return { piece, code: 'IMPORT_DEJA_ENREGISTRE' };
+
+    // Le contenu doit être du base64 valide, dans la taille qui passe par la synchro
+    const contenu = corps.contenuBase64;
+    if (contenu.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(contenu)) {
+      throw new RejetSynchro('FICHIER_INVALIDE');
+    }
+    const buffer = Buffer.from(contenu, 'base64');
+    if (buffer.length === 0 || buffer.length > TAILLE_MAX_FICHIER_DIFFERE) {
+      throw new RejetSynchro('FICHIER_INVALIDE');
+    }
+    const fichier: FichierImport = {
+      buffer,
+      size: buffer.length,
+      mimetype:
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      originalname: /\.xlsx$/i.test(corps.nomFichier)
+        ? corps.nomFichier
+        : `${corps.nomFichier}.xlsx`,
+    };
+    const acces = {
+      structure: ctx.structure,
+      user: utilisateur,
+    } as unknown as AccesPharmacie;
+
+    // Même code que l'import en ligne : un fichier illisible ou hors modèle (400) est rejeté en bloc
+    let ecrit: Awaited<ReturnType<PharmacieService['importerStockRejeu']>>;
+    try {
+      ecrit = await this.pharmacie.importerStockRejeu(
+        tx,
+        acces,
+        fichier,
+        corps.mode,
+        corps.id,
+      );
+    } catch (erreur) {
+      if (erreur instanceof BadRequestException) {
+        throw new RejetSynchro('FICHIER_INVALIDE');
+      }
+      throw erreur;
+    }
+
+    const data = ecrit.data as {
+      totalLignes: number;
+      importees: number;
+      receptionId: string | null;
+      inventaireId: string | null;
+      lignes: { ligne: number; nom: string; statut: string; raison?: string }[];
+    };
+    const lignesRejetees = data.lignes
+      .filter((l) => l.statut === 'rejetee')
+      .map((l) => ({ ligne: l.ligne, nom: l.nom, raison: l.raison ?? '' }));
+    const importe: ResultatImportSynchro = {
+      mode: corps.mode,
+      nomFichier: corps.nomFichier.slice(0, 120),
+      totalLignes: data.totalLignes,
+      importees: data.importees,
+      rejetees: data.totalLignes - data.importees,
+      receptionId: data.receptionId,
+      inventaireId: data.inventaireId,
+      lignesRejetees: lignesRejetees.slice(0, LIGNES_REJETEES_IMPORT_MAX),
+    };
+    const resultat: ResultatApplication = { piece, importe };
+    if (importe.rejetees > 0) {
+      const auteur = `${utilisateur.prenom} ${utilisateur.nom}`.trim();
+      const anomalie = await this.creerAnomalie(
+        tx,
+        ctx,
+        'IMPORT_DIFFERE_PARTIEL',
+        'IMPORT_STOCK',
+        corps.id,
+        {
+          mode: corps.mode,
+          nomFichier: importe.nomFichier,
+          totalLignes: importe.totalLignes,
+          importees: importe.importees,
+          rejetees: importe.rejetees,
+          lignesRejetees: importe.lignesRejetees,
+          receptionId: importe.receptionId,
+          inventaireId: importe.inventaireId,
+          posteCode: ctx.poste.code,
+          utilisateurId: utilisateur.id,
+          utilisateurNom: auteur,
+          jourMetier: jourConakry(local),
+          message: `Le fichier « ${importe.nomFichier} » mis de côté hors ligne (poste ${ctx.poste.code}, ${auteur}) a été importé : ${importe.importees} ligne(s) importée(s) sur ${importe.totalLignes}, ${importe.rejetees} refusée(s). Corrigez les lignes refusées dans le fichier, puis importez-les de nouveau.`,
+        },
+      );
+      resultat.anomalies = [
+        { type: 'IMPORT_DIFFERE_PARTIEL', id: anomalie.id },
+      ];
+    }
+    return resultat;
+  }
+
+  // ------------------------------------------------- fiches hors ligne (modification, création)
+
+  private async appliquerFicheModifiee(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    corps: CorpsFicheModifieeDto,
+    utilisateur: UtilisateurCharge,
+    local: Date,
+  ): Promise<ResultatApplication> {
+    const resultat: ResultatFicheModifiee = await appliquerFicheModifiee(tx, {
+      structureId: ctx.structure.id,
+      auteurId: utilisateur.id,
+      posteId: ctx.poste.id,
+      ip: ctx.ip ?? null,
+      corps,
+    });
+    const piece = { type: 'FICHE' as const, id: corps.stockId };
+    if (resultat.conflits.length === 0) return { piece };
+    const auteur = `${utilisateur.prenom} ${utilisateur.nom}`.trim();
+    const montrer = (champ: string, v: string | number | null) =>
+      champ === 'notes'
+        ? ''
+        : v === null
+          ? ' (aucune valeur)'
+          : ` (${String(v)})`;
+    const phrases = resultat.conflits.map(
+      (c) =>
+        `${LIBELLES_CHAMP_FICHE[c.champ]}${montrer(c.champ, c.valeurServeur)} a été changé ailleurs entre-temps et n'a pas été modifié`,
+    );
+    const anomalie = await this.creerAnomalie(
+      tx,
+      ctx,
+      'FICHE_MODIFIEE_ENTRETEMPS',
+      'FICHE',
+      corps.stockId,
+      {
+        stockId: corps.stockId,
+        nom: resultat.nom,
+        champs: resultat.conflits.map((c) =>
+          c.champ === 'notes'
+            ? { champ: c.champ }
+            : {
+                champ: c.champ,
+                avantPoste: c.avantPoste,
+                valeurServeur: c.valeurServeur,
+                valeurVoulue: c.valeurVoulue,
+              },
+        ),
+        appliques: resultat.appliques,
+        posteCode: ctx.poste.code,
+        utilisateurId: utilisateur.id,
+        utilisateurNom: auteur,
+        jourMetier: jourConakry(local),
+        message: `${resultat.nom} : la fiche modifiée hors ligne (poste ${ctx.poste.code}, ${auteur}) a changé ailleurs entre-temps : ${phrases.join(' ; ')}. Vérifiez la fiche et refaites la modification si elle est toujours voulue.`,
+      },
+    );
+    return { piece, anomalies: [anomalie] };
+  }
+
+  private async appliquerFicheCreee(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    corps: CorpsFicheCreeeDto,
+    utilisateur: UtilisateurCharge,
+  ): Promise<ResultatApplication> {
+    const f = await appliquerFicheCreee(tx, {
+      structureId: ctx.structure.id,
+      auteurId: utilisateur.id,
+      posteId: ctx.poste.id,
+      ip: ctx.ip ?? null,
+      corps,
+    });
+    // L'identifiant retenu est rendu dans la pièce : celui du poste, sauf fiche déjà existante (alias).
+    return {
+      piece: { type: 'FICHE', id: f.id },
+      ...(f.reutilisee ? { code: 'FICHE_EXISTANTE_REUTILISEE' } : {}),
+      ...(f.dejaApplique ? { dejaApplique: true as const } : {}),
+    };
+  }
+
   private async appliquerAnomalieTraitee(
     tx: Tx,
     ctx: ContexteRejeu,
@@ -1151,10 +1746,8 @@ export class SynchroService {
     });
     if (existante) throw new RejetSynchro('IDENTIFIANT_DEJA_UTILISE');
 
-    // Le crédit demande une connexion (client, reste à payer) : pas de vente à crédit rejouée depuis un poste.
-    if (corps.paiements.some((p) => p.mode === CODE_CREDIT)) {
-      throw new RejetSynchro('CREDIT_HORS_LIGNE', { champs: ['paiements'] });
-    }
+    // Vente à crédit : client du cahier (existant ou créé par le poste), date limite, droit credit:write.
+    const credit = await this.preparerCreditRejeu(tx, ctx, corps, utilisateur);
 
     const coherence = verifierCoherenceVente(corps);
     if (!coherence.ok) {
@@ -1297,8 +1890,9 @@ export class SynchroService {
       jourMetier,
       jourMetierOrigine,
       vendeur: { id: utilisateur.id, nom: nomVendeur },
-      clientNom: corps.clientNom || null,
-      clientTelephone: corps.clientTelephone || null,
+      clientNom: corps.clientNom || credit?.nomComplet || null,
+      clientTelephone: corps.clientTelephone || credit?.telephone || null,
+      clientCreditId: credit?.clientCreditId ?? null,
       ordonnanceVerifiee: corps.ordonnanceVerifiee,
       telephonePrescripteur: corps.telephonePrescripteur ?? null,
       total: corps.total,
@@ -1325,6 +1919,16 @@ export class SynchroService {
       evenementIdMouvement: (i, lotId) =>
         `synchro:${e.evenementId}:${i}:${lotId ?? 'provisoire'}`,
     });
+
+    // Date limite de la prise à crédit (la vente est immuable : la date vit à part).
+    if (credit?.dateLimite) {
+      await tx.echeanceCredit.create({
+        data: {
+          venteId: corps.venteId,
+          dateLimite: jourVersDate(credit.dateLimite),
+        },
+      });
+    }
 
     // Anomalies d'application, au titulaire : la vente est toujours appliquée (D653).
     const anomalies: { type: string; id: string }[] = [...ecrit.anomalies];
@@ -1523,6 +2127,13 @@ export class SynchroService {
           origine: 'synchro',
           posteCode,
           sequence: e.sequence,
+          ...(credit
+            ? {
+                credit: true,
+                clientCreditId: credit.clientCreditId,
+                dateLimite: credit.dateLimite,
+              }
+            : {}),
         },
       },
     });
@@ -1534,6 +2145,509 @@ export class SynchroService {
       },
       anomalies,
     };
+  }
+
+  // ------------------------------------------------------ cahier de crédit hors ligne
+
+  /**
+   * Vente à crédit rejouée : droit `credit:write` en plus, un seul paiement CREDIT du total, client existant
+   * de la pharmacie ou créé par le poste (sous son identifiant). Null si la vente n'est pas à crédit.
+   * Rien n'est refusé sur le fond (date limite passée, reste déjà élevé) : la vente est déjà faite.
+   */
+  private async preparerCreditRejeu(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    corps: CorpsVenteDto,
+    utilisateur: UtilisateurCharge,
+  ): Promise<{
+    clientCreditId: string;
+    nomComplet: string;
+    telephone: string | null;
+    dateLimite: string | null;
+  } | null> {
+    if (!estVenteACredit(corps)) {
+      if (corps.dateLimiteCredit !== undefined) {
+        throw new RejetSynchro('EVENEMENT_INVALIDE', {
+          champs: ['dateLimiteCredit'],
+        });
+      }
+      return null;
+    }
+    if (
+      !permissionsSuffisantes(
+        [PERMISSIONS.CREDIT_WRITE],
+        await ctx.chargerPermissions(utilisateur.id),
+      )
+    ) {
+      throw new RejetSynchro('PERMISSION_INSUFFISANTE');
+    }
+    const champs: string[] = [];
+    if (
+      !(
+        corps.paiements.length === 1 &&
+        corps.paiements[0].mode === CODE_CREDIT &&
+        corps.paiements[0].montant === corps.total
+      )
+    ) {
+      champs.push('paiements');
+    }
+    if (corps.clientCreditId && corps.nouveauClientCredit) {
+      champs.push('nouveauClientCredit');
+    }
+    if (!corps.clientCreditId && !corps.nouveauClientCredit) {
+      champs.push('clientCreditId');
+    }
+    if (corps.dateLimiteCredit !== undefined) {
+      const date = new Date(`${corps.dateLimiteCredit}T00:00:00.000Z`);
+      if (
+        Number.isNaN(date.getTime()) ||
+        jourConakry(date) !== corps.dateLimiteCredit
+      ) {
+        champs.push('dateLimiteCredit');
+      }
+    }
+    if (champs.length > 0) {
+      throw new RejetSynchro('EVENEMENT_INVALIDE', { champs });
+    }
+    const structureId = ctx.structure.id;
+    const dateLimite = corps.dateLimiteCredit ?? null;
+    if (corps.clientCreditId) {
+      const client = await tx.clientCredit.findFirst({
+        where: { id: corps.clientCreditId, structureId },
+        select: { id: true, nomComplet: true, telephone: true },
+      });
+      if (!client) throw new RejetSynchro('CLIENT_CREDIT_INTROUVABLE');
+      return {
+        clientCreditId: client.id,
+        nomComplet: client.nomComplet,
+        telephone: client.telephone,
+        dateLimite,
+      };
+    }
+    const nouveau = corps.nouveauClientCredit as NonNullable<
+      CorpsVenteDto['nouveauClientCredit']
+    >;
+    if (nouveau.id) {
+      const deja = await tx.clientCredit.findUnique({
+        where: { id: nouveau.id },
+        select: {
+          id: true,
+          structureId: true,
+          nomComplet: true,
+          telephone: true,
+        },
+      });
+      if (deja) {
+        if (deja.structureId !== structureId) {
+          throw new RejetSynchro('IDENTIFIANT_DEJA_UTILISE');
+        }
+        return {
+          clientCreditId: deja.id,
+          nomComplet: deja.nomComplet,
+          telephone: deja.telephone,
+          dateLimite,
+        };
+      }
+    }
+    const cree = await tx.clientCredit.create({
+      data: {
+        ...(nouveau.id ? { id: nouveau.id } : {}),
+        structureId,
+        nomComplet: nouveau.nomComplet,
+        telephone: nouveau.telephone ?? null,
+        auteurId: utilisateur.id,
+      },
+      select: { id: true, nomComplet: true, telephone: true },
+    });
+    // Jamais le nom ni le téléphone dans le journal.
+    await tx.auditLog.create({
+      data: {
+        userId: utilisateur.id,
+        action: 'create',
+        entityType: 'ClientCredit',
+        entityId: cree.id,
+        ip: ctx.ip ?? null,
+        metadata: { structureId, origine: 'synchro', posteId: ctx.poste.id },
+      },
+    });
+    return {
+      clientCreditId: cree.id,
+      nomComplet: cree.nomComplet,
+      telephone: cree.telephone,
+      dateLimite,
+    };
+  }
+
+  /** Client du cahier créé sur le poste : l'identifiant du poste est gardé, un rejeu ne crée rien de plus. */
+  private async appliquerClientCreditCree(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    corps: CorpsClientCreditCreeDto,
+    utilisateur: UtilisateurCharge,
+  ): Promise<ResultatApplication> {
+    const structureId = ctx.structure.id;
+    const piece = { type: 'CLIENT_CREDIT' as const, id: corps.id };
+    const existant = await tx.clientCredit.findUnique({
+      where: { id: corps.id },
+      select: { structureId: true },
+    });
+    if (existant) {
+      if (existant.structureId !== structureId) {
+        throw new RejetSynchro('IDENTIFIANT_DEJA_UTILISE');
+      }
+      return { piece, dejaApplique: true };
+    }
+    await tx.clientCredit.create({
+      data: {
+        id: corps.id,
+        structureId,
+        nomComplet: corps.nomComplet,
+        telephone: corps.telephone ?? null,
+        note: corps.note ?? null,
+        auteurId: utilisateur.id,
+      },
+    });
+    // Jamais le nom, le téléphone ni la note dans le journal.
+    await tx.auditLog.create({
+      data: {
+        userId: utilisateur.id,
+        action: 'create',
+        entityType: 'ClientCredit',
+        entityId: corps.id,
+        ip: ctx.ip ?? null,
+        metadata: { structureId, origine: 'synchro', posteId: ctx.poste.id },
+      },
+    });
+    return { piece };
+  }
+
+  /** Client du cahier modifié sur le poste : dernier écrit gagné, champ par champ ; rien ne change = déjà appliqué. */
+  private async appliquerClientCreditModifie(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    corps: CorpsClientCreditModifieDto,
+    utilisateur: UtilisateurCharge,
+  ): Promise<ResultatApplication> {
+    const structureId = ctx.structure.id;
+    const piece = { type: 'CLIENT_CREDIT' as const, id: corps.id };
+    const avant = await tx.clientCredit.findFirst({
+      where: { id: corps.id, structureId },
+    });
+    if (!avant) throw new RejetSynchro('CLIENT_CREDIT_INTROUVABLE');
+    const data: Prisma.ClientCreditUpdateInput = {};
+    const champs: string[] = [];
+    const { nomComplet, telephone, note } = corps.champs;
+    if (nomComplet !== undefined && nomComplet !== avant.nomComplet) {
+      data.nomComplet = nomComplet;
+      champs.push('nomComplet');
+    }
+    if (telephone !== undefined && telephone !== avant.telephone) {
+      data.telephone = telephone;
+      champs.push('telephone');
+    }
+    if (note !== undefined && note !== avant.note) {
+      data.note = note;
+      champs.push('note');
+    }
+    if (champs.length === 0) return { piece, dejaApplique: true };
+    await tx.clientCredit.update({ where: { id: avant.id }, data });
+    // Les champs modifiés, jamais leurs valeurs.
+    await tx.auditLog.create({
+      data: {
+        userId: utilisateur.id,
+        action: 'update',
+        entityType: 'ClientCredit',
+        entityId: avant.id,
+        ip: ctx.ip ?? null,
+        metadata: {
+          structureId,
+          champs,
+          origine: 'synchro',
+          posteId: ctx.poste.id,
+        },
+      },
+    });
+    return { piece };
+  }
+
+  /**
+   * Remboursement de crédit encaissé sur le poste. Jamais refusé pour son montant : l'argent est déjà dans
+   * le tiroir (Q3). S'il dépasse le reste au rejeu (deux postes ont encaissé, ou une prise a été annulée),
+   * il est gardé en entier et l'anomalie CREDIT_TROP_PERCU le signale au titulaire ; le reste ne descend
+   * jamais sous 0 et le crédit est SOLDE. La route web, elle, garde son refus MONTANT_SUPERIEUR_AU_RESTE.
+   * Même ordre de verrous que la route : journées, poste, client, puis caisse.
+   */
+  private async appliquerRemboursementCredit(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    corps: CorpsRemboursementCreditDto,
+    utilisateur: UtilisateurCharge,
+    local: Date,
+    borne: Date,
+  ): Promise<ResultatApplication> {
+    const structureId = ctx.structure.id;
+    const piece = { type: 'REMBOURSEMENT_CREDIT' as const, id: corps.id };
+    if (corps.verseEnCaisse && !corps.sessionId) {
+      throw new RejetSynchro('EVENEMENT_INVALIDE', { champs: ['sessionId'] });
+    }
+    await tx.$queryRaw`SELECT "id" FROM "ClientCredit" WHERE "id" = ${corps.clientId} AND "structureId" = ${structureId} FOR UPDATE`;
+    const client = await tx.clientCredit.findFirst({
+      where: { id: corps.clientId, structureId },
+      select: { id: true, nomComplet: true },
+    });
+    if (!client) throw new RejetSynchro('CLIENT_CREDIT_INTROUVABLE');
+    const existant = await tx.remboursementCredit.findUnique({
+      where: { id: corps.id },
+      select: { clientCreditId: true },
+    });
+    if (existant) {
+      if (existant.clientCreditId !== client.id) {
+        throw new RejetSynchro('IDENTIFIANT_DEJA_UTILISE');
+      }
+      return { piece, dejaApplique: true };
+    }
+
+    const avant = (await lireEtatsCredit(tx, structureId, [client.id])).get(
+      client.id,
+    );
+    const resteAvant = avant?.etat.resteAPayer ?? 0;
+    const tropPercu = Math.max(0, corps.montant - resteAvant);
+
+    // Argent versé dans la caisse du poste : la caisse de l'événement, jamais « la caisse ouverte de l'auteur ».
+    let mouvementCaisseId: string | null = null;
+    let horsCaisse: {
+      raison: 'CAISSE_FERMEE' | 'JOURNEE_CLOTUREE' | 'CAISSE_INCONNUE';
+      sessionId: string;
+      jourOrigine: string | null;
+      responsableId: string | null;
+      responsableNom: string | null;
+    } | null = null;
+    if (corps.verseEnCaisse && corps.sessionId) {
+      const brute = await tx.sessionCaisse.findUnique({
+        where: { id: corps.sessionId },
+        select: { id: true, posteId: true },
+      });
+      if (!brute || brute.posteId !== ctx.poste.id) {
+        horsCaisse = {
+          raison: 'CAISSE_INCONNUE',
+          sessionId: corps.sessionId,
+          jourOrigine: null,
+          responsableId: null,
+          responsableNom: null,
+        };
+      } else {
+        const s = await this.sessionsCaisse.verrouillerSession(tx, brute.id);
+        if (s.statut === 'OUVERTE') {
+          // Comme MOUVEMENT_CAISSE : une caisse ouverte reçoit l'argent même si son jour est clôturé.
+          const mode = await tx.modePaiement.findUnique({
+            where: { code: CODE_ESPECES },
+            select: { id: true },
+          });
+          if (!mode) {
+            throw new RejetSynchro('EVENEMENT_INVALIDE', { champs: ['mode'] });
+          }
+          await tx.mouvementCaisse.create({
+            data: {
+              id: corps.id,
+              sessionCaisseId: s.id,
+              pointDeVenteId: s.pointDeVenteId,
+              type: 'APPORT',
+              modePaiementId: mode.id,
+              montant: corps.montant,
+              motif: `Remboursement de crédit : ${client.nomComplet}`.slice(
+                0,
+                200,
+              ),
+              auteurId: utilisateur.id,
+              horodatageLocal: local,
+              evenementId: corps.id,
+            },
+          });
+          mouvementCaisseId = corps.id;
+        } else {
+          // Caisse déjà fermée : aucun mouvement n'est ajouté à une caisse fermée ou incluse dans une clôture
+          // (son bilan et l'export de sa journée ne bougent pas). Le remboursement est gardé, l'anomalie
+          // demande au responsable de la caisse de recompter son tiroir.
+          const jourCaisse = dateVersJour(s.jourMetier);
+          const clos = await estJourCloture(tx, s.pointDeVenteId, jourCaisse);
+          horsCaisse = {
+            raison: clos ? 'JOURNEE_CLOTUREE' : 'CAISSE_FERMEE',
+            sessionId: s.id,
+            jourOrigine: jourCaisse,
+            responsableId: s.utilisateurId,
+            responsableNom: s.utilisateurNom,
+          };
+        }
+      }
+    }
+
+    await tx.remboursementCredit.create({
+      data: {
+        id: corps.id,
+        clientCreditId: client.id,
+        montant: corps.montant,
+        note: corps.note ?? null,
+        verseEnCaisse: mouvementCaisseId !== null,
+        mouvementCaisseId,
+        auteurId: utilisateur.id,
+        createdAt: borne,
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: utilisateur.id,
+        action: 'create',
+        entityType: 'RemboursementCredit',
+        entityId: corps.id,
+        ip: ctx.ip ?? null,
+        metadata: {
+          structureId,
+          clientCreditId: client.id,
+          montant: corps.montant,
+          verseEnCaisse: mouvementCaisseId !== null,
+          mouvementCaisseId,
+          tropPercu,
+          origine: 'synchro',
+          posteId: ctx.poste.id,
+        },
+      },
+    });
+
+    const anomalies: { type: string; id: string }[] = [];
+    const nomVendeur = `${utilisateur.prenom} ${utilisateur.nom}`.trim();
+    if (tropPercu > 0) {
+      anomalies.push(
+        await this.creerAnomalie(
+          tx,
+          ctx,
+          'CREDIT_TROP_PERCU',
+          'RemboursementCredit',
+          corps.id,
+          {
+            // Jamais le nom ni le téléphone du client : l'identifiant suffit pour retrouver sa fiche.
+            clientCreditId: client.id,
+            montant: corps.montant,
+            resteAvant,
+            tropPercu,
+            posteCode: ctx.poste.code,
+            utilisateurId: utilisateur.id,
+            utilisateurNom: nomVendeur,
+            horodatageLocal: local.toISOString(),
+            message: `Un remboursement de crédit de ${formaterGnf(corps.montant)} GNF a été encaissé sur le poste ${ctx.poste.libelle} alors que le client ne devait plus que ${formaterGnf(resteAvant)} GNF : trop-perçu de ${formaterGnf(tropPercu)} GNF. L'argent est déjà encaissé et le remboursement est gardé en entier ; le crédit est soldé. Rendez la différence au client ou gardez-la pour un prochain crédit, puis classez l'anomalie.`,
+          },
+        ),
+      );
+    }
+    if (horsCaisse) {
+      const montant = `${formaterGnf(corps.montant)} GNF`;
+      const message =
+        horsCaisse.raison === 'CAISSE_INCONNUE'
+          ? `Remboursement de crédit de ${montant} remonté du poste ${ctx.poste.libelle} pour une caisse inconnue : il est enregistré sans entrer dans aucune caisse. Vérifiez l'argent du poste.`
+          : horsCaisse.raison === 'JOURNEE_CLOTUREE'
+            ? `Remboursement de crédit de ${montant} remonté après la clôture de la journée du ${jourLisible(horsCaisse.jourOrigine as string)} (caisse de ${horsCaisse.responsableNom}) : recomptez le tiroir et rapprochez l'argent. Le remboursement est enregistré mais n'est dans aucune caisse, la journée clôturée n'a pas changé.`
+            : `Remboursement de crédit de ${montant} remonté après la fermeture de la caisse de ${horsCaisse.responsableNom} : recomptez le tiroir et rapprochez l'argent. Le remboursement est enregistré mais n'est dans aucune caisse, la caisse fermée n'a pas changé.`;
+      anomalies.push(
+        await this.creerAnomalie(
+          tx,
+          ctx,
+          'REMONTEE_APRES_CLOTURE',
+          'RemboursementCredit',
+          corps.id,
+          {
+            raison: `REMBOURSEMENT_CREDIT_${horsCaisse.raison}`,
+            clientCreditId: client.id,
+            montant: corps.montant,
+            sessionId: horsCaisse.sessionId,
+            jourOrigine: horsCaisse.jourOrigine,
+            posteCode: ctx.poste.code,
+            utilisateurId: utilisateur.id,
+            utilisateurNom: nomVendeur,
+            horodatageLocal: local.toISOString(),
+            message,
+          },
+          horsCaisse.responsableId ?? ctx.structure.adminId,
+        ),
+      );
+    }
+    return { piece, ...(anomalies.length > 0 ? { anomalies } : {}) };
+  }
+
+  /** Date limite d'une prise à crédit modifiée sur le poste : jamais refusée parce qu'elle est passée. */
+  private async appliquerDateLimite(
+    tx: Tx,
+    ctx: ContexteRejeu,
+    corps: CorpsDateLimiteModifieeDto,
+    utilisateur: UtilisateurCharge,
+  ): Promise<ResultatApplication> {
+    const structureId = ctx.structure.id;
+    const piece = { type: 'ECHEANCE_CREDIT' as const, id: corps.venteId };
+    const dateLimite = corps.dateLimite;
+    if (dateLimite !== null) {
+      const valide = new Date(`${dateLimite}T00:00:00.000Z`);
+      if (
+        Number.isNaN(valide.getTime()) ||
+        jourConakry(valide) !== dateLimite
+      ) {
+        throw new RejetSynchro('EVENEMENT_INVALIDE', {
+          champs: ['dateLimite'],
+        });
+      }
+    }
+    const vente = await tx.vente.findFirst({
+      where: {
+        id: corps.venteId,
+        structureId,
+        typePiece: { in: ['VENTE', 'REGULARISATION'] },
+        clientCreditId: { not: null },
+      },
+      select: { clientCreditId: true },
+    });
+    if (!vente?.clientCreditId) throw new RejetSynchro('PRISE_INTROUVABLE');
+    const clientId = vente.clientCreditId;
+    await tx.$queryRaw`SELECT "id" FROM "ClientCredit" WHERE "id" = ${clientId} AND "structureId" = ${structureId} FOR UPDATE`;
+    const etat = (await lireEtatsCredit(tx, structureId, [clientId])).get(
+      clientId,
+    );
+    const prise = etat?.etat.prises.find((p) => p.venteId === corps.venteId);
+    if (!prise) throw new RejetSynchro('PRISE_INTROUVABLE');
+    if (prise.annulee) throw new RejetSynchro('PRISE_ANNULEE');
+    if (!prise.nonSoldee) throw new RejetSynchro('PRISE_SOLDEE');
+    const avant = await tx.echeanceCredit.findUnique({
+      where: { venteId: corps.venteId },
+      select: { dateLimite: true },
+    });
+    const avantJour = avant ? dateVersJour(avant.dateLimite) : null;
+    if (avantJour === dateLimite) return { piece, dejaApplique: true };
+    if (dateLimite === null) {
+      await tx.echeanceCredit.delete({ where: { venteId: corps.venteId } });
+    } else {
+      await tx.echeanceCredit.upsert({
+        where: { venteId: corps.venteId },
+        create: {
+          venteId: corps.venteId,
+          dateLimite: jourVersDate(dateLimite),
+        },
+        update: { dateLimite: jourVersDate(dateLimite) },
+      });
+    }
+    await tx.auditLog.create({
+      data: {
+        userId: utilisateur.id,
+        action: 'update',
+        entityType: 'EcheanceCredit',
+        entityId: corps.venteId,
+        ip: ctx.ip ?? null,
+        metadata: {
+          structureId,
+          clientCreditId: clientId,
+          avant: avantJour,
+          apres: dateLimite,
+          origine: 'synchro',
+          posteId: ctx.poste.id,
+        },
+      },
+    });
+    return { piece };
   }
 
   // ------------------------------------------------------ gestionnaires caisse
